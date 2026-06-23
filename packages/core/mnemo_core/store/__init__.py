@@ -1,0 +1,1 @@
+"""mnemo storage adapters."""

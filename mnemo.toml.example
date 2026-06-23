@@ -1,0 +1,31 @@
+# mnemo configuration example. Copy to mnemo.toml or ~/.mnemo/mnemo.toml.
+# Every field below has a builtin default — only set what you want to change.
+
+[mnemo.ollama]
+host = "http://localhost:11434"
+embed_model = "bge-m3"
+llm_model = "qwen2.5:7b"
+timeout = 120.0
+
+[mnemo.store]
+data_dir = "~/.mnemo"
+lancedb_table = "chunks"
+kuzu_db = "graph"
+
+[mnemo.ingest]
+chunk_token_target = 512
+chunk_token_overlap = 64
+dedup_similarity_threshold = 0.92
+include_globs = ["**/*.md", "**/*.txt", "**/*.py", "**/*.ts", "**/*.pdf", "**/*.docx"]
+exclude_globs = ["**/.git/**", "**/node_modules/**", "**/.venv/**", "**/__pycache__/**"]
+
+[mnemo.retrieve]
+top_k_chunks = 16
+top_k_files = 8
+graph_expand_hops = 1
+vector_weight = 0.6
+graph_weight = 0.4
+default_context_max_tokens = 3000
+
+[mnemo.mcp]
+enable_answer_tool = false

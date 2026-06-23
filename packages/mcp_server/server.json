@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/schema/registry.schema.json",
+  "name": "mnemo",
+  "description": "Local-first MCP server that gives any MCP client cheap, relational context about a user's files. Summarize-once + knowledge graph + vector store; returns a budget-capped context bundle for the client to answer over.",
+  "repository": "https://github.com/jeaneths/mnemo",
+  "publisher": "mnemo",
+  "version": "0.1.0",
+  "homepage": "https://github.com/jeaneths/mnemo",
+  "license": "MIT",
+  "keywords": ["mcp", "rag", "knowledge-graph", "ollama", "local", "privacy"],
+  "categories": ["local", "search", "files"],
+  "author": {
+    "name": "mnemo contributors"
+  },
+  "bin": "mnemo-mcp",
+  "runtime": "python",
+  "install": {
+    "type": "uvx",
+    "command": "uvx",
+    "args": ["mnemo-mcp"]
+  },
+  "tools": [
+    {"name": "get_context", "description": "Curated, budget-capped context bundle for the client to answer over."},
+    {"name": "search_files", "description": "Ranked files for a query, each with a one-line 'why relevant'."},
+    {"name": "related", "description": "Graph neighbors: shared entities/topics, references, duplicates."},
+    {"name": "get_file_summary", "description": "Cached summary + metadata for one file."},
+    {"name": "index_status", "description": "Counts by status, last index time, total chunks."},
+    {"name": "index_file_tool", "description": "Trigger one-file ingestion from the client."},
+    {"name": "answer", "description": "(off by default) Local-model synthesis over the bundle."}
+  ]
+}

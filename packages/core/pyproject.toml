@@ -1,0 +1,40 @@
+[project]
+name = "mnemo-core"
+version = "0.1.0"
+description = "mnemo core: models, config, stores, ingest, retrieve."
+requires-python = ">=3.12,<3.14"
+authors = [{ name = "mnemo contributors" }]
+license = { text = "MIT" }
+# readme lives at workspace root, not in this package
+keywords = ["mcp", "rag", "knowledge-graph", "ollama", "local", "privacy"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "lancedb>=0.6",
+    "kuzu>=0.4",
+    "ollama>=0.3",
+    "markitdown>=0.0.1",
+    "blake3>=0.3",
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/jeaneths/mnemo"
+Repository = "https://github.com/jeaneths/mnemo"
+Issues = "https://github.com/jeaneths/mnemo/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mnemo_core"]
