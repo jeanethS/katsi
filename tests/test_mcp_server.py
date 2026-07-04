@@ -1,4 +1,5 @@
 """Smoke tests for the mnemo FastMCP server tools."""
+
 from __future__ import annotations
 
 import json
@@ -11,6 +12,7 @@ from mnemo_core.ingest.records import FileRecordStore
 from mnemo_core.models import Extraction
 from mnemo_core.store.graph import GraphStore
 from mnemo_core.store.vectors import VectorStore
+from mnemo_core.synth import SynthConfigError
 
 
 class _FakeEmbed:
@@ -58,21 +60,25 @@ def server_state(tmp_path):
     records = FileRecordStore(tmp_path / "mnemo_data" / "records")
     embed = _FakeEmbed(dim=8)
     llm = _FakeLLM(EXTRACTION_JSON)
-    pipeline = IngestPipeline(s, graph=graph, vectors=vectors, embed=embed,
-                              llm=llm, records=records)
+    pipeline = IngestPipeline(
+        s, graph=graph, vectors=vectors, embed=embed, llm=llm, records=records
+    )
 
     # Import the mcp server module
     from mnemo_mcp import server as srv
+
     srv._state.clear()
-    srv._state.update({
-        "settings": s,
-        "embed": embed,
-        "llm": llm,
-        "graph": graph,
-        "vectors": vectors,
-        "records": records,
-        "pipeline": pipeline,
-    })
+    srv._state.update(
+        {
+            "settings": s,
+            "embed": embed,
+            "llm": llm,
+            "graph": graph,
+            "vectors": vectors,
+            "records": records,
+            "pipeline": pipeline,
+        }
+    )
     return srv, embed, llm, records
 
 
@@ -117,8 +123,37 @@ def test_answer_tool_works_when_enabled(server_state):
     srv, embed, llm, records = server_state
     srv._state["settings"].mcp.enable_answer_tool = True
     out = srv.answer("any query")
-    assert isinstance(out, str)
-    assert out.startswith("answer")
+    assert isinstance(out, dict)
+    assert "text" in out
+    assert "mode" in out
+    assert "escalated" in out
+
+
+def test_answer_tool_returns_mode_and_escalated(server_state):
+    srv, embed, llm, records = server_state
+    srv._state["settings"].mcp.enable_answer_tool = True
+    out = srv.answer("q", mode="local")
+    assert isinstance(out, dict)
+    assert out["mode"] == "local"
+    assert out["escalated"] is False
+    assert isinstance(out["text"], str)
+
+
+def test_answer_tool_return_only_when_mode_return_only(server_state):
+    srv, embed, llm, records = server_state
+    srv._state["settings"].mcp.enable_answer_tool = True
+    out = srv.answer("q", mode="return_only")
+    assert out["text"] is None
+    assert out["mode"] == "return_only"
+    assert "hint" in out
+
+
+def test_answer_tool_override_disabled_raises(server_state):
+    srv, embed, llm, records = server_state
+    srv._state["settings"].mcp.enable_answer_tool = True
+    srv._state["settings"].synth.allow_per_call_override = False
+    with pytest.raises(SynthConfigError):
+        srv.answer("q", mode="local")
 
 
 def test_smoke_index_then_get_context(server_state, tmp_path):
@@ -130,8 +165,8 @@ def test_smoke_index_then_get_context(server_state, tmp_path):
     # Index via the pipeline exposed through the server
     rec = srv.index_file_tool(str(md_path))
     assert rec.status.value == "indexed"
-    assert embed.calls == 1   # one embed call for the chunks
-    assert llm.calls == 1     # one extract call
+    assert embed.calls == 1  # one embed call for the chunks
+    assert llm.calls == 1  # one extract call
 
     # Now get_context should find it
     bundle = srv.get_context("Acme AI", max_tokens=2000)

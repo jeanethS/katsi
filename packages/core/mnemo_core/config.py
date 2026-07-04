@@ -31,12 +31,22 @@ class IngestSettings(BaseModel):
     chunk_token_overlap: int = 64
     dedup_similarity_threshold: float = 0.92
     include_globs: list[str] = Field(
-        default_factory=lambda: ["**/*.md", "**/*.txt", "**/*.py",
-                                  "**/*.ts", "**/*.pdf", "**/*.docx"]
+        default_factory=lambda: [
+            "**/*.md",
+            "**/*.txt",
+            "**/*.py",
+            "**/*.ts",
+            "**/*.pdf",
+            "**/*.docx",
+        ]
     )
     exclude_globs: list[str] = Field(
-        default_factory=lambda: ["**/.git/**", "**/node_modules/**",
-                                  "**/.venv/**", "**/__pycache__/**"]
+        default_factory=lambda: [
+            "**/.git/**",
+            "**/node_modules/**",
+            "**/.venv/**",
+            "**/__pycache__/**",
+        ]
     )
 
 
@@ -53,6 +63,35 @@ class MCPSettings(BaseModel):
     enable_answer_tool: bool = False
 
 
+class SynthLocalSettings(BaseModel):
+    model: str = "qwen2.5:7b"
+    max_tokens: int = 800
+
+
+class SynthCloudSettings(BaseModel):
+    provider: str = "anthropic"
+    model: str = ""
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    enable_prompt_caching: bool = True
+
+
+class SynthAutoSettings(BaseModel):
+    escalate_when_files_gte: int = 4
+    escalate_when_tokens_gte: int = 2500
+    escalate_on_intents: list[str] = Field(
+        default_factory=lambda: ["compare", "contrast", "synthesize", "across", "difference"]
+    )
+    fallback_to_local_if_cloud_unavailable: bool = True
+
+
+class SynthSettings(BaseModel):
+    backend: str = "return_only"
+    allow_per_call_override: bool = True
+    local: SynthLocalSettings = Field(default_factory=SynthLocalSettings)
+    cloud: SynthCloudSettings = Field(default_factory=SynthCloudSettings)
+    auto: SynthAutoSettings = Field(default_factory=SynthAutoSettings)
+
+
 class Settings(BaseSettings):
     """Top-level settings. Loaded from mnemo.toml if present, env-overridable."""
 
@@ -67,6 +106,7 @@ class Settings(BaseSettings):
     ingest: IngestSettings = Field(default_factory=IngestSettings)
     retrieve: RetrieveSettings = Field(default_factory=RetrieveSettings)
     mcp: MCPSettings = Field(default_factory=MCPSettings)
+    synth: SynthSettings = Field(default_factory=SynthSettings)
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> Settings:
@@ -79,8 +119,8 @@ class Settings(BaseSettings):
         if config_path is None:
             cwd_path = Path.cwd() / "mnemo.toml"
             home_path = Path.home() / ".mnemo" / "mnemo.toml"
-            config_path = cwd_path if cwd_path.exists() else (
-                home_path if home_path.exists() else None
+            config_path = (
+                cwd_path if cwd_path.exists() else (home_path if home_path.exists() else None)
             )
         if config_path is None or not config_path.exists():
             return env_settings

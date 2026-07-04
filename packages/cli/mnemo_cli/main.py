@@ -1,4 +1,5 @@
 """mnemo CLI: index, status, search, ask."""
+
 from __future__ import annotations
 
 import fnmatch
@@ -19,11 +20,11 @@ from mnemo_core.retrieve.context import build_context
 from mnemo_core.retrieve.search import search
 from mnemo_core.store.graph import GraphStore
 from mnemo_core.store.vectors import VectorStore
+from mnemo_core.synth import SynthConfigError, build_synthesizer
 
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(help="mnemo: local-first relational file context.",
-                  no_args_is_help=True)
+app = typer.Typer(help="mnemo: local-first relational file context.", no_args_is_help=True)
 console = Console()
 
 
@@ -42,8 +43,12 @@ def _services():
     _state["vectors"] = VectorStore(s.store.data_dir / "vectors", s.store.lancedb_table)
     _state["records"] = FileRecordStore(s.store.data_dir / "records")
     _state["pipeline"] = IngestPipeline(
-        s, graph=_state["graph"], vectors=_state["vectors"],
-        embed=_state["embed"], llm=_state["llm"], records=_state["records"],
+        s,
+        graph=_state["graph"],
+        vectors=_state["vectors"],
+        embed=_state["embed"],
+        llm=_state["llm"],
+        records=_state["records"],
     )
     return _state
 
@@ -151,12 +156,14 @@ def status() -> None:
     for k, v in sorted(counts.items()):
         table.add_row(f"  {k}", str(v))
     table.add_row("total chunks", str(total_chunks))
-    table.add_row("last indexed",
-                  last_indexed.isoformat() if last_indexed else "(none)")
+    table.add_row("last indexed", last_indexed.isoformat() if last_indexed else "(none)")
     table.add_row("data_dir", str(svc["settings"].store.data_dir))
-    table.add_row("ollama", f"{svc['settings'].ollama.host} "
-                              f"(embed={svc['settings'].ollama.embed_model} "
-                              f"llm={svc['settings'].ollama.llm_model})")
+    table.add_row(
+        "ollama",
+        f"{svc['settings'].ollama.host} "
+        f"(embed={svc['settings'].ollama.embed_model} "
+        f"llm={svc['settings'].ollama.llm_model})",
+    )
     console.print(table)
 
 
@@ -169,8 +176,15 @@ def search_cmd(
     svc = _services()
     # Name the function search_cmd; Typer uses the function's name as the command name
     # by default. To expose it as `search`, set name="search" on @app.command.
-    hits = search(query, k=k, settings=svc["settings"], vectors=svc["vectors"],
-                  graph=svc["graph"], embed=svc["embed"], records=svc["records"])
+    hits = search(
+        query,
+        k=k,
+        settings=svc["settings"],
+        vectors=svc["vectors"],
+        graph=svc["graph"],
+        embed=svc["embed"],
+        records=svc["records"],
+    )
     if not hits:
         console.print("[yellow]no matches[/]")
         return
@@ -180,9 +194,9 @@ def search_cmd(
     table.add_column("why")
     table.add_column("summary")
     for h in hits:
-        table.add_row(f"{h.score:.3f}", h.path, h.why,
-                      (h.summary or "")[:80])
+        table.add_row(f"{h.score:.3f}", h.path, h.why, (h.summary or "")[:80])
     console.print(table)
+
 
 # Force the command name to "search", not "search_cmd":
 search_cmd.__name__ = "search"
@@ -193,15 +207,29 @@ app.command(name="search")(search_cmd)
 def ask(
     query: str = typer.Argument(..., help="Question to ask of your indexed files."),
     max_tokens: int = typer.Option(3000, "--max-tokens", help="Token budget for context."),  # noqa: B008
-    local: bool = typer.Option(False, "--local", help="Also run local LLM synthesis."),  # noqa: B008
+    local: bool = typer.Option(
+        False,
+        "--local",  # noqa: B008
+        help="[deprecated] Use --mode local instead.",
+    ),
+    mode: str | None = typer.Option(
+        None,
+        "--mode",  # noqa: B008
+        help="Synthesis mode: return_only|local|cloud|auto. Defaults to config.",
+    ),
 ) -> None:
-    """Print the curated context bundle for QUERY (and optionally a local answer)."""
+    """Print the curated context bundle for QUERY (and optionally synthesize an answer)."""
     svc = _services()
-    bundle = build_context(query, max_tokens=max_tokens, settings=svc["settings"],
-                            vectors=svc["vectors"], graph=svc["graph"],
-                            embed=svc["embed"], records=svc["records"])
-    console.print(f"[bold]query:[/] {bundle.query}  "
-                  f"[dim]tokens~=[/] {bundle.token_estimate}")
+    bundle = build_context(
+        query,
+        max_tokens=max_tokens,
+        settings=svc["settings"],
+        vectors=svc["vectors"],
+        graph=svc["graph"],
+        embed=svc["embed"],
+        records=svc["records"],
+    )
+    console.print(f"[bold]query:[/] {bundle.query}  [dim]tokens~=[/] {bundle.token_estimate}")
     if not bundle.files:
         console.print("[yellow]no matching files[/]")
         return
@@ -211,8 +239,7 @@ def ask(
     file_table.add_column("why")
     file_table.add_column("summary")
     for h in bundle.files:
-        file_table.add_row(f"{h.score:.3f}", h.path, h.why,
-                            (h.summary or "")[:80])
+        file_table.add_row(f"{h.score:.3f}", h.path, h.why, (h.summary or "")[:80])
     console.print(file_table)
     if bundle.chunks:
         console.print("[bold]top chunks:[/]")
@@ -223,23 +250,27 @@ def ask(
         console.print("[bold]relationships:[/]")
         for r in bundle.relationships:
             console.print(f"  {r}")
-    if local:
+    resolved_mode = mode or ("local" if local else None)
+    if resolved_mode:
         console.print()
-        console.print("[bold]local synthesis:[/]")
-        # Reuse the server's answer path by building the same prompt.
-        from mnemo_mcp.server import answer as _answer_tool
         try:
-            out = _answer_tool(query)
-            console.print(out)
-        except PermissionError:
-            console.print("[red]answer tool is disabled; "
-                          "set mnemo.mcp.enable_answer_tool=true to enable.[/]")
+            synth = build_synthesizer(svc["settings"], mode=resolved_mode)
+            result = synth.answer(query, bundle)
+            text_out = result.text or "(none — return_only)"
+            console.print(
+                f"[bold]synthesis (mode={result.mode}, escalated={result.escalated}):[/] {text_out}"
+            )
+        except SynthConfigError as e:
+            console.print(f"[red]synthesis config error:[/] {e}")
+        except PermissionError as e:
+            console.print(f"[red]synthesis error:[/] {e}")
         except Exception as e:
-            console.print(f"[red]local synthesis failed:[/] {e!r}")
+            console.print(f"[red]synthesis failed:[/] {e!r}")
 
 
 def main() -> None:
     """Entry point: `mnemo` console script."""
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     app()

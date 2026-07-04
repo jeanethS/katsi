@@ -15,6 +15,7 @@ from mnemo_core.retrieve.context import build_context
 from mnemo_core.retrieve.search import search
 from mnemo_core.store.graph import GraphStore
 from mnemo_core.store.vectors import VectorStore
+from mnemo_core.synth import build_synthesizer
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,14 @@ def _services():
     _state["graph"] = GraphStore(s.store.data_dir / s.store.kuzu_db)
     _state["vectors"] = VectorStore(s.store.data_dir / "vectors", s.store.lancedb_table)
     _state["records"] = FileRecordStore(s.store.data_dir / "records")
-    _state["pipeline"] = IngestPipeline(s,
-                                         graph=_state["graph"],
-                                         vectors=_state["vectors"],
-                                         embed=_state["embed"],
-                                         llm=_state["llm"],
-                                         records=_state["records"])
+    _state["pipeline"] = IngestPipeline(
+        s,
+        graph=_state["graph"],
+        vectors=_state["vectors"],
+        embed=_state["embed"],
+        llm=_state["llm"],
+        records=_state["records"],
+    )
     return _state
 
 
@@ -57,8 +60,9 @@ def index_status() -> dict:
     total_files = sum(counts.values())
     last_indexed = None
     for rec in svc["records"].list_all():
-        if rec.last_indexed_at is not None and (last_indexed is None
-                                                  or rec.last_indexed_at > last_indexed):
+        if rec.last_indexed_at is not None and (
+            last_indexed is None or rec.last_indexed_at > last_indexed
+        ):
             last_indexed = rec.last_indexed_at
     try:
         total_chunks = svc["vectors"].count()
@@ -78,9 +82,15 @@ def search_files(query: str, k: int = 8) -> list[FileHit]:
     """Ranked files for a query, each with a one-line 'why relevant'."""
     # NOTE: tool name is search_files to avoid shadowing the imported search().
     svc = _services()
-    return search(query, k=k,
-                  settings=svc["settings"], vectors=svc["vectors"],
-                  graph=svc["graph"], embed=svc["embed"], records=svc["records"])
+    return search(
+        query,
+        k=k,
+        settings=svc["settings"],
+        vectors=svc["vectors"],
+        graph=svc["graph"],
+        embed=svc["embed"],
+        records=svc["records"],
+    )
 
 
 @mcp.tool()
@@ -88,10 +98,15 @@ def get_context(query: str, max_tokens: int = 3000) -> ContextBundle:
     """PRIMARY TOOL. Curated, budget-capped context for the client to answer over:
     file summaries + the few most relevant raw chunks + a graph relationship sketch."""
     svc = _services()
-    return build_context(query, max_tokens=max_tokens,
-                          settings=svc["settings"], vectors=svc["vectors"],
-                          graph=svc["graph"], embed=svc["embed"],
-                          records=svc["records"])
+    return build_context(
+        query,
+        max_tokens=max_tokens,
+        settings=svc["settings"],
+        vectors=svc["vectors"],
+        graph=svc["graph"],
+        embed=svc["embed"],
+        records=svc["records"],
+    )
 
 
 @mcp.tool()
@@ -132,10 +147,15 @@ def related(file_id: str, kinds: list[str] | None = None) -> list[FileHit]:
         else:
             path = node.path
             summary = node.summary or ""
-        hits.append(FileHit(
-            file_id=peer, path=path, summary=summary,
-            score=nb.get("score", 0.0), why=nb.get("via", "neighbor"),
-        ))
+        hits.append(
+            FileHit(
+                file_id=peer,
+                path=path,
+                summary=summary,
+                score=nb.get("score", 0.0),
+                why=nb.get("via", "neighbor"),
+            )
+        )
     return hits
 
 
@@ -148,35 +168,34 @@ def index_file_tool(path: str) -> FileRecord:
 
 
 @mcp.tool()
-def answer(query: str) -> str:
-    """Local-model synthesis over get_context output. For sensitive trees
-    where nothing should leave the machine. OFF BY DEFAULT."""
+def answer(query: str, mode: str | None = None) -> dict:
+    """Synthesis over the curated context bundle. Supports multiple backends.
+    OFF BY DEFAULT (set mnemo.mcp.enable_answer_tool=true to enable)."""
     svc = _services()
     s = svc["settings"]
     if not s.mcp.enable_answer_tool:
         raise PermissionError(
             "answer tool disabled; set mnemo.mcp.enable_answer_tool=true to enable"
         )
-    bundle = build_context(query, max_tokens=s.retrieve.default_context_max_tokens,
-                            settings=s, vectors=svc["vectors"], graph=svc["graph"],
-                            embed=svc["embed"], records=svc["records"])
-    # Render a prompt and have the local LLM synthesize over the bundle.
-    prompt_parts = [f"# Context bundle for query: {bundle.query}"]
-    prompt_parts.append("\n## Files:")
-    for h in bundle.files:
-        prompt_parts.append(f"- {h.path} (score={h.score:.3f}; {h.why})")
-        if h.summary:
-            prompt_parts.append(f"  SUMMARY: {h.summary}")
-    prompt_parts.append("\n## Top chunks:")
-    for c in bundle.chunks:
-        prompt_parts.append(f"--- chunk {c.id} ({c.token_count} tokens) ---")
-        prompt_parts.append(c.text)
-    if bundle.relationships:
-        prompt_parts.append("\n## Relationships:")
-        prompt_parts.extend(bundle.relationships)
-    prompt_parts.append("\nAnswer the query using ONLY the context above.")
-    prompt = "\n".join(prompt_parts)
-    return svc["llm"].chat(prompt, temperature=0.2)
+    bundle = build_context(
+        query,
+        max_tokens=s.retrieve.default_context_max_tokens,
+        settings=s,
+        vectors=svc["vectors"],
+        graph=svc["graph"],
+        embed=svc["embed"],
+        records=svc["records"],
+    )
+    synth = build_synthesizer(s, mode=mode, llm_client=svc["llm"])
+    result = synth.answer(query, bundle)
+    if result.text is None:
+        return {
+            "text": None,
+            "mode": "return_only",
+            "escalated": False,
+            "hint": "use get_context for the bundle",
+        }
+    return {"text": result.text, "mode": result.mode, "escalated": result.escalated}
 
 
 def main() -> None:

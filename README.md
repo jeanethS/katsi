@@ -108,6 +108,51 @@ default_context_max_tokens = 3000
 enable_answer_tool = false          # local-only synthesis, off by default
 ```
 
+## Synthesis modes
+
+mnemo does all retrieval locally. You choose where answers are synthesized:
+
+- **return_only** (default) — mnemo returns the curated `ContextBundle`; your
+  MCP client's model answers. Zero cloud tokens spent by mnemo.
+- **local** — a local model (Ollama) writes the answer. $0, private, offline.
+- **cloud** — your own API key; mnemo sends only a tight context bundle (not
+  the whole tree). Anthropic by default, provider-pluggable.
+- **auto** — answers locally, escalating to cloud only for cross-document
+  questions (file count, token estimate, or intent keywords).
+
+Set `synth.backend` in `mnemo.toml`, or override per call:
+
+| Surface | Override |
+|---|---|
+| MCP `answer` tool | `mode` argument |
+| CLI `ask` | `--mode {return_only\|local\|cloud\|auto}` |
+
+Example config:
+
+```toml
+[mnemo.synth]
+backend = "auto"
+allow_per_call_override = true
+
+[mnemo.synth.local]
+model = "qwen2.5:7b"
+max_tokens = 800
+
+[mnemo.synth.cloud]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+enable_prompt_caching = true
+
+[mnemo.synth.auto]
+escalate_when_files_gte = 4
+escalate_when_tokens_gte = 2500
+escalate_on_intents = ["compare", "contrast", "synthesize", "across", "difference"]
+fallback_to_local_if_cloud_unavailable = true
+```
+
+The default is zero-cloud-cost. Devs opt into cloud per config or per call.
+
 ## Architecture
 
 ```
