@@ -87,3 +87,12 @@ def test_chat_passes_messages():
     messages = call["messages"]
     assert len(messages) == 1
     assert messages[0]["content"] == "hi"
+
+
+def test_chat_honors_model_and_max_tokens_override():
+    fake = _FakeOllama(["ok"])
+    c = LLMClient(client=fake)
+    c.chat("hi", model="llama3.2:3b", max_tokens=42)
+    call = fake.chat_calls[0]
+    assert call["model"] == "llama3.2:3b"
+    assert call["options"]["num_predict"] == 42

@@ -89,16 +89,25 @@ class LLMClient:
         *,
         system: str | None = None,
         temperature: float = 0.1,
+        model: str | None = None,
+        max_tokens: int | None = None,
     ) -> str:
-        """Raw chat returning the model's ``message.content`` string."""
+        """Raw chat returning the model's ``message.content`` string.
+
+        ``model`` overrides ``ollama.llm_model``; ``max_tokens`` caps the
+        response via ollama's ``num_predict`` option.
+        """
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": user_text})
+        options: dict = {"temperature": temperature}
+        if max_tokens is not None:
+            options["num_predict"] = max_tokens
         resp = self._get_client().chat(
-            model=self._settings.ollama.llm_model,
+            model=model or self._settings.ollama.llm_model,
             messages=messages,
-            options={"temperature": temperature},
+            options=options,
         )
         return resp.message.content
 

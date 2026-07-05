@@ -34,7 +34,7 @@ class _FakeLLM:
         self.calls += 1
         return Extraction(**json.loads(self.json_str))
 
-    def chat(self, prompt, *, temperature: float = 0.2):
+    def chat(self, prompt, *, temperature: float = 0.2, model=None, max_tokens=None):
         return f"answer for prompt len={len(prompt)}"
 
     def _chat(self, system_prompt, user_text):

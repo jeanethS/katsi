@@ -72,12 +72,15 @@ class LocalSynthesizer:
         self._llm = client or LLMClient(settings)
 
     def answer(self, question: str, bundle: ContextBundle) -> SynthResult:
+        local = self._settings.synth.local
         prompt = render_bundle_prompt(question, bundle)
         try:
-            text = self._llm.chat(prompt, temperature=0.2)
+            text = self._llm.chat(
+                prompt, temperature=0.2, model=local.model, max_tokens=local.max_tokens
+            )
         except Exception as exc:
             raise SynthUnavailableError(
-                f"Local model {self._settings.ollama.llm_model} at "
+                f"Local model {local.model} at "
                 f"{self._settings.ollama.host} unavailable: {exc}"
             ) from exc
         return SynthResult(text=text, bundle=bundle, mode="local")
@@ -155,8 +158,10 @@ class AutoSynthesizer:
         if any(kw in question.lower() for kw in auto.escalate_on_intents):
             escalate = True
         if escalate:
-            cloud = self._cloud or CloudSynthesizer(self._settings)
             try:
+                # Construction validates cloud config, so it must stay inside
+                # the try for the unconfigured-cloud fallback to apply.
+                cloud = self._cloud or CloudSynthesizer(self._settings)
                 result = cloud.answer(question, bundle)
                 result.escalated = True
                 return result

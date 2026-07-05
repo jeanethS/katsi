@@ -40,9 +40,13 @@ class _FakeLLM:
     def __init__(self, text: str = "fake answer"):
         self.text = text
         self.last_prompt = ""
+        self.last_model = None
+        self.last_max_tokens = None
 
-    def chat(self, prompt, *, temperature: float = 0.2):
+    def chat(self, prompt, *, temperature: float = 0.2, model=None, max_tokens=None):
         self.last_prompt = prompt
+        self.last_model = model
+        self.last_max_tokens = max_tokens
         return self.text
 
 
@@ -146,6 +150,17 @@ def test_local_synthesizer_calls_llm():
     assert result.mode == "local"
     assert "test q" in fake.last_prompt
     assert "sum 0" in fake.last_prompt or "/p/f0.md" in fake.last_prompt
+
+
+def test_local_synthesizer_uses_synth_local_settings():
+    fake = _FakeLLM("resp")
+    s = Settings()
+    s.synth.local.model = "llama3.2:3b"
+    s.synth.local.max_tokens = 123
+    synth = LocalSynthesizer(s, client=fake)
+    synth.answer("q", _bundle())
+    assert fake.last_model == "llama3.2:3b"
+    assert fake.last_max_tokens == 123
 
 
 def test_cloud_synthesizer_calls_provider():
@@ -276,6 +291,36 @@ def test_auto_fallback_to_local_when_cloud_unavailable():
         assert result.text == "fallback answer"
     finally:
         os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_auto_fallback_when_cloud_unconfigured(monkeypatch):
+    """Escalation with no cloud model/key must degrade to local when the
+    fallback flag is set — not raise at CloudSynthesizer construction."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    fake_llm = _FakeLLM("fallback answer")
+    s = Settings()
+    s.synth.backend = "auto"
+    s.synth.cloud.model = ""
+    s.synth.auto.fallback_to_local_if_cloud_unavailable = True
+    local_synth = LocalSynthesizer(s, client=fake_llm)
+    auto = AutoSynthesizer(s, local=local_synth)
+    bundle = _bundle(files=5, tokens=10)
+    result = auto.answer("q", bundle)
+    assert result.escalated is True
+    assert result.mode == "local"
+    assert result.text == "fallback answer"
+
+
+def test_auto_unconfigured_cloud_no_fallback_raises_config_error(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    s = Settings()
+    s.synth.backend = "auto"
+    s.synth.cloud.model = ""
+    s.synth.auto.fallback_to_local_if_cloud_unavailable = False
+    auto = AutoSynthesizer(s)
+    bundle = _bundle(files=5, tokens=10)
+    with pytest.raises(SynthConfigError):
+        auto.answer("q", bundle)
 
 
 def test_auto_no_fallback_raises():
