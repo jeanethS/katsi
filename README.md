@@ -20,9 +20,10 @@ client's model synthesizes over a tiny window instead of exploring the filesyste
   not in the top-N vector hits.
 - **Local-first.** Summaries, embeddings, entity extraction, and graph queries all
   run on Ollama + LanceDB + Kùzu locally. Nothing leaves your machine.
-- **Returns context, not answers.** The MCP server does NOT call a cloud model —
-  it returns a `ContextBundle` of file summaries + top raw chunks + a relationship
-  sketch for the *client's* model to synthesize over.
+- **Returns context, not answers (by default).** The MCP server does NOT call a
+  cloud model — it returns a `ContextBundle` of file summaries + top raw chunks +
+  a relationship sketch for the *client's* model to synthesize over. Server-side
+  synthesis (local, cloud, or auto) is opt-in — see [Synthesis modes](#synthesis-modes).
 
 ## Quickstart (60 seconds)
 
@@ -72,7 +73,7 @@ on macOS; `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 | `get_file_summary(file_id)` | Cached summary + metadata for a file. |
 | `index_status()` | Counts by status, last index time, chunk counts. |
 | `index_file_tool(path)` | Trigger one-file ingestion from the client. |
-| `answer(query)` | *(off by default)* Fully-local synthesis over the bundle — never leaves the machine. Enable with `enable_answer_tool=true`. |
+| `answer(query, mode?)` | *(off by default)* Server-side synthesis over the bundle using the configured backend (`return_only`/`local`/`cloud`/`auto`); `mode` overrides per call. Returns the answer plus the mode that ran and whether it escalated. Enable with `enable_answer_tool=true`. |
 
 ## CLI dogfood surface
 
@@ -80,9 +81,13 @@ on macOS; `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 mnemo index ./some-folder      # recursive walk with include/exclude globs + Rich progress
 mnemo status                    # counts + last index time
 mnemo search "machine learning" # ranked files
-mnemo ask "what is this project about?"   # prints the curated context bundle
-mnemo ask "what is this about?" --local   # also runs local-model synthesis (off by default)
+mnemo ask "what is this project about?"        # prints the curated context bundle
+mnemo ask "what is this about?" --mode local   # + local-model (Ollama) synthesis
+mnemo ask "compare these designs" --mode auto  # local, escalating to cloud if warranted
 ```
+
+`ask` prints which mode actually ran and whether it escalated. (`--local` still
+works but is deprecated in favor of `--mode local`.)
 
 ## Config
 
@@ -105,7 +110,7 @@ top_k_files = 8
 default_context_max_tokens = 3000
 
 [mnemo.mcp]
-enable_answer_tool = false          # local-only synthesis, off by default
+enable_answer_tool = false          # server-side synthesis (answer tool), off by default
 ```
 
 ## Synthesis modes
@@ -181,5 +186,3 @@ local reranker (`bge-reranker-v2-m3`), visual graph explorer.
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-# AgenticFile

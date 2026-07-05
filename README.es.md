@@ -26,10 +26,11 @@ en lugar de explorar el sistema de archivos.
 - **Local-first.** Los resúmenes, embeddings, extracción de entidades y
   consultas al grafo se ejecutan localmente con Ollama + LanceDB + Kùzu. Nada
   sale de tu máquina.
-- **Devuelve contexto, no respuestas.** El servidor MCP NO llama a un modelo en
-  la nube — devuelve un `ContextBundle` con resúmenes de archivos + los mejores
-  fragmentos sin procesar + un esbozo de relaciones para que los sintetice el
-  *modelo del cliente*.
+- **Devuelve contexto, no respuestas (por defecto).** El servidor MCP NO llama a
+  un modelo en la nube — devuelve un `ContextBundle` con resúmenes de archivos +
+  los mejores fragmentos sin procesar + un esbozo de relaciones para que los
+  sintetice el *modelo del cliente*. La síntesis del lado del servidor (local,
+  nube o auto) es opcional — ver [Modos de síntesis](#modos-de-síntesis).
 
 ## Inicio rápido (60 segundos)
 
@@ -81,7 +82,7 @@ Agrega a la configuración de Claude Desktop
 | `get_file_summary(file_id)` | Resumen en caché + metadatos de un archivo. |
 | `index_status()` | Conteos por estado, última indexación, total de fragmentos. |
 | `index_file_tool(path)` | Activar ingesta de un archivo desde el cliente. |
-| `answer(query)` | *(desactivado por defecto)* Síntesis completamente local — nunca sale de la máquina. Activar con `enable_answer_tool=true`. |
+| `answer(query, mode?)` | *(desactivado por defecto)* Síntesis del lado del servidor sobre el paquete usando el backend configurado (`return_only`/`local`/`cloud`/`auto`); `mode` sobrescribe por llamada. Devuelve la respuesta más el modo que se ejecutó y si escaló. Activar con `enable_answer_tool=true`. |
 
 ## Superficie CLI
 
@@ -89,9 +90,13 @@ Agrega a la configuración de Claude Desktop
 mnemo index ./una-carpeta        # recorrido recursivo con globos include/exclude + progreso Rich
 mnemo status                      # conteos + última indexación
 mnemo search "aprendizaje automático"  # archivos clasificados
-mnemo ask "¿de qué trata este proyecto?"     # imprime el paquete de contexto curado
-mnemo ask "¿de qué trata esto?" --local       # también ejecuta síntesis con modelo local
+mnemo ask "¿de qué trata este proyecto?"        # imprime el paquete de contexto curado
+mnemo ask "¿de qué trata esto?" --mode local    # + síntesis con modelo local (Ollama)
+mnemo ask "compara estos diseños" --mode auto   # local, escalando a la nube si lo amerita
 ```
+
+`ask` imprime qué modo se ejecutó realmente y si escaló. (`--local` sigue
+funcionando pero está obsoleto en favor de `--mode local`.)
 
 ## Configuración
 
@@ -115,7 +120,7 @@ top_k_files = 8
 default_context_max_tokens = 3000
 
 [mnemo.mcp]
-enable_answer_tool = false          # síntesis local, desactivado por defecto
+enable_answer_tool = false          # síntesis del lado del servidor (herramienta answer), desactivado por defecto
 ```
 
 ## Modos de síntesis
