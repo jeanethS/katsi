@@ -131,7 +131,7 @@ class CloudSynthesizer:
                 model=cloud.model,
                 system=system,
                 messages=messages,
-                max_tokens=1024,
+                max_tokens=cloud.max_tokens,
             )
         except Exception as exc:
             raise SynthUnavailableError(

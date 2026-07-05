@@ -73,6 +73,7 @@ class SynthCloudSettings(BaseModel):
     model: str = ""
     api_key_env: str = "ANTHROPIC_API_KEY"
     enable_prompt_caching: bool = True
+    max_tokens: int = 1024
 
 
 class SynthAutoSettings(BaseModel):

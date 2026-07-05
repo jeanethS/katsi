@@ -202,6 +202,17 @@ def test_cloud_synthesizer_prompt_caching_flag():
         os.environ.pop("ANTHROPIC_API_KEY", None)
 
 
+def test_cloud_synthesizer_uses_configured_max_tokens(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    s = Settings()
+    s.synth.cloud.model = "claude-sonnet-4-20250514"
+    s.synth.cloud.max_tokens = 512
+    fake = _FakeAnthropicClient("resp")
+    synth = CloudSynthesizer(s, client=fake)
+    synth.answer("q", _bundle())
+    assert fake.last_max_tokens == 512
+
+
 def test_render_bundle_prompt_omits_empty_sections():
     bundle = _bundle(files=0, chunks=0, tokens=0)
     prompt = render_bundle_prompt("my question", bundle)

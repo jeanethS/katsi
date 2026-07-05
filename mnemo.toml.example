@@ -44,6 +44,7 @@ provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 api_key_env = "ANTHROPIC_API_KEY"
 enable_prompt_caching = true
+max_tokens = 1024
 
 [mnemo.synth.auto]
 escalate_when_files_gte = 4
