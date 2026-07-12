@@ -10,3 +10,6 @@ dist/
 .mnemo/
 mnemo.toml
 .hermes/
+packages/app/frontend/node_modules/
+packages/app/frontend/.vite/
+packages/app/mnemo_app/static/
