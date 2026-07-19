@@ -5,7 +5,7 @@ import pytest
 from mnemo_core.config import Settings
 from mnemo_core.ingest.records import FileRecordStore
 from mnemo_core.models import Chunk, FileRecord, IndexStatus
-from mnemo_core.retrieve.search import WHY_ENTITY, WHY_VECTOR, search
+from mnemo_core.retrieve.search import search
 from mnemo_core.store.graph import GraphStore
 from mnemo_core.store.vectors import VectorStore
 
@@ -70,8 +70,8 @@ def test_search_returns_vector_hits_in_order(setup_stores):
     assert result[0].file_id == "f1"
     assert result[1].file_id == "f2"
     assert result[0].score >= result[1].score
-    assert result[0].why == WHY_VECTOR
-    assert result[1].why == WHY_VECTOR
+    assert "vector" in result[0].why
+    assert "vector" in result[1].why
 
 
 def test_search_surfaces_graph_neighbors(setup_stores):
@@ -97,7 +97,7 @@ def test_search_surfaces_graph_neighbors(setup_stores):
     assert "f2" in fids
 
     f2_hit = [h for h in result if h.file_id == "f2"][0]
-    assert "graph-extended" in f2_hit.why or WHY_ENTITY in f2_hit.why
+    assert any(e.kind.value == "entity" for e in f2_hit.evidence) or "entity" in f2_hit.why
 
 
 def test_search_fused_score_better_than_pure_vector(setup_stores):

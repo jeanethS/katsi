@@ -3,16 +3,20 @@ from __future__ import annotations
 from mnemo_core.clients.embed import EmbedClient
 from mnemo_core.config import Settings
 from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.models import FileHit
+from mnemo_core.models import Evidence, FileHit
+from mnemo_core.retrieve.scoring import (
+    duplicate_evidence,
+    entity_evidence,
+    hop_evidence,
+    rank_hits,
+    reference_evidence,
+    render_why,
+    score_file,
+    topic_evidence,
+    vector_evidence,
+)
 from mnemo_core.store.graph import GraphStore
 from mnemo_core.store.vectors import VectorStore
-
-# Why strings:
-WHY_VECTOR = "vector match"
-WHY_ENTITY = "shares entity with top hit"
-WHY_TOPIC = "shares topic with top hit"
-WHY_REF_OUT = "referenced by top hit"
-WHY_DUPLICATE = "duplicate of top hit"
 
 
 def _resolve(
@@ -43,18 +47,11 @@ def search(
        where top_n_chunks = settings.retrieve.top_k_chunks.
     4. Aggregate chunk scores per file: best chunk score per file_id wins.
     5. For each ranked-by-vector file_id (top candidates), call graph.neighbors(file_id)
-       to get peer file_ids + their via + name fields.
-    6. Score fusion:
-        vector_score_norm = vector_score  (already similarity, in [0, 1])
-        graph_score = 1.0 if this file appears as a neighbor of ANY top-ranked hit,
-                      else 0.0
-        fused_score = settings.retrieve.vector_weight * vector_score
-                    + settings.retrieve.graph_weight * graph_score
-    7. Sort files descending by fused_score; slice top k.
-    8. Build FileHit for each: file_id, path, summary, score=fused_score, why=one of:
-        WHY_VECTOR if file was in the top vector hits.
-        WHY_ENTITY / WHY_TOPIC / WHY_REF_OUT / WHY_DUPLICATE if surfaced via graph.
-        If both, choose graph reason ("graph-extended: " + the why).
+       to get peer file_ids + their via + name + weight fields.
+    6. Group neighbor connectors by peer file_id.
+    7. For each candidate file, collect evidence list via scoring.py builders,
+       call score_file() for final score and render_why() for why string.
+    8. Use rank_hits() for deterministic sort; slice top k.
     """
     s = settings or Settings()
     vectors = _resolve(s, vectors, lambda: VectorStore(s.store.data_dir / "vectors", s.store.lancedb_table))  # type: ignore[arg-type]
@@ -82,17 +79,27 @@ def search(
     top_files = list(file_vec_score.keys())
     vec_best = {fid: file_vec_score[fid] for fid in top_files}
 
-    # 3. graph expand: for each top file, get its 1-hop neighbors
-    neighbor_files: dict[str, tuple[str, str | None]] = {}  # peer_fid -> (via, name)
+    # 3. graph expand + group connectors per peer file
+    neighbor_data: dict[str, dict] = {}
     for src_fid in top_files:
         for nb in graph.neighbors(src_fid, hops=1):
             peer = nb.get("file_id")
-            if peer and peer not in neighbor_files and peer != src_fid:
-                neighbor_files[peer] = (nb.get("via", "graph"), nb.get("name"))
+            if not peer or peer == src_fid:
+                continue
+            data = neighbor_data.setdefault(peer, {})
+            via = nb.get("via", "")
+            if via == "mentioned-entity":
+                data.setdefault("MENTIONS", []).append((nb["name"], nb["weight"]))
+            elif via == "shared-topic":
+                data.setdefault("ABOUT", []).append((nb["name"], nb["weight"]))
+            elif via == "references":
+                data["REFERENCES"] = data.get("REFERENCES", 0) + 1
+            elif via == "duplicate":
+                data["DUPLICATE_OF"] = nb["score"]
 
-    # 4. score fusion
-    vw, gw = s.retrieve.vector_weight, s.retrieve.graph_weight
-    candidate_files = set(top_files) | set(neighbor_files.keys())
+    # 4. score fusion via evidence
+    weights = s.retrieve.weights
+    candidate_files = set(top_files) | set(neighbor_data.keys())
     fused: list[FileHit] = []
     for fid in candidate_files:
         vnode = graph.get_file(fid)
@@ -105,27 +112,49 @@ def search(
         else:
             path = vnode.path
             summary = vnode.summary or ""
+
+        evidence: list[Evidence] = []
+        nbd = neighbor_data.get(fid, {})
+
         vec = vec_best.get(fid, 0.0)
-        if fid in neighbor_files:
-            via, name = neighbor_files[fid]
-            graph_score = 1.0
-            if via == "mentioned-entity":
-                why = WHY_ENTITY
-            elif via == "shared-topic":
-                why = WHY_TOPIC
-            elif via == "references":
-                why = WHY_REF_OUT
-            else:
-                why = WHY_DUPLICATE
-            if fid in vec_best:
-                why = f"vector + graph-extended ({why})"
-        else:
-            graph_score = 0.0
-            why = WHY_VECTOR
-        score = vw * vec + gw * graph_score
+        ev = vector_evidence(vec, weights)
+        if ev:
+            evidence.append(ev)
+
+        mentions = nbd.get("MENTIONS")
+        if mentions:
+            ev = entity_evidence(mentions, weights)
+            if ev:
+                evidence.append(ev)
+
+        about = nbd.get("ABOUT")
+        if about:
+            ev = topic_evidence(about, weights)
+            if ev:
+                evidence.append(ev)
+
+        if nbd.get("REFERENCES", 0) > 0:
+            ev = reference_evidence("out", weights)
+            if ev:
+                evidence.append(ev)
+
+        dup = nbd.get("DUPLICATE_OF")
+        if dup is not None:
+            ev = duplicate_evidence(dup, weights)
+            if ev:
+                evidence.append(ev)
+
+        if fid not in vec_best:
+            ev = hop_evidence(1, weights)
+            if ev:
+                evidence.append(ev)
+
+        score = score_file(evidence, weights)
+        why = render_why(evidence)
         fused.append(FileHit(
             file_id=fid, path=path, summary=summary,
-            score=score, why=why,
+            score=score, why=why, evidence=evidence,
         ))
-    fused.sort(key=lambda h: h.score, reverse=True)
+
+    fused = rank_hits(fused)
     return fused[:k]
