@@ -12,3 +12,4 @@ katsi.toml
 .hermes/
 packages/app/frontend/node_modules/
 packages/app/frontend/.vite/
+/*-spec.md
