@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from mnemo_core.config import Settings
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.models import Chunk, FileRecord, IndexStatus
-from mnemo_core.retrieve.context import build_context
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.config import Settings
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.models import Chunk, FileRecord, IndexStatus
+from katsi_core.retrieve.context import build_context
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 
 class _FakeEmbed:

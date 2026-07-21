@@ -1,4 +1,4 @@
-# mnemo — Architecture & Build Spec
+# katsi — Architecture & Build Spec
 
 > Working name: **MyFoldersote** (placeholder — rename freely). A local-first, privacy-first MCP server that gives any MCP client (Claude Desktop, Code, Cursor, etc.) cheap, relational context about a user's files. The engine does the expensive "understanding" once per file with local models and banks it in a knowledge graph + vector store; at query time it returns a small curated context bundle so the *client's* model synthesizes over a tiny window instead of exploring the filesystem.
 
@@ -8,7 +8,7 @@ This document is written for handoff to an agentic coder (opencode). It contains
 
 ## 1. Core value proposition (the thing every decision serves)
 
-Naive filesystem MCP servers dump files into the client's context (the Cowork token problem). Naive RAG servers only do vector similarity. **mnemo gives context that is both cheap *and* relational** — summarize-once + a local knowledge graph. The graph is the differentiator; lead with it.
+Naive filesystem MCP servers dump files into the client's context (the Cowork token problem). Naive RAG servers only do vector similarity. **katsi gives context that is both cheap *and* relational** — summarize-once + a local knowledge graph. The graph is the differentiator; lead with it.
 
 The token math: exploration cost moves from query-time (expensive, cloud, repeated) to ingest-time (cheap, local, once per file change). The only cloud cost is the client synthesizing over a curated bundle.
 
@@ -59,14 +59,14 @@ All model names are config-driven; never hardcode them in logic.
 ## 4. Monorepo layout
 
 ```
-mnemo/
+katsi/
 ├── pyproject.toml              # uv workspace root
 ├── AGENTS.md                   # repo context for the coding agent
 ├── README.md
-├── mnemo.toml.example          # sample config
+├── katsi.toml.example          # sample config
 ├── packages/
 │   ├── core/
-│   │   └── mnemo_core/
+│   │   └── katsi_core/
 │   │       ├── models.py       # pydantic data models
 │   │       ├── config.py       # settings
 │   │       ├── store/
@@ -84,9 +84,9 @@ mnemo/
 │   │           ├── search.py   # vector + graph fusion
 │   │           └── context.py  # assemble ContextBundle (budget-capped)
 │   ├── mcp_server/
-│   │   └── mnemo_mcp/server.py # FastMCP tools wrapping core
+│   │   └── katsi_mcp/server.py # FastMCP tools wrapping core
 │   └── cli/
-│       └── mnemo_cli/main.py   # typer app
+│       └── katsi_cli/main.py   # typer app
 └── tests/
 ```
 
@@ -94,7 +94,7 @@ mnemo/
 
 ## 5. Data models
 
-### 5.1 Pydantic (`core/mnemo_core/models.py`)
+### 5.1 Pydantic (`core/katsi_core/models.py`)
 
 ```python
 from datetime import datetime
@@ -180,7 +180,7 @@ One table `chunks` with columns: `id`, `file_id`, `ordinal`, `text`, `vector` (f
 
 ## 6. MCP interface (the product surface — keep stable)
 
-All tools live in `mcp_server/mnemo_mcp/server.py` and call into `core`. The headline tool is `get_context`: it returns a compact bundle the **client's** model synthesizes over. That return-context-not-answer design is the entire token saver — do not have the server call a cloud model.
+All tools live in `mcp_server/katsi_mcp/server.py` and call into `core`. The headline tool is `get_context`: it returns a compact bundle the **client's** model synthesizes over. That return-context-not-answer design is the entire token saver — do not have the server call a cloud model.
 
 ```python
 @mcp.tool()
@@ -242,7 +242,7 @@ def answer(query: str) -> str:
 ## 8. `AGENTS.md` (commit this so opencode has standing context)
 
 ```markdown
-# mnemo — agent instructions
+# katsi — agent instructions
 
 Local-first MCP server for relational file context. Python 3.12, uv workspace.
 
@@ -260,8 +260,8 @@ Local-first MCP server for relational file context. Python 3.12, uv workspace.
 - Install: `uv sync`
 - Test: `uv run pytest`
 - Lint: `uv run ruff check . && uv run ruff format .`
-- Run MCP server: `uv run mnemo-mcp`
-- Run CLI: `uv run mnemo --help`
+- Run MCP server: `uv run katsi-mcp`
+- Run CLI: `uv run katsi --help`
 
 ## Definition of done (every task)
 - Type hints throughout; passes ruff.
@@ -277,10 +277,10 @@ Local-first MCP server for relational file context. Python 3.12, uv workspace.
 Dependency-ordered. Each is sized for one focused opencode session. Hand them over one at a time, in order. Each has a paste-ready prompt — adjust the project name first.
 
 ### T0 — Scaffold the workspace
-**Touches:** `pyproject.toml`, `packages/*/pyproject.toml`, `AGENTS.md`, `mnemo.toml.example`, `core/models.py`, `core/config.py`
+**Touches:** `pyproject.toml`, `packages/*/pyproject.toml`, `AGENTS.md`, `katsi.toml.example`, `core/models.py`, `core/config.py`
 **Done when:** `uv sync` succeeds; `uv run pytest` runs (zero tests OK); the three packages import each other per the dependency rule; `models.py` and `config.py` match §5 and §3.
 **Prompt:**
-> Set up a `uv` workspace named `mnemo` with three packages under `packages/`: `core` (importable as `mnemo_core`), `mcp_server` (`mnemo_mcp`), and `cli` (`mnemo_cli`). `mcp_server` and `cli` depend on `core`; `core` depends on neither. Add `pydantic`, `pydantic-settings`, `typer`, `rich`, `ruff`, `pytest`, `lancedb`, `kuzu`, `ollama`, `markitdown`, `blake3`. Create `core/mnemo_core/models.py` and `config.py` exactly per the spec sections I'll paste. Add the `AGENTS.md` and a `mnemo.toml.example`. Configure ruff and a `mnemo`/`mnemo-mcp` script entrypoint.
+> Set up a `uv` workspace named `katsi` with three packages under `packages/`: `core` (importable as `katsi_core`), `mcp_server` (`katsi_mcp`), and `cli` (`katsi_cli`). `mcp_server` and `cli` depend on `core`; `core` depends on neither. Add `pydantic`, `pydantic-settings`, `typer`, `rich`, `ruff`, `pytest`, `lancedb`, `kuzu`, `ollama`, `markitdown`, `blake3`. Create `core/katsi_core/models.py` and `config.py` exactly per the spec sections I'll paste. Add the `AGENTS.md` and a `katsi.toml.example`. Configure ruff and a `katsi`/`katsi-mcp` script entrypoint.
 
 ### T1 — Store adapters
 **Touches:** `core/store/vectors.py`, `core/store/graph.py`
@@ -318,25 +318,25 @@ Dependency-ordered. Each is sized for one focused opencode session. Hand them ov
 > Implement `retrieve/search.py::search(query, k)` (embed query → vector ANN → graph 1-hop expand → score fusion → `FileHit`s with a short `why`) and `retrieve/context.py::build_context(query, max_tokens)` per §7.2, strictly budget-capped. Test the budget cap and that graph neighbors surface even when not in the top vector hits.
 
 ### T6 — MCP server
-**Touches:** `mcp_server/mnemo_mcp/server.py`
+**Touches:** `mcp_server/katsi_mcp/server.py`
 **Deps:** T4, T5
-**Done when:** FastMCP server exposes the five §6 tools (plus gated `answer`) wired to core; `uv run mnemo-mcp` starts over stdio; a smoke test lists tools and calls `get_context` against a fixtured store.
+**Done when:** FastMCP server exposes the five §6 tools (plus gated `answer`) wired to core; `uv run katsi-mcp` starts over stdio; a smoke test lists tools and calls `get_context` against a fixtured store.
 **Prompt:**
-> Implement the FastMCP server in `mcp_server/mnemo_mcp/server.py` exposing `index_status`, `search`, `get_context`, `get_file_summary`, `related`, and a config-gated `answer`, each delegating to `mnemo_core`. Stdio transport, `mnemo-mcp` entrypoint. Add a smoke test that initializes against a fixtured store and calls `get_context`.
+> Implement the FastMCP server in `mcp_server/katsi_mcp/server.py` exposing `index_status`, `search`, `get_context`, `get_file_summary`, `related`, and a config-gated `answer`, each delegating to `katsi_core`. Stdio transport, `katsi-mcp` entrypoint. Add a smoke test that initializes against a fixtured store and calls `get_context`.
 
 ### T7 — CLI
-**Touches:** `cli/mnemo_cli/main.py`
+**Touches:** `cli/katsi_cli/main.py`
 **Deps:** T4, T5
-**Done when:** `mnemo index <path>` walks + indexes with a Rich progress bar; `mnemo status`, `mnemo search <q>`, `mnemo ask <q>` (prints the assembled context, and the local answer if the flag is on) all work end-to-end.
+**Done when:** `katsi index <path>` walks + indexes with a Rich progress bar; `katsi status`, `katsi search <q>`, `katsi ask <q>` (prints the assembled context, and the local answer if the flag is on) all work end-to-end.
 **Prompt:**
-> Build a Typer CLI in `cli/mnemo_cli/main.py`: `index PATH` (recursive walk honoring config include/exclude globs, Rich progress), `status`, `search QUERY`, `ask QUERY` (prints the `ContextBundle`; with `--local` also prints local-model synthesis). This is the demo + dogfood surface — make the output clean.
+> Build a Typer CLI in `cli/katsi_cli/main.py`: `index PATH` (recursive walk honoring config include/exclude globs, Rich progress), `status`, `search QUERY`, `ask QUERY` (prints the `ContextBundle`; with `--local` also prints local-model synthesis). This is the demo + dogfood surface — make the output clean.
 
 ### T8 — Package & publish
 **Touches:** `README.md`, entrypoints, registry metadata
 **Deps:** T6, T7
-**Done when:** `uvx mnemo-mcp` runs from a clean machine; README opens with a copy-paste MCP client config block and a 60-second quickstart; `server.json`/registry metadata prepared for the official MCP community registry.
+**Done when:** `uvx katsi-mcp` runs from a clean machine; README opens with a copy-paste MCP client config block and a 60-second quickstart; `server.json`/registry metadata prepared for the official MCP community registry.
 **Prompt:**
-> Finalize packaging for `uvx mnemo-mcp`. Write a README whose first screen is (1) one-line value prop, (2) copy-paste MCP client config block, (3) 60-second quickstart. Prepare metadata to publish to the official MCP community registry (it auto-propagates to the GitHub registry). Add ES + EN README variants.
+> Finalize packaging for `uvx katsi-mcp`. Write a README whose first screen is (1) one-line value prop, (2) copy-paste MCP client config block, (3) 60-second quickstart. Prepare metadata to publish to the official MCP community registry (it auto-propagates to the GitHub registry). Add ES + EN README variants.
 
 ---
 

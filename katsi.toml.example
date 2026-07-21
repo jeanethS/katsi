@@ -1,0 +1,53 @@
+# katsi configuration example. Copy to katsi.toml or ~/.katsi/katsi.toml.
+# Every field below has a builtin default — only set what you want to change.
+
+[katsi.ollama]
+host = "http://localhost:11434"
+embed_model = "bge-m3"
+llm_model = "qwen2.5:7b"
+timeout = 120.0
+
+[katsi.store]
+data_dir = "~/.katsi"
+lancedb_table = "chunks"
+kuzu_db = "graph"
+
+[katsi.ingest]
+chunk_token_target = 512
+chunk_token_overlap = 64
+dedup_similarity_threshold = 0.92
+include_globs = ["**/*.md", "**/*.txt", "**/*.py", "**/*.ts", "**/*.pdf", "**/*.docx"]
+exclude_globs = ["**/.git/**", "**/node_modules/**", "**/.venv/**", "**/__pycache__/**"]
+
+[katsi.retrieve]
+top_k_chunks = 16
+top_k_files = 8
+graph_expand_hops = 1
+vector_weight = 0.6
+graph_weight = 0.4
+default_context_max_tokens = 3000
+
+[katsi.mcp]
+enable_answer_tool = false
+
+# Synthesis modes — see README
+[katsi.synth]
+backend = "return_only"
+allow_per_call_override = true
+
+[katsi.synth.local]
+model = "qwen2.5:7b"
+max_tokens = 800
+
+[katsi.synth.cloud]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+enable_prompt_caching = true
+max_tokens = 1024
+
+[katsi.synth.auto]
+escalate_when_files_gte = 4
+escalate_when_tokens_gte = 2500
+escalate_on_intents = ["compare", "contrast", "synthesize", "across", "difference"]
+fallback_to_local_if_cloud_unavailable = true

@@ -5,7 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
-    outDir: "../mnemo_app/static",
+    outDir: "../katsi_app/static",
     emptyOutDir: true,
   },
   server: {

@@ -1,6 +1,6 @@
 """Tests for EmbedClient — all use a fake in-memory ollama client."""
 
-from mnemo_core.clients.embed import EmbedClient
+from katsi_core.clients.embed import EmbedClient
 
 
 class _FakeEmbedResp:

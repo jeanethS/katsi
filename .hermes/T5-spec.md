@@ -1,6 +1,6 @@
 # T5 — Retrieval + context assembly
 
-Extends the existing mnemo workspace. T0–T4 already done — add only the new files.
+Extends the existing katsi workspace. T0–T4 already done — add only the new files.
 
 ## TOOL RULES (read first)
 
@@ -12,12 +12,12 @@ from the project root, report exit codes + tail outputs.
 
 ## 0. What you wire together
 
-From `mnemo_core.models`: `FileHit`, `ContextBundle`, `Chunk`, `FileRecord`.
-From `mnemo_core.config`: `Settings`.
-From `mnemo_core.store.graph`: `GraphStore`.
-From `mnemo_core.store.vectors`: `VectorStore`.
-From `mnemo_core.clients.embed`: `EmbedClient`.
-From `mnemo_core.ingest.records`: `FileRecordStore`.
+From `katsi_core.models`: `FileHit`, `ContextBundle`, `Chunk`, `FileRecord`.
+From `katsi_core.config`: `Settings`.
+From `katsi_core.store.graph`: `GraphStore`.
+From `katsi_core.store.vectors`: `VectorStore`.
+From `katsi_core.clients.embed`: `EmbedClient`.
+From `katsi_core.ingest.records`: `FileRecordStore`.
 
 The architecture spec §7.2 retrieval flow:
 1. Embed query → LanceDB ANN, top-N chunks.
@@ -28,20 +28,20 @@ The architecture spec §7.2 retrieval flow:
 ## 1. Files to create (5 new files)
 
 ```
-packages/core/mnemo_core/retrieve/__init__.py
-packages/core/mnemo_core/retrieve/search.py
-packages/core/mnemo_core/retrieve/context.py
+packages/core/katsi_core/retrieve/__init__.py
+packages/core/katsi_core/retrieve/search.py
+packages/core/katsi_core/retrieve/context.py
 tests/test_search.py
 tests/test_context.py
 ```
 
-## 2. Contract: `packages/core/mnemo_core/retrieve/__init__.py`
+## 2. Contract: `packages/core/katsi_core/retrieve/__init__.py`
 
 ```python
-"""mnemo retrieval: vector+graph fusion + budget-capped context bundle."""
+"""katsi retrieval: vector+graph fusion + budget-capped context bundle."""
 ```
 
-## 3. Contract: `packages/core/mnemo_core/retrieve/search.py`
+## 3. Contract: `packages/core/katsi_core/retrieve/search.py`
 
 Score fusion of vector ANN + graph 1-hop expansion. Returns ranked `FileHit`s with
 a short `why` line.
@@ -49,12 +49,12 @@ a short `why` line.
 ```python
 from __future__ import annotations
 
-from mnemo_core.clients.embed import EmbedClient
-from mnemo_core.config import Settings
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.models import FileHit
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.clients.embed import EmbedClient
+from katsi_core.config import Settings
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.models import FileHit
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 # Why strings:
 WHY_VECTOR = "vector match"
@@ -186,18 +186,18 @@ def search(
 The implementation reference above is the source of truth — use it verbatim,
 adjust imports as needed.
 
-## 4. Contract: `packages/core/mnemo_core/retrieve/context.py`
+## 4. Contract: `packages/core/katsi_core/retrieve/context.py`
 
 ```python
 from __future__ import annotations
 
-from mnemo_core.clients.embed import EmbedClient
-from mnemo_core.config import Settings
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.models import Chunk, ContextBundle, FileHit
-from mnemo_core.retrieve.search import search
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.clients.embed import EmbedClient
+from katsi_core.config import Settings
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.models import Chunk, ContextBundle, FileHit
+from katsi_core.retrieve.search import search
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 
 def build_context(
@@ -345,7 +345,7 @@ Then the budget logic:
 
 ```python
 import os
-from mnemo_core.ingest.chunk import estimate_tokens
+from katsi_core.ingest.chunk import estimate_tokens
 
 def _name(path: str) -> str:
     return os.path.basename(path) or path
@@ -447,12 +447,12 @@ fake embed/llm (llm not needed here, only embed). Build helper:
 
 ```python
 import pytest
-from mnemo_core.clients.embed import EmbedClient
-from mnemo_core.config import Settings
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.models import Chunk, FileRecord, IndexStatus
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.clients.embed import EmbedClient
+from katsi_core.config import Settings
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.models import Chunk, FileRecord, IndexStatus
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 
 class _FakeEmbed:

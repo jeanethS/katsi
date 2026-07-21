@@ -1,0 +1,1 @@
+"""katsi storage adapters."""

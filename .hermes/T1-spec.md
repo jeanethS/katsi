@@ -1,6 +1,6 @@
 # T1 — Store adapters (LanceDB + Kùzu)
 
-You are extending the EXISTING mnemo uv workspace in the current working directory.
+You are extending the EXISTING katsi uv workspace in the current working directory.
 T0 already created the scaffold (packages/, models.py, config.py). Do NOT recreate it.
 Only ADD the new files listed below.
 
@@ -68,33 +68,33 @@ def _unwrap(val):
 
 ## 1. Existing models you can import
 
-From `mnemo_core.models`:
+From `katsi_core.models`:
 - `FileRecord` (id, path, name, ext, mime, size_bytes, mtime, content_hash, status, summary, last_indexed_at, error)
 - `Chunk` (id, file_id, ordinal, text, token_count)
 - `IndexStatus` (StrEnum: PENDING, INDEXED, STALE, ERROR)
 
-Settings lives at `mnemo_core.config.Settings`. `Settings().store.data_dir` gives `~/.mnemo` by default;
+Settings lives at `katsi_core.config.Settings`. `Settings().store.data_dir` gives `~/.katsi` by default;
 `Settings().store.lancedb_table` is `"chunks"` and `Settings().store.kuzu_db` is `"graph"`.
 
 ## 2. Files to create (5 new files)
 
 ```
-packages/core/mnemo_core/store/__init__.py
-packages/core/mnemo_core/store/vectors.py
-packages/core/mnemo_core/store/graph.py
+packages/core/katsi_core/store/__init__.py
+packages/core/katsi_core/store/vectors.py
+packages/core/katsi_core/store/graph.py
 tests/test_vectors.py
 tests/test_graph.py
 ```
 
-## 3. Contract: `packages/core/mnemo_core/store/__init__.py`
+## 3. Contract: `packages/core/katsi_core/store/__init__.py`
 
 ```python
-"""mnemo storage adapters."""
+"""katsi storage adapters."""
 ```
 
 That's it — keeps the directory a package.
 
-## 4. Contract: `packages/core/mnemo_core/store/vectors.py`
+## 4. Contract: `packages/core/katsi_core/store/vectors.py`
 
 Class `VectorStore`. LanceDB-backed. Constructor params and methods below.
 Tests must use temp dirs and NO network.
@@ -127,14 +127,14 @@ Notes:
   only known after the first call to Ollama — do NOT hardcode it).
 - `upsert_chunks` builds an Arrow table from the passed `Chunk` objects + vectors and
   calls `tbl.add(...)`. First deletes rows where `file_id` matches using `tbl.delete(...)`.
-- The `~` tilde in `Path.home() / ".mnemo"` is already expanded; do not expand again.
+- The `~` tilde in `Path.home() / ".katsi"` is already expanded; do not expand again.
 - LanceDB stores its data under "db_path"; create parent dir if missing.
 
 Notes about upsert_with_chunks-method semantics:
 - If `chunks` and `vectors` are empty, return immediately (no-op).
 - Match lengths: raise `ValueError("len(chunks) != len(vectors)")` on mismatch.
 
-## 5. Contract: `packages/core/mnemo_core/store/graph.py`
+## 5. Contract: `packages/core/katsi_core/store/graph.py`
 
 Kùzu-backed. Implements the DDL from the architecture spec §5.2 exactly. Add an unwrapping
 helper (`_unwrap`) at module top — see §0.
@@ -260,8 +260,8 @@ Both must exit 0. Paste the tail outputs in your final report.
 
 ## 9. Constraints / anti-patterns
 
-- Do NOT add new dependencies to pyproject.toml. lancedb, kuzu are already in mnemo-core deps.
-- Do NOT modify files in `packages/core/mnemo_core/models.py`, `config.py`, or
+- Do NOT add new dependencies to pyproject.toml. lancedb, kuzu are already in katsi-core deps.
+- Do NOT modify files in `packages/core/katsi_core/models.py`, `config.py`, or
   `__init__.py` from T0. Do NOT touch mcp_server/ or cli/.
 - Do NOT call any external service (no real Ollama, no real network). All tests use tmp dirs.
 - Do NOT leave TODO comments anywhere.

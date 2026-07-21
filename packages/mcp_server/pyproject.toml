@@ -1,9 +1,9 @@
 [project]
-name = "mnemo-mcp"
+name = "katsi-mcp"
 version = "0.1.0"
-description = "mnemo MCP server (FastMCP)."
+description = "katsi MCP server (FastMCP)."
 requires-python = ">=3.12,<3.14"
-authors = [{ name = "mnemo contributors" }]
+authors = [{ name = "katsi contributors" }]
 license = { text = "MIT" }
 # readme lives at workspace root, not in this package
 keywords = ["mcp", "rag", "knowledge-graph", "ollama", "local", "privacy"]
@@ -16,21 +16,21 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "mnemo-core",
+    "katsi-core",
     "mcp>=1.0",
 ]
 
 [project.scripts]
-mnemo-mcp = "mnemo_mcp.server:main"
+katsi-mcp = "katsi_mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/jeaneths/mnemo"
-Repository = "https://github.com/jeaneths/mnemo"
-Issues = "https://github.com/jeaneths/mnemo/issues"
+Homepage = "https://github.com/jeanethS/katsi"
+Repository = "https://github.com/jeanethS/katsi"
+Issues = "https://github.com/jeanethS/katsi/issues"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["mnemo_mcp"]
+packages = ["katsi_mcp"]

@@ -1,7 +1,7 @@
 # T8 — Package & publish
 
-Final task. Extends the existing mnemo workspace. T0–T7 already done. This task
-polishes packaging + docs so `uvx mnemo-mcp` works from a clean machine and the
+Final task. Extends the existing katsi workspace. T0–T7 already done. This task
+polishes packaging + docs so `uvx katsi-mcp` works from a clean machine and the
 README opens with a copy-paste MCP client config block + 60-second quickstart.
 
 ## TOOL RULES (read first)
@@ -40,23 +40,23 @@ This block is the headline of the README. It is what every MCP client wants:
 ```json
 {
   "mcpServers": {
-    "mnemo": {
+    "katsi": {
       "command": "uvx",
-      "args": ["mnemo-mcp"]
+      "args": ["katsi-mcp"]
     }
   }
 }
 ```
 
 Some clients need slightly different syntax (e.g. Cursor needs the `args` to be
-`["--from", "mnemo-mcp", "mnemo-mcp"]`). The README should give the canonical
+`["--from", "katsi-mcp", "katsi-mcp"]`). The README should give the canonical
 Claude Desktop config first; underneath cover Claude Desktop, Cursor, and
 generic MCP clients briefly.
 
 ## 3. README.md rewrite (exact structure)
 
 ```markdown
-# mnemo
+# katsi
 
 Local-first, privacy-first MCP server that gives any MCP client (Claude Desktop,
 Code, Cursor, ...) cheap, **relational** context about your files. Summarize each
@@ -86,7 +86,7 @@ client's model synthesizes over a tiny window instead of exploring the filesyste
 
 ```bash
 # 1. Install + run (one line)
-uvx mnemo-mcp
+uvx katsi-mcp
 ```
 
 That's it for the server. To actually get value, index a folder then wire the
@@ -95,8 +95,8 @@ server into your MCP client (next block).
 To index + search the indexed tree locally:
 
 ```bash
-uvx --from mnemo-cli mnemo index ~/my-folder
-uvx --from mnemo-cli mnemo ask "what is this project about?"
+uvx --from katsi-cli katsi index ~/my-folder
+uvx --from katsi-cli katsi ask "what is this project about?"
 ```
 
 ## MCP client config (Claude Desktop)
@@ -107,9 +107,9 @@ on macOS; `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 ```json
 {
   "mcpServers": {
-    "mnemo": {
+    "katsi": {
       "command": "uvx",
-      "args": ["mnemo-mcp"]
+      "args": ["katsi-mcp"]
     }
   }
 }
@@ -117,8 +117,8 @@ on macOS; `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 
 ### Other clients
 
-- **Cursor**: Settings → MCP → Add MCP → `uvx mnemo-mcp`.
-- **Generic MCP**: any client that speaks MCP stdio can launch `uvx mnemo-mcp`.
+- **Cursor**: Settings → MCP → Add MCP → `uvx katsi-mcp`.
+- **Generic MCP**: any client that speaks MCP stdio can launch `uvx katsi-mcp`.
 
 ## Provided MCP tools
 
@@ -135,45 +135,45 @@ on macOS; `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 ## CLI dogfood surface
 
 ```bash
-mnemo index ./some-folder      # recursive walk with include/exclude globs + Rich progress
-mnemo status                    # counts + last index time
-mnemo search "machine learning" # ranked files
-mnemo ask "what is this project about?"   # prints the curated context bundle
-mnemo ask "what is this about?" --local   # also runs local-model synthesis (off by default)
+katsi index ./some-folder      # recursive walk with include/exclude globs + Rich progress
+katsi status                    # counts + last index time
+katsi search "machine learning" # ranked files
+katsi ask "what is this project about?"   # prints the curated context bundle
+katsi ask "what is this about?" --local   # also runs local-model synthesis (off by default)
 ```
 
 ## Config
 
-A `mnemo.toml` (or `~/.mnemo/mnemo.toml`) is optional. Every field has a default.
-See `mnemo.toml.example` for the full schema. Key fields:
+A `katsi.toml` (or `~/.katsi/katsi.toml`) is optional. Every field has a default.
+See `katsi.toml.example` for the full schema. Key fields:
 
 ```toml
-[mnemo.ollama]
+[katsi.ollama]
 host = "http://localhost:11434"
 embed_model = "bge-m3"          # multilingual ES/EN/ZH
 llm_model = "qwen2.5:7b"
 
-[mnemo.ingest]
+[katsi.ingest]
 chunk_token_target = 512
 chunk_token_overlap = 64
 
-[mnemo.retrieve]
+[katsi.retrieve]
 top_k_chunks = 16
 top_k_files = 8
 default_context_max_tokens = 3000
 
-[mnemo.mcp]
+[katsi.mcp]
 enable_answer_tool = false     # local-only synthesis, off by default
 ```
 
 ## Architecture
 
 ```
-mnemo/
+katsi/
 ├── packages/
-│   ├── core/mnemo_core/   models, config, store, clients, ingest, retrieve
-│   ├── mcp_server/        FastMCP tools (this package is what `mnemo-mcp` runs)
-│   └── cli/               `mnemo` CLI: index, status, search, ask
+│   ├── core/katsi_core/   models, config, store, clients, ingest, retrieve
+│   ├── mcp_server/        FastMCP tools (this package is what `katsi-mcp` runs)
+│   └── cli/               `katsi` CLI: index, status, search, ask
 └── tests/
 ```
 
@@ -203,7 +203,7 @@ are identical (with minimal commentary in Spanish).
 
 ## 5. LICENSE (MIT)
 
-Standard MIT license, copyright year = current year (2026), holder = "mnemo contributors".
+Standard MIT license, copyright year = current year (2026), holder = "katsi contributors".
 
 ## 6. server.json (MCP community registry metadata)
 
@@ -212,24 +212,24 @@ Per the official MCP community registry schema (resembles a PyPI/registry entry:
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/schema/registry.schema.json",
-  "name": "mnemo",
+  "name": "katsi",
   "description": "Local-first MCP server that gives any MCP client cheap, relational context about a user's files. Summarize-once + knowledge graph + vector store; returns a budget-capped context bundle for the client to answer over.",
-  "repository": "https://github.com/JEANETH_USER/mnemo",
-  "publisher": "mnemo",
+  "repository": "https://github.com/JEANETH_USER/katsi",
+  "publisher": "katsi",
   "version": "0.1.0",
-  "homepage": "https://github.com/JEANETH_USER/mnemo",
+  "homepage": "https://github.com/JEANETH_USER/katsi",
   "license": "MIT",
   "keywords": ["mcp", "rag", "knowledge-graph", "ollama", "local", "privacy"],
   "categories": ["local", "search", "files"],
   "author": {
-    "name": "mnemo contributors"
+    "name": "katsi contributors"
   },
-  "bin": "mnemo-mcp",
+  "bin": "katsi-mcp",
   "runtime": "python",
   "install": {
     "type": "uvx",
     "command": "uvx",
-    "args": ["mnemo-mcp"]
+    "args": ["katsi-mcp"]
   },
   "tools": [
     {"name": "get_context", "description": "Curated, budget-capped context bundle for the client to answer over."},
@@ -245,7 +245,7 @@ Per the official MCP community registry schema (resembles a PyPI/registry entry:
 
 Replace `JEANETH_USER` placeholder in the `repository` + `homepage` URL with the
 public GitHub username. Use `jeaneths` (case-insensitive: lowercase GitHub
-usernames). So `https://github.com/jeaneths/mnemo`.
+usernames). So `https://github.com/jeanethS/katsi`.
 
 ## 7. pyproject.toml updates (root + 3 packages)
 
@@ -254,7 +254,7 @@ or remove existing fields.
 
 Root `pyproject.toml`:
 ```toml
-authors = [{ name = "mnemo contributors" }]
+authors = [{ name = "katsi contributors" }]
 license = { text = "MIT" }
 readme = "README.md"
 keywords = ["mcp", "rag", "knowledge-graph", "ollama", "local", "privacy"]
@@ -268,9 +268,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jeaneths/mnemo"
-Repository = "https://github.com/jeaneths/mnemo"
-Issues = "https://github.com/jeaneths/mnemo/issues"
+Homepage = "https://github.com/jeanethS/katsi"
+Repository = "https://github.com/jeanethS/katsi"
+Issues = "https://github.com/jeanethS/katsi/issues"
 ```
 
 For each per-package pyproject.toml (core, mcp_server, cli): add the SAME metadata
@@ -282,13 +282,13 @@ must be preserved exactly.
 
 ## 8. uvx verification
 
-After updating, run `uv build --package mnemo-mcp 2>&1 | tail -30` to verify the
+After updating, run `uv build --package katsi-mcp 2>&1 | tail -30` to verify the
 mcp_server package builds cleanly. Do NOT push to PyPI. The success criterion is
 that `uv build` produces a wheel/sdist without errors.
 
-Do NOT run `uvx mnemo-mcp` from this machine — to keep this task offline-safe,
+Do NOT run `uvx katsi-mcp` from this machine — to keep this task offline-safe,
 just verify the build succeeds. The README's quickstart hypothesis (that
-`uvx mnemo-mcp` works) is implied by `uv build` publishing capability.
+`uvx katsi-mcp` works) is implied by `uv build` publishing capability.
 
 ## 9. Constraints
 
@@ -304,7 +304,7 @@ just verify the build succeeds. The README's quickstart hypothesis (that
 - 3 new files exist: `README.es.md`, `packages/mcp_server/server.json`, `LICENSE`.
 - `README.md` rewritten per §3.
 - All 4 pyproject.toml files have the new metadata fields added.
-- `uv build --package mnemo-mcp` exits 0 — paste tail output.
+- `uv build --package katsi-mcp` exits 0 — paste tail output.
 - `uv run pytest -q` exits 0 — paste tail (should still be 78+ tests passing).
 - `uv run ruff check .` exits 0 — paste tail.
 - Hand back a short report with file list and tail outputs.

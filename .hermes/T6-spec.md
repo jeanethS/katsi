@@ -1,6 +1,6 @@
 # T6 — FastMCP server
 
-Extends the existing mnemo workspace. T0–T5 already done — add only the new files.
+Extends the existing katsi workspace. T0–T5 already done — add only the new files.
 
 ## TOOL RULES (read first)
 
@@ -15,7 +15,7 @@ from the project root, report exit codes + tail outputs.
 ```python
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("mnemo")
+mcp = FastMCP("katsi")
 
 @mcp.tool()
 def search(query: str, k: int = 8) -> list[dict]:
@@ -33,31 +33,31 @@ if __name__ == "__main__":
 
 ## 1. What you wire together
 
-From `mnemo_core.models`: `FileHit`, `ContextBundle`, `FileRecord`.
-From `mnemo_core.config`: `Settings`, `get_settings`.
-From `mnemo_core.ingest.pipeline`: `IngestPipeline`.
-From `mnemo_core.ingest.records`: `FileRecordStore`.
-From `mnemo_core.store.graph`: `GraphStore`.
-From `mnemo_core.store.vectors`: `VectorStore` (used indirectly via pipeline/retrieve).
-From `mnemo_core.clients.embed`: `EmbedClient`.
-From `mnemo_core.clients.llm`: `LLMClient`.
-From `mnemo_core.retrieve.search`: `search`.
-From `mnemo_core.retrieve.context`: `build_context`.
+From `katsi_core.models`: `FileHit`, `ContextBundle`, `FileRecord`.
+From `katsi_core.config`: `Settings`, `get_settings`.
+From `katsi_core.ingest.pipeline`: `IngestPipeline`.
+From `katsi_core.ingest.records`: `FileRecordStore`.
+From `katsi_core.store.graph`: `GraphStore`.
+From `katsi_core.store.vectors`: `VectorStore` (used indirectly via pipeline/retrieve).
+From `katsi_core.clients.embed`: `EmbedClient`.
+From `katsi_core.clients.llm`: `LLMClient`.
+From `katsi_core.retrieve.search`: `search`.
+From `katsi_core.retrieve.context`: `build_context`.
 
 ## 2. Files to create / update (3 files)
 
 ```
-packages/mcp_server/mnemo_mcp/server.py         (REWRITE the T0 stub)
-packages/mcp_server/mnemo_mcp/__init__.py        (replace NotImplementedError stub)
+packages/mcp_server/katsi_mcp/server.py         (REWRITE the T0 stub)
+packages/mcp_server/katsi_mcp/__init__.py        (replace NotImplementedError stub)
 tests/test_mcp_server.py                          (NEW)
 ```
 
 Do NOT touch any other files (T0–T5 stay untouched).
 
-## 3. Contract: `packages/mcp_server/mnemo_mcp/server.py`
+## 3. Contract: `packages/mcp_server/katsi_mcp/server.py`
 
 Implements §6 of the architecture spec. Five tools + one config-gated `answer`. Each
-tool delegates to `mnemo_core`. Server keeps ONE set of long-lived clients/graph
+tool delegates to `katsi_core`. Server keeps ONE set of long-lived clients/graph
 constructed lazily on first tool call.
 
 ```python
@@ -69,20 +69,20 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from mnemo_core.clients.embed import EmbedClient
-from mnemo_core.clients.llm import LLMClient
-from mnemo_core.config import Settings, get_settings
-from mnemo_core.ingest.pipeline import IngestPipeline
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.models import ContextBundle, FileHit, FileRecord, IndexStatus
-from mnemo_core.retrieve.context import build_context
-from mnemo_core.retrieve.search import search
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.clients.embed import EmbedClient
+from katsi_core.clients.llm import LLMClient
+from katsi_core.config import Settings, get_settings
+from katsi_core.ingest.pipeline import IngestPipeline
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.models import ContextBundle, FileHit, FileRecord, IndexStatus
+from katsi_core.retrieve.context import build_context
+from katsi_core.retrieve.search import search
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("mnemo")
+mcp = FastMCP("katsi")
 
 
 # --- shared service singletons (lazy-init on first tool call) ---
@@ -220,7 +220,7 @@ def answer(query: str) -> str:
     s = svc["settings"]
     if not s.mcp.enable_answer_tool:
         raise PermissionError(
-            "answer tool disabled; set mnemo.mcp.enable_answer_tool=true to enable"
+            "answer tool disabled; set katsi.mcp.enable_answer_tool=true to enable"
         )
     bundle = build_context(query, max_tokens=s.retrieve.default_context_max_tokens,
                             settings=s, vectors=svc["vectors"], graph=svc["graph"],
@@ -245,7 +245,7 @@ def answer(query: str) -> str:
 
 
 def main() -> None:
-    """Entry point: `mnemo-mcp` console script."""
+    """Entry point: `katsi-mcp` console script."""
     logging.basicConfig(level=logging.INFO)
     mcp.run()
 
@@ -260,22 +260,22 @@ beyond §6 — it lets the MCP client trigger ingestion. Keep it.
 Note the tool `search_files` shadows nothing because we use a function name distinct
 from the `search` import. The MCP tool name (as exposed to clients) is `search_files`.
 
-## 4. Contract: `packages/mcp_server/mnemo_mcp/__init__.py`
+## 4. Contract: `packages/mcp_server/katsi_mcp/__init__.py`
 
 ```python
-"""mnemo MCP server package."""
+"""katsi MCP server package."""
 
 __version__ = "0.1.0"
 
 
 def main() -> None:
-    """Entrypoint for `mnemo-mcp` script."""
-    from mnemo_mcp.server import main as _real
+    """Entrypoint for `katsi-mcp` script."""
+    from katsi_mcp.server import main as _real
     _real()
 ```
 
-The `from mnemo_mcp.server import main as _real` is deferred so that printing
-`--help` from a CLI that imports mnemo_mcp does not eagerly start the MCP server.
+The `from katsi_mcp.server import main as _real` is deferred so that printing
+`--help` from a CLI that imports katsi_mcp does not eagerly start the MCP server.
 
 ## 5. Contract: `tests/test_mcp_server.py`
 
@@ -284,19 +284,19 @@ A SMOKE test that initializes against a fixtured store and calls `get_context`
 the tool functions directly.
 
 ```python
-"""Smoke tests for the mnemo FastMCP server tools."""
+"""Smoke tests for the katsi FastMCP server tools."""
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-from mnemo_core.clients.embed import EmbedClient
-from mnemo_core.config import Settings, reset_settings
-from mnemo_core.ingest.pipeline import IngestPipeline
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.clients.embed import EmbedClient
+from katsi_core.config import Settings, reset_settings
+from katsi_core.ingest.pipeline import IngestPipeline
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 
 class _FakeEmbed:
@@ -317,7 +317,7 @@ class _FakeLLM:
     def extract(self, text, *, attempts: int = 2):
         self.calls += 1
         import json as _json
-        from mnemo_core.models import Extraction
+        from katsi_core.models import Extraction
         return Extraction(**_json.loads(self.json_str))
 
     def chat(self, prompt, *, temperature: float = 0.2):
@@ -338,19 +338,19 @@ def server_state(tmp_path):
     """Replace the mcp server `_state` with a fresh fixture-backed pipeline."""
     # Build local stores pointing at tmp_path
     s = Settings()
-    # Override data_dir so writes go to tmp, not ~/.mnemo.
-    s.store.data_dir = tmp_path / "mnemo_data"
-    vectors = VectorStore(tmp_path / "mnemo_data" / "vectors")
+    # Override data_dir so writes go to tmp, not ~/.katsi.
+    s.store.data_dir = tmp_path / "katsi_data"
+    vectors = VectorStore(tmp_path / "katsi_data" / "vectors")
     vectors.init_table(8)
-    graph = GraphStore(tmp_path / "mnemo_data" / "graph")
-    records = FileRecordStore(tmp_path / "mnemo_data" / "records")
+    graph = GraphStore(tmp_path / "katsi_data" / "graph")
+    records = FileRecordStore(tmp_path / "katsi_data" / "records")
     embed = _FakeEmbed(dim=8)
     llm = _FakeLLM(EXTRACTION_JSON)
     pipeline = IngestPipeline(s, graph=graph, vectors=vectors, embed=embed,
                               llm=llm, records=records)
 
     # Import the mcp server module
-    from mnemo_mcp import server as srv
+    from katsi_mcp import server as srv
     srv._state.clear()
     srv._state.update({
         "settings": s,
@@ -432,7 +432,7 @@ def test_smoke_index_then_get_context(server_state, tmp_path):
 
 ## 6. Constraints
 
-- Do NOT add new dependencies. mcp is already in mnemo-mcp deps.
+- Do NOT add new dependencies. mcp is already in katsi-mcp deps.
 - Do NOT modify any T0–T5 files.
 - Do NOT leave TODO comments.
 - Do NOT start the MCP stdio server in tests (we test the tool functions directly).
@@ -442,5 +442,5 @@ def test_smoke_index_then_get_context(server_state, tmp_path):
 - All 3 files exist with the contracts above.
 - `uv run pytest` passes (existing 64 + ~7 mcp server = ~71+).
 - `uv run ruff check .` is clean.
-- `uv run python -c "from mnemo_mcp.server import main"` works without raising.
+- `uv run python -c "from katsi_mcp.server import main"` works without raising.
 - Hand back a short report.

@@ -1,4 +1,4 @@
-"""Smoke tests for the mnemo FastMCP server tools."""
+"""Smoke tests for the katsi FastMCP server tools."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import json
 
 import pytest
 
-from mnemo_core.config import Settings
-from mnemo_core.ingest.pipeline import IngestPipeline
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.models import Extraction
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
-from mnemo_core.synth import SynthConfigError
+from katsi_core.config import Settings
+from katsi_core.ingest.pipeline import IngestPipeline
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.models import Extraction
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
+from katsi_core.synth import SynthConfigError
 
 
 class _FakeEmbed:
@@ -52,12 +52,12 @@ def server_state(tmp_path):
     """Replace the mcp server `_state` with a fresh fixture-backed pipeline."""
     # Build local stores pointing at tmp_path
     s = Settings()
-    # Override data_dir so writes go to tmp, not ~/.mnemo.
-    s.store.data_dir = tmp_path / "mnemo_data"
-    vectors = VectorStore(tmp_path / "mnemo_data" / "vectors")
+    # Override data_dir so writes go to tmp, not ~/.katsi.
+    s.store.data_dir = tmp_path / "katsi_data"
+    vectors = VectorStore(tmp_path / "katsi_data" / "vectors")
     vectors.init_table(8)
-    graph = GraphStore(tmp_path / "mnemo_data" / "graph")
-    records = FileRecordStore(tmp_path / "mnemo_data" / "records")
+    graph = GraphStore(tmp_path / "katsi_data" / "graph")
+    records = FileRecordStore(tmp_path / "katsi_data" / "records")
     embed = _FakeEmbed(dim=8)
     llm = _FakeLLM(EXTRACTION_JSON)
     pipeline = IngestPipeline(
@@ -65,7 +65,7 @@ def server_state(tmp_path):
     )
 
     # Import the mcp server module
-    from mnemo_mcp import server as srv
+    from katsi_mcp import server as srv
 
     srv._state.clear()
     srv._state.update(

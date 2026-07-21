@@ -1,4 +1,6 @@
-# mnemo
+# katsi
+
+> The word *katsi* means "to know" or "to understand" in Totonac.
 
 Local-first, privacy-first MCP server that gives any MCP client (Claude Desktop,
 Code, Cursor, ...) cheap, **relational** context about your files. Summarize each
@@ -29,7 +31,7 @@ client's model synthesizes over a tiny window instead of exploring the filesyste
 
 ```bash
 # 1. Install + run (one line)
-uvx mnemo-mcp
+uvx katsi-mcp
 ```
 
 That's it for the server. To actually get value, index a folder then wire the
@@ -38,8 +40,8 @@ server into your MCP client (next block).
 To index + search the indexed tree locally:
 
 ```bash
-uvx --from mnemo-cli mnemo index ~/my-folder
-uvx --from mnemo-cli mnemo ask "what is this project about?"
+uvx --from katsi-cli katsi index ~/my-folder
+uvx --from katsi-cli katsi ask "what is this project about?"
 ```
 
 ## MCP client config (Claude Desktop)
@@ -50,9 +52,9 @@ on macOS; `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 ```json
 {
   "mcpServers": {
-    "mnemo": {
+    "katsi": {
       "command": "uvx",
-      "args": ["mnemo-mcp"]
+      "args": ["katsi-mcp"]
     }
   }
 }
@@ -60,8 +62,8 @@ on macOS; `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 
 ### Other clients
 
-- **Cursor**: Settings → MCP → Add MCP → `uvx mnemo-mcp`.
-- **Generic MCP**: any client that speaks MCP stdio can launch `uvx mnemo-mcp`.
+- **Cursor**: Settings → MCP → Add MCP → `uvx katsi-mcp`.
+- **Generic MCP**: any client that speaks MCP stdio can launch `uvx katsi-mcp`.
 
 ## Provided MCP tools
 
@@ -78,12 +80,12 @@ on macOS; `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 ## CLI dogfood surface
 
 ```bash
-mnemo index ./some-folder      # recursive walk with include/exclude globs + Rich progress
-mnemo status                    # counts + last index time
-mnemo search "machine learning" # ranked files
-mnemo ask "what is this project about?"        # prints the curated context bundle
-mnemo ask "what is this about?" --mode local   # + local-model (Ollama) synthesis
-mnemo ask "compare these designs" --mode auto  # local, escalating to cloud if warranted
+katsi index ./some-folder      # recursive walk with include/exclude globs + Rich progress
+katsi status                    # counts + last index time
+katsi search "machine learning" # ranked files
+katsi ask "what is this project about?"        # prints the curated context bundle
+katsi ask "what is this about?" --mode local   # + local-model (Ollama) synthesis
+katsi ask "compare these designs" --mode auto  # local, escalating to cloud if warranted
 ```
 
 `ask` prints which mode actually ran and whether it escalated. (`--local` still
@@ -91,41 +93,41 @@ works but is deprecated in favor of `--mode local`.)
 
 ## Config
 
-A `mnemo.toml` (or `~/.mnemo/mnemo.toml`) is optional. Every field has a default.
-See `mnemo.toml.example` for the full schema. Key fields:
+A `katsi.toml` (or `~/.katsi/katsi.toml`) is optional. Every field has a default.
+See `katsi.toml.example` for the full schema. Key fields:
 
 ```toml
-[mnemo.ollama]
+[katsi.ollama]
 host = "http://localhost:11434"
 embed_model = "bge-m3"              # multilingual ES/EN/ZH
 llm_model = "qwen2.5:7b"
 
-[mnemo.ingest]
+[katsi.ingest]
 chunk_token_target = 512
 chunk_token_overlap = 64
 
-[mnemo.retrieve]
+[katsi.retrieve]
 top_k_chunks = 16
 top_k_files = 8
 default_context_max_tokens = 3000
 
-[mnemo.mcp]
+[katsi.mcp]
 enable_answer_tool = false          # server-side synthesis (answer tool), off by default
 ```
 
 ## Synthesis modes
 
-mnemo does all retrieval locally. You choose where answers are synthesized:
+katsi does all retrieval locally. You choose where answers are synthesized:
 
-- **return_only** (default) — mnemo returns the curated `ContextBundle`; your
-  MCP client's model answers. Zero cloud tokens spent by mnemo.
+- **return_only** (default) — katsi returns the curated `ContextBundle`; your
+  MCP client's model answers. Zero cloud tokens spent by katsi.
 - **local** — a local model (Ollama) writes the answer. $0, private, offline.
-- **cloud** — your own API key; mnemo sends only a tight context bundle (not
+- **cloud** — your own API key; katsi sends only a tight context bundle (not
   the whole tree). Anthropic by default, provider-pluggable.
 - **auto** — answers locally, escalating to cloud only for cross-document
   questions (file count, token estimate, or intent keywords).
 
-Set `synth.backend` in `mnemo.toml`, or override per call:
+Set `synth.backend` in `katsi.toml`, or override per call:
 
 | Surface | Override |
 |---|---|
@@ -135,22 +137,22 @@ Set `synth.backend` in `mnemo.toml`, or override per call:
 Example config:
 
 ```toml
-[mnemo.synth]
+[katsi.synth]
 backend = "auto"
 allow_per_call_override = true
 
-[mnemo.synth.local]
+[katsi.synth.local]
 model = "qwen2.5:7b"
 max_tokens = 800
 
-[mnemo.synth.cloud]
+[katsi.synth.cloud]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 api_key_env = "ANTHROPIC_API_KEY"
 enable_prompt_caching = true
 max_tokens = 1024
 
-[mnemo.synth.auto]
+[katsi.synth.auto]
 escalate_when_files_gte = 4
 escalate_when_tokens_gte = 2500
 escalate_on_intents = ["compare", "contrast", "synthesize", "across", "difference"]
@@ -162,11 +164,11 @@ The default is zero-cloud-cost. Devs opt into cloud per config or per call.
 ## Architecture
 
 ```
-mnemo/
+katsi/
 ├── packages/
-│   ├── core/mnemo_core/   models, config, store, clients, ingest, retrieve
-│   ├── mcp_server/        FastMCP tools (this package is what `mnemo-mcp` runs)
-│   └── cli/               `mnemo` CLI: index, status, search, ask
+│   ├── core/katsi_core/   models, config, store, clients, ingest, retrieve
+│   ├── mcp_server/        FastMCP tools (this package is what `katsi-mcp` runs)
+│   └── cli/               `katsi` CLI: index, status, search, ask
 └── tests/
 ```
 

@@ -1,23 +1,23 @@
 {
   "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/schema/registry.schema.json",
-  "name": "mnemo",
+  "name": "katsi",
   "description": "Local-first MCP server that gives any MCP client cheap, relational context about a user's files. Summarize-once + knowledge graph + vector store; returns a budget-capped context bundle for the client to answer over.",
-  "repository": "https://github.com/jeaneths/mnemo",
-  "publisher": "mnemo",
+  "repository": "https://github.com/jeanethS/katsi",
+  "publisher": "katsi",
   "version": "0.1.0",
-  "homepage": "https://github.com/jeaneths/mnemo",
+  "homepage": "https://github.com/jeanethS/katsi",
   "license": "MIT",
   "keywords": ["mcp", "rag", "knowledge-graph", "ollama", "local", "privacy"],
   "categories": ["local", "search", "files"],
   "author": {
-    "name": "mnemo contributors"
+    "name": "katsi contributors"
   },
-  "bin": "mnemo-mcp",
+  "bin": "katsi-mcp",
   "runtime": "python",
   "install": {
     "type": "uvx",
     "command": "uvx",
-    "args": ["mnemo-mcp"]
+    "args": ["katsi-mcp"]
   },
   "tools": [
     {"name": "get_context", "description": "Curated, budget-capped context bundle for the client to answer over."},

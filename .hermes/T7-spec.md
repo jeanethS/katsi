@@ -1,6 +1,6 @@
 # T7 — Typer CLI
 
-Extends the existing mnemo workspace. T0–T6 already done — add only the new files.
+Extends the existing katsi workspace. T0–T6 already done — add only the new files.
 
 ## TOOL RULES (read first)
 
@@ -20,7 +20,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from rich.table import Table
 from pathlib import Path
 
-app = typer.Typer(help="mnemo: relational file context", no_args_is_help=True)
+app = typer.Typer(help="katsi: relational file context", no_args_is_help=True)
 console = Console()
 
 @app.command()
@@ -43,32 +43,32 @@ supplies `__call__` on the Typer instance.
 
 ## 1. What you wire together
 
-From `mnemo_core.models`: `ContextBundle`, `FileHit`, `FileRecord`, `IndexStatus`.
-From `mnemo_core.config`: `Settings`, `get_settings`.
-From `mnemo_core.ingest.pipeline`: `IngestPipeline`.
-From `mnemo_core.ingest.records`: `FileRecordStore`.
-From `mnemo_core.clients.embed`: `EmbedClient`.
-From `mnemo_core.clients.llm`: `LLMClient`.
-From `mnemo_core.retrieve.search`: `search`.
-From `mnemo_core.retrieve.context`: `build_context`.
-From `mnemo_core.store.graph`: `GraphStore`.
-From `mnemo_core.store.vectors`: `VectorStore`.
+From `katsi_core.models`: `ContextBundle`, `FileHit`, `FileRecord`, `IndexStatus`.
+From `katsi_core.config`: `Settings`, `get_settings`.
+From `katsi_core.ingest.pipeline`: `IngestPipeline`.
+From `katsi_core.ingest.records`: `FileRecordStore`.
+From `katsi_core.clients.embed`: `EmbedClient`.
+From `katsi_core.clients.llm`: `LLMClient`.
+From `katsi_core.retrieve.search`: `search`.
+From `katsi_core.retrieve.context`: `build_context`.
+From `katsi_core.store.graph`: `GraphStore`.
+From `katsi_core.store.vectors`: `VectorStore`.
 Stdlib: `fnmatch`, `pathlib.Path`, `pathlib.PurePath.is_relative_to` (3.9+)
 
 ## 2. Files to create / update (3 files)
 
 ```
-packages/cli/mnemo_cli/main.py     (REWRITE the T0 stub)
-packages/cli/mnemo_cli/__init__.py  (replace stub; expose main)
+packages/cli/katsi_cli/main.py     (REWRITE the T0 stub)
+packages/cli/katsi_cli/__init__.py  (replace stub; expose main)
 tests/test_cli.py                   (NEW)
 ```
 
 Do NOT touch any other files (T0–T6 stay untouched).
 
-## 3. Contract: `packages/cli/mnemo_cli/main.py`
+## 3. Contract: `packages/cli/katsi_cli/main.py`
 
 ```python
-"""mnemo CLI: index, status, search, ask."""
+"""katsi CLI: index, status, search, ask."""
 from __future__ import annotations
 
 import fnmatch
@@ -82,19 +82,19 @@ from rich.progress import (BarColumn, Progress, SpinnerColumn,
                             TaskProgressColumn, TextColumn)
 from rich.table import Table
 
-from mnemo_core.clients.embed import EmbedClient
-from mnemo_core.clients.llm import LLMClient
-from mnemo_core.config import Settings, get_settings
-from mnemo_core.ingest.pipeline import IngestPipeline
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.retrieve.context import build_context
-from mnemo_core.retrieve.search import search
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.clients.embed import EmbedClient
+from katsi_core.clients.llm import LLMClient
+from katsi_core.config import Settings, get_settings
+from katsi_core.ingest.pipeline import IngestPipeline
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.retrieve.context import build_context
+from katsi_core.retrieve.search import search
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(help="mnemo: local-first relational file context.",
+app = typer.Typer(help="katsi: local-first relational file context.",
                   no_args_is_help=True)
 console = Console()
 
@@ -217,7 +217,7 @@ def status() -> None:
     except Exception as e:
         logger.warning("status: vector store count failed: %r", e)
         total_chunks = 0
-    table = Table(title="mnemo status")
+    table = Table(title="katsi status")
     table.add_column("metric")
     table.add_column("value", justify="right")
     table.add_row("total files", str(total_files))
@@ -300,19 +300,19 @@ def ask(
         console.print()
         console.print("[bold]local synthesis:[/]")
         # Reuse the server's answer path by building the same prompt.
-        from mnemo_mcp.server import answer as _answer_tool
+        from katsi_mcp.server import answer as _answer_tool
         try:
             out = _answer_tool(query)
             console.print(out)
         except PermissionError:
             console.print("[red]answer tool is disabled; "
-                          "set mnemo.mcp.enable_answer_tool=true to enable.[/]")
+                          "set katsi.mcp.enable_answer_tool=true to enable.[/]")
         except Exception as e:
             console.print(f"[red]local synthesis failed:[/] {e!r}")
 
 
 def main() -> None:
-    """Entry point: `mnemo` console script."""
+    """Entry point: `katsi` console script."""
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     app()
@@ -328,22 +328,22 @@ Key correctness points:
 - The pipeline uses lazy store construction via `_services()` — same pattern as the
   MCP server.
 
-## 4. Contract: `packages/cli/mnemo_cli/__init__.py`
+## 4. Contract: `packages/cli/katsi_cli/__init__.py`
 
 ```python
-"""mnemo CLI package."""
+"""katsi CLI package."""
 
 __version__ = "0.1.0"
 
 
 def main() -> None:
-    """Entrypoint for `mnemo` script."""
-    from mnemo_cli.main import main as _real
+    """Entrypoint for `katsi` script."""
+    from katsi_cli.main import main as _real
     _real()
 ```
 
-The deferred import is so importing mnemo_cli (e.g. for introspection) does not pull
-typer / rich eagerly; they load when `mnemo ...` is invoked.
+The deferred import is so importing katsi_cli (e.g. for introspection) does not pull
+typer / rich eagerly; they load when `katsi ...` is invoked.
 
 ## 5. Contract: `tests/test_cli.py`
 
@@ -351,7 +351,7 @@ Use Typer's CliRunner to test command dispatch; avoid hitting Ollama by injectin
 fakes via the module's `_state`.
 
 ```python
-"""Tests for the mnemo Typer CLI."""
+"""Tests for the katsi Typer CLI."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -359,12 +359,12 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from mnemo_core.clients.embed import EmbedClient
-from mnemo_core.config import Settings
-from mnemo_core.ingest.pipeline import IngestPipeline
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.clients.embed import EmbedClient
+from katsi_core.config import Settings
+from katsi_core.ingest.pipeline import IngestPipeline
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 
 class _FakeEmbed:
@@ -383,7 +383,7 @@ class _FakeLLM:
     def extract(self, text, *, attempts: int = 2):
         self.calls += 1
         import json as _json
-        from mnemo_core.models import Extraction
+        from katsi_core.models import Extraction
         return Extraction(**_json.loads(self.json_str))
     def chat(self, prompt, *, temperature: float = 0.2):
         return f"local-answer (prompt-len={len(prompt)})"
@@ -397,14 +397,14 @@ EXTRACTION_JSON = '{"summary":"doc summary","entities":[{"name":"Acme","kind":"o
 @pytest.fixture
 def cli_runner(tmp_path):
     """Return (runner, services dict) wired to tmp_path."""
-    from mnemo_cli import main as cli_main
+    from katsi_cli import main as cli_main
     # Build local stores pointing at tmp_path
     s = Settings()
-    s.store.data_dir = tmp_path / "mnemo_data"
-    vectors = VectorStore(tmp_path / "mnemo_data" / "vectors")
+    s.store.data_dir = tmp_path / "katsi_data"
+    vectors = VectorStore(tmp_path / "katsi_data" / "vectors")
     vectors.init_table(8)
-    graph = GraphStore(tmp_path / "mnemo_data" / "graph")
-    records = FileRecordStore(tmp_path / "mnemo_data" / "records")
+    graph = GraphStore(tmp_path / "katsi_data" / "graph")
+    records = FileRecordStore(tmp_path / "katsi_data" / "records")
     embed = _FakeEmbed(dim=8)
     llm = _FakeLLM(EXTRACTION_JSON)
     pipeline = IngestPipeline(s, graph=graph, vectors=vectors, embed=embed,
@@ -494,13 +494,13 @@ def test_help_lists_all_four_commands(cli_runner):
 ```
 
 Note: the last test `test_help_lists_all_four_commands` must show all four commands
-exposed via `mnemo --help`. Your `app = typer.Typer(no_args_is_help=True)` exposes
+exposed via `katsi --help`. Your `app = typer.Typer(no_args_is_help=True)` exposes
 the help on missing args.
 
 ## 6. Constraints
 
-- Do NOT add new dependencies. typer + rich are already in mnemo-cli deps.
-- Do NOT modify any T0–T6 files except the `packages/cli/mnemo_cli/__init__.py`
+- Do NOT add new dependencies. typer + rich are already in katsi-cli deps.
+- Do NOT modify any T0–T6 files except the `packages/cli/katsi_cli/__init__.py`
   stub (which only had a docstring + NotImplementedError).
 - Do NOT leave TODO comments.
 - Do NOT actually call Ollama in tests (use fakes).
@@ -512,5 +512,5 @@ the help on missing args.
 - All 3 files exist with the contracts above.
 - `uv run pytest` passes (existing ~71 + ~7 cli = ~78+).
 - `uv run ruff check .` is clean.
-- `uv run mnemo --help` lists commands: index, status, search, ask.
+- `uv run katsi --help` lists commands: index, status, search, ask.
 - Hand back a short report.

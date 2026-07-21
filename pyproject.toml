@@ -1,9 +1,9 @@
 [project]
-name = "mnemo"
+name = "katsi"
 version = "0.1.0"
 description = "Local-first MCP server for relational file context."
 requires-python = ">=3.12,<3.14"
-authors = [{ name = "mnemo contributors" }]
+authors = [{ name = "katsi contributors" }]
 license = { text = "MIT" }
 readme = "README.md"
 keywords = ["mcp", "rag", "knowledge-graph", "ollama", "local", "privacy"]
@@ -17,20 +17,23 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jeaneths/mnemo"
-Repository = "https://github.com/jeaneths/mnemo"
-Issues = "https://github.com/jeaneths/mnemo/issues"
+Homepage = "https://github.com/jeanethS/katsi"
+Repository = "https://github.com/jeanethS/katsi"
+Issues = "https://github.com/jeanethS/katsi/issues"
 
+# Explicit members, not packages/* — packages/app is a container (JS frontend +
+# future katsi_app backend), not itself a Python package. Add packages/app/katsi_app
+# here once the backend exists.
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/core", "packages/cli", "packages/mcp_server"]
 
 [tool.uv.sources]
-mnemo-core = { workspace = true }
-mnemo-mcp = { workspace = true }
-mnemo-cli = { workspace = true }
+katsi-core = { workspace = true }
+katsi-mcp = { workspace = true }
+katsi-cli = { workspace = true }
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "ruff>=0.6",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -46,7 +49,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "N"]
 ignore = ["E501"]   # let line-length be advisory; formatter enforces soft wrap
 
 [tool.ruff.lint.isort]
-known-first-party = ["mnemo_core", "mnemo_mcp", "mnemo_cli"]
+known-first-party = ["katsi_core", "katsi_mcp", "katsi_cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

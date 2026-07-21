@@ -1,4 +1,4 @@
-# mnemo — agent instructions
+# katsi — agent instructions
 
 Local-first MCP server for relational file context. Python 3.12, uv workspace.
 
@@ -18,18 +18,18 @@ Local-first MCP server for relational file context. Python 3.12, uv workspace.
 - Install: `uv sync`
 - Test: `uv run pytest`
 - Lint: `uv run ruff check . && uv run ruff format .`
-- Run MCP server: `uv run mnemo-mcp`
-- Run CLI: `uv run mnemo --help`
+- Run MCP server: `uv run katsi-mcp`
+- Run CLI: `uv run katsi --help`
 
 ## Layout
 
 ```text
-mnemo/
+katsi/
 ├── pyproject.toml              # uv workspace root
 ├── packages/
-│   ├── core/└── mnemo_core/   # models, config, store, clients, ingest, retrieve
-│   ├── mcp_server/└── mnemo_mcp/server.py
-│   └── cli/└── mnemo_cli/main.py
+│   ├── core/└── katsi_core/   # models, config, store, clients, ingest, retrieve
+│   ├── mcp_server/└── katsi_mcp/server.py
+│   └── cli/└── katsi_cli/main.py
 └── tests/
 ```
 

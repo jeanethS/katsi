@@ -1,6 +1,6 @@
 # T2 — Ollama clients (embed + llm)
 
-Extends the existing mnemo workspace. T0/T1 already done — do NOT recreate. Add only
+Extends the existing katsi workspace. T0/T1 already done — do NOT recreate. Add only
 the new files listed below.
 
 ## TOOL RULES (read first)
@@ -43,37 +43,37 @@ Tests must mock the `ollama.Client` (or its methods). Use `unittest.mock` /
 
 ## 1. Existing models you can import
 
-From `mnemo_core.models`:
+From `katsi_core.models`:
 - `Extraction(summary: str, entities: list[dict], topics: list[str], references: list[str])`
 
-From `mnemo_core.config`:
+From `katsi_core.config`:
 - `Settings().ollama.host`, `Settings().ollama.embed_model`,
   `Settings().ollama.llm_model`, `Settings().ollama.timeout`
 
 ## 2. Files to create (5 new files)
 
 ```
-packages/core/mnemo_core/clients/__init__.py
-packages/core/mnemo_core/clients/embed.py
-packages/core/mnemo_core/clients/llm.py
+packages/core/katsi_core/clients/__init__.py
+packages/core/katsi_core/clients/embed.py
+packages/core/katsi_core/clients/llm.py
 tests/test_embed.py
 tests/test_llm.py
 ```
 
-## 3. Contract: `packages/core/mnemo_core/clients/__init__.py`
+## 3. Contract: `packages/core/katsi_core/clients/__init__.py`
 
 ```python
-"""mnemo Ollama clients (embeddings + LLM)."""
+"""katsi Ollama clients (embeddings + LLM)."""
 ```
 
-## 4. Contract: `packages/core/mnemo_core/clients/embed.py`
+## 4. Contract: `packages/core/katsi_core/clients/embed.py`
 
 ```python
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mnemo_core.config import Settings
+from katsi_core.config import Settings
 
 if TYPE_CHECKING:
     import ollama
@@ -116,15 +116,15 @@ def _get_client(self):
     return self._client
 ```
 
-## 5. Contract: `packages/core/mnemo_core/clients/llm.py`
+## 5. Contract: `packages/core/katsi_core/clients/llm.py`
 
 ```python
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mnemo_core.config import Settings
-from mnemo_core.models import Extraction
+from katsi_core.config import Settings
+from katsi_core.models import Extraction
 
 if TYPE_CHECKING:
     import ollama
@@ -273,7 +273,7 @@ All tests use a FAKE ollama client. Pattern (use this):
 
 ```python
 from types import SimpleNamespace
-from mnemo_core.clients.embed import EmbedClient
+from katsi_core.clients.embed import EmbedClient
 
 
 class _FakeEmbedResp:
@@ -374,7 +374,7 @@ def test_extract_retries_once_on_bad_json():
 
 ## 8. Constraints / anti-patterns
 
-- Do NOT add new dependencies. ollama is already in mnemo-core deps.
+- Do NOT add new dependencies. ollama is already in katsi-core deps.
 - Do NOT modify models.py, config.py, store/, mcp_server/, cli/.
 - Do NOT call any external service in tests (no real Ollama).
 - Do NOT leave TODO comments.

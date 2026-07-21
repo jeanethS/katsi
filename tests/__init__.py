@@ -1,1 +1,1 @@
-"""mnemo test suite."""
+"""katsi test suite."""

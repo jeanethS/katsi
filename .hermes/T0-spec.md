@@ -1,6 +1,6 @@
-# T0 — Scaffold the mnemo uv workspace
+# T0 — Scaffold the katsi uv workspace
 
-You are working inside an EMPTY greenfield project directory `mnemo/` at the current
+You are working inside an EMPTY greenfield project directory `katsi/` at the current
 working directory. The only file present is `AGENTS.md` and this spec file (in
 `.hermes/`). Everything below must be created from scratch.
 
@@ -23,26 +23,26 @@ exit codes and a 400-char tail of each output:
 ## 1. File tree to create
 
 ```
-mnemo/                              (working dir)
+katsi/                              (working dir)
 ├── AGENTS.md                       (already exists — do not touch)
 ├── pyproject.toml                  (uv workspace root + dev tools)
-├── mnemo.toml.example              (sample config)
+├── katsi.toml.example              (sample config)
 ├── README.md                       (one-screen overview; quickstart placeholder)
 ├── .gitignore
 ├── packages/
 │   ├── core/
 │   │   ├── pyproject.toml
-│   │   └── mnemo_core/
+│   │   └── katsi_core/
 │   │       ├── __init__.py
 │   │       ├── models.py
 │   │       └── config.py
 │   ├── mcp_server/
 │   │   ├── pyproject.toml
-│   │   └── mnemo_mcp/
+│   │   └── katsi_mcp/
 │   │       └── __init__.py
 │   └── cli/
 │       ├── pyproject.toml
-│       └── mnemo_cli/
+│       └── katsi_cli/
 │           └── __init__.py
 └── tests/
     ├── __init__.py
@@ -53,10 +53,10 @@ That's 14 files. Create all of them with the exact contents in §3 below.
 
 ## 2. Dependency rule (critical)
 
-- `mnemo_core` depends on NOTHING in this repo (no mcp_server, no cli imports).
-- `mnemo_mcp` depends on `mnemo-core` workspace package.
-- `mnemo_cli` depends on `mnemo-core` workspace package.
-- `mnemo_mcp` and `mnemo_cli` do NOT depend on each other.
+- `katsi_core` depends on NOTHING in this repo (no mcp_server, no cli imports).
+- `katsi_mcp` depends on `katsi-core` workspace package.
+- `katsi_cli` depends on `katsi-core` workspace package.
+- `katsi_mcp` and `katsi_cli` do NOT depend on each other.
 - `uv` workspace members are `packages/*`.
 
 ## 3. Exact file contents
@@ -65,7 +65,7 @@ That's 14 files. Create all of them with the exact contents in §3 below.
 
 ```toml
 [project]
-name = "mnemo"
+name = "katsi"
 version = "0.1.0"
 description = "Local-first MCP server for relational file context."
 requires-python = ">=3.12,<3.14"
@@ -74,9 +74,9 @@ requires-python = ">=3.12,<3.14"
 members = ["packages/*"]
 
 [tool.uv.sources]
-mnemo-core = { workspace = true }
-mnemo-mcp = { workspace = true }
-mnemo-cli = { workspace = true }
+katsi-core = { workspace = true }
+katsi-mcp = { workspace = true }
+katsi-cli = { workspace = true }
 
 [tool.uv]
 dev-dependencies = [
@@ -95,7 +95,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "N"]
 ignore = ["E501"]   # let line-length be advisory; formatter enforces soft wrap
 
 [tool.ruff.lint.isort]
-known-first-party = ["mnemo_core", "mnemo_mcp", "mnemo_cli"]
+known-first-party = ["katsi_core", "katsi_mcp", "katsi_cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -114,9 +114,9 @@ packages = []
 
 ```toml
 [project]
-name = "mnemo-core"
+name = "katsi-core"
 version = "0.1.0"
-description = "mnemo core: models, config, stores, ingest, retrieve."
+description = "katsi core: models, config, stores, ingest, retrieve."
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "pydantic>=2.7",
@@ -135,70 +135,70 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["mnemo_core"]
+packages = ["katsi_core"]
 ```
 
 ### 3.3 `packages/mcp_server/pyproject.toml`
 
 ```toml
 [project]
-name = "mnemo-mcp"
+name = "katsi-mcp"
 version = "0.1.0"
-description = "mnemo MCP server (FastMCP)."
+description = "katsi MCP server (FastMCP)."
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "mnemo-core",
+    "katsi-core",
     "mcp>=1.0",
 ]
 
 [project.scripts]
-mnemo-mcp = "mnemo_mcp.server:main"
+katsi-mcp = "katsi_mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["mnemo_mcp"]
+packages = ["katsi_mcp"]
 ```
 
 ### 3.4 `packages/cli/pyproject.toml`
 
 ```toml
 [project]
-name = "mnemo-cli"
+name = "katsi-cli"
 version = "0.1.0"
-description = "mnemo CLI: index, status, search, ask."
+description = "katsi CLI: index, status, search, ask."
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "mnemo-core",
+    "katsi-core",
     "typer>=0.12",
     "rich>=13.7",
 ]
 
 [project.scripts]
-mnemo = "mnemo_cli.main:main"
+katsi = "katsi_cli.main:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["mnemo_cli"]
+packages = ["katsi_cli"]
 ```
 
-### 3.5 `packages/core/mnemo_core/__init__.py`
+### 3.5 `packages/core/katsi_core/__init__.py`
 
 ```python
-"""mnemo core package."""
+"""katsi core package."""
 
 __version__ = "0.1.0"
 ```
 
-### 3.6 `packages/core/mnemo_core/models.py` — EXACTLY this content
+### 3.6 `packages/core/katsi_core/models.py` — EXACTLY this content
 
 ```python
-"""mnemo data models.
+"""katsi data models.
 
 Strictly follows §5.1 of the architecture spec. Do not rename fields, do not
 add defaults beyond what is specified.
@@ -267,12 +267,12 @@ class ContextBundle(BaseModel):
     token_estimate: int
 ```
 
-### 3.7 `packages/core/mnemo_core/config.py` — EXACTLY this content
+### 3.7 `packages/core/katsi_core/config.py` — EXACTLY this content
 
 ```python
-"""mnemo configuration.
+"""katsi configuration.
 
-Loads from mnemo.toml (TOML file) with env var overrides.
+Loads from katsi.toml (TOML file) with env var overrides.
 Never hardcode model names / paths / thresholds — read from this Settings object.
 """
 
@@ -294,7 +294,7 @@ class OllamaSettings(BaseModel):
 
 
 class StoreSettings(BaseModel):
-    data_dir: Path = Path.home() / ".mnemo"
+    data_dir: Path = Path.home() / ".katsi"
     lancedb_table: str = "chunks"
     kuzu_db: str = "graph"
 
@@ -327,10 +327,10 @@ class MCPSettings(BaseModel):
 
 
 class Settings(BaseSettings):
-    """Top-level settings. Loaded from mnemo.toml if present, env-overridable."""
+    """Top-level settings. Loaded from katsi.toml if present, env-overridable."""
 
     model_config = SettingsConfigDict(
-        env_prefix="MNEMO_",
+        env_prefix="KATSI_",
         env_nested_delimiter="__",
         extra="ignore",
     )
@@ -345,20 +345,20 @@ class Settings(BaseSettings):
     def load(cls, config_path: Optional[Path] = None) -> Settings:
         """Load settings from a TOML file or default locations.
 
-        Env vars (MNEMO_*) override the file. If no path given, look for
-        mnemo.toml in CWD then ~/.mnemo/mnemo.toml.
+        Env vars (KATSI_*) override the file. If no path given, look for
+        katsi.toml in CWD then ~/.katsi/katsi.toml.
         """
         env_settings = cls()
         if config_path is None:
-            cwd_path = Path.cwd() / "mnemo.toml"
-            home_path = Path.home() / ".mnemo" / "mnemo.toml"
+            cwd_path = Path.cwd() / "katsi.toml"
+            home_path = Path.home() / ".katsi" / "katsi.toml"
             config_path = cwd_path if cwd_path.exists() else (
                 home_path if home_path.exists() else None
             )
         if config_path is None or not config_path.exists():
             return env_settings
         with open(config_path, "rb") as f:
-            data = tomllib.load(f).get("mnemo", {})
+            data = tomllib.load(f).get("katsi", {})
         if not data:
             return env_settings
         # Merge file values over env defaults (env already resolved above).
@@ -387,23 +387,23 @@ def reset_settings() -> None:
     _settings = None
 ```
 
-### 3.8 `packages/mcp_server/mnemo_mcp/__init__.py`
+### 3.8 `packages/mcp_server/katsi_mcp/__init__.py`
 
 ```python
-"""mnemo MCP server package (T0 stub — implemented in T6)."""
+"""katsi MCP server package (T0 stub — implemented in T6)."""
 
 __version__ = "0.1.0"
 
 
 def main() -> None:
-    """Entrypoint for `mnemo-mcp` script. Implemented in T6."""
-    raise NotImplementedError("mnemo-mcp server is implemented in T6")
+    """Entrypoint for `katsi-mcp` script. Implemented in T6."""
+    raise NotImplementedError("katsi-mcp server is implemented in T6")
 ```
 
-### 3.9 `packages/cli/mnemo_cli/__init__.py`
+### 3.9 `packages/cli/katsi_cli/__init__.py`
 
 ```python
-"""mnemo CLI package (T0 stub — implemented in T7)."""
+"""katsi CLI package (T0 stub — implemented in T7)."""
 
 __version__ = "0.1.0"  # noqa: F841
 ```
@@ -411,7 +411,7 @@ __version__ = "0.1.0"  # noqa: F841
 ### 3.10 `tests/__init__.py`
 
 ```python
-"""mnemo test suite."""
+"""katsi test suite."""
 ```
 
 ### 3.11 `tests/test_smoke.py`
@@ -421,8 +421,8 @@ A minimal smoke test verifying imports and basic model construction:
 ```python
 """Smoke tests for T0 scaffold: imports + model construction."""
 
-from mnemo_core.config import Settings
-from mnemo_core.models import (
+from katsi_core.config import Settings
+from katsi_core.models import (
     Chunk,
     ContextBundle,
     Extraction,
@@ -433,7 +433,7 @@ from mnemo_core.models import (
 
 
 def test_imports_core():
-    """All mnemo_core public symbols can be imported."""
+    """All katsi_core public symbols can be imported."""
     assert FileRecord is not None
     assert Chunk is not None
     assert Extraction is not None
@@ -488,31 +488,31 @@ def test_filehit_and_bundle_construction():
     assert b.files == [h]
 ```
 
-### 3.12 `mnemo.toml.example`
+### 3.12 `katsi.toml.example`
 
 ```toml
-# mnemo configuration example. Copy to mnemo.toml or ~/.mnemo/mnemo.toml.
+# katsi configuration example. Copy to katsi.toml or ~/.katsi/katsi.toml.
 # Every field below has a builtin default — only set what you want to change.
 
-[mnemo.ollama]
+[katsi.ollama]
 host = "http://localhost:11434"
 embed_model = "bge-m3"
 llm_model = "qwen2.5:7b"
 timeout = 120.0
 
-[mnemo.store]
-data_dir = "~/.mnemo"
+[katsi.store]
+data_dir = "~/.katsi"
 lancedb_table = "chunks"
 kuzu_db = "graph"
 
-[mnemo.ingest]
+[katsi.ingest]
 chunk_token_target = 512
 chunk_token_overlap = 64
 dedup_similarity_threshold = 0.92
 include_globs = ["**/*.md", "**/*.txt", "**/*.py", "**/*.ts", "**/*.pdf", "**/*.docx"]
 exclude_globs = ["**/.git/**", "**/node_modules/**", "**/.venv/**", "**/__pycache__/**"]
 
-[mnemo.retrieve]
+[katsi.retrieve]
 top_k_chunks = 16
 top_k_files = 8
 graph_expand_hops = 1
@@ -520,14 +520,14 @@ vector_weight = 0.6
 graph_weight = 0.4
 default_context_max_tokens = 3000
 
-[mnemo.mcp]
+[katsi.mcp]
 enable_answer_tool = false
 ```
 
 ### 3.13 `README.md`
 
 ```markdown
-# mnemo
+# katsi
 
 Local-first, privacy-first MCP server that gives any MCP client (Claude Desktop,
 Code, Cursor, ...) relational context about your files. Summarize-once per file
@@ -542,9 +542,9 @@ v0.1 in development. See `Foldersote-architecture-and-tasks.md` for the spec.
 
 ```bash
 uv sync
-uv run mnemo index ./some-folder
-uv run mnemo ask "what is this project about?"
-uvx mnemo-mcp    # for MCP client config once T6 lands
+uv run katsi index ./some-folder
+uv run katsi ask "what is this project about?"
+uvx katsi-mcp    # for MCP client config once T6 lands
 ```
 ```
 
@@ -560,8 +560,8 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-.mnemo/
-mnemo.toml
+.katsi/
+katsi.toml
 ```
 
 ## 4. Success criteria (do not mark complete until all pass)
@@ -571,10 +571,10 @@ mnemo.toml
 3. `uv run pytest` exits 0 (6 tests passing).
 4. `uv run ruff check .` exits 0 (no lint errors).
 5. The three packages import each other per the dependency rule:
-   - `python -c "import mnemo_core"` works
-   - `python -c "import mnemo_mcp"` works
-   - `python -c "import mnemo_cli"` works
-6. Run `uv run python -c "import mnemo_core; from mnemo_core.models import FileRecord; print('OK')"` — prints OK.
+   - `python -c "import katsi_core"` works
+   - `python -c "import katsi_mcp"` works
+   - `python -c "import katsi_cli"` works
+6. Run `uv run python -c "import katsi_core; from katsi_core.models import FileRecord; print('OK')"` — prints OK.
 
 ## 5. After writing all files
 
@@ -587,7 +587,7 @@ uv sync && uv run pytest && uv run ruff check .
 Then run:
 
 ```bash
-uv run python -c "import mnemo_core, mnemo_mcp, mnemo_cli; from mnemo_core.models import FileRecord, Chunk, Extraction, FileHit, ContextBundle, IndexStatus; from mnemo_core.config import Settings; s = Settings(); print('OK', s.ollama.embed_model, s.ollama.llm_model)"
+uv run python -c "import katsi_core, katsi_mcp, katsi_cli; from katsi_core.models import FileRecord, Chunk, Extraction, FileHit, ContextBundle, IndexStatus; from katsi_core.config import Settings; s = Settings(); print('OK', s.ollama.embed_model, s.ollama.llm_model)"
 ```
 
 Report both outputs exactly. Done.

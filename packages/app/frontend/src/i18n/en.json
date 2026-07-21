@@ -7,7 +7,7 @@
   "library.title": "Library",
   "library.addFolder": "Add folder",
   "library.emptyTitle": "Nothing indexed yet",
-  "library.emptyBody": "Add a folder and mnemo will read it once, locally. After that, questions are nearly free.",
+  "library.emptyBody": "Add a folder and katsi will read it once, locally. After that, questions are nearly free.",
   "library.index": "Index now",
   "ask.title": "Ask your archive",
   "ask.placeholder": "Ask about your files...",

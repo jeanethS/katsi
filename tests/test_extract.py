@@ -1,10 +1,10 @@
-"""Tests for mnemo_core.ingest.extract."""
+"""Tests for katsi_core.ingest.extract."""
 
 from pathlib import Path
 
 import pytest
 
-from mnemo_core.ingest.extract import _get_markitdown, extract_text
+from katsi_core.ingest.extract import _get_markitdown, extract_text
 
 
 def test_extract_markdown_file(tmp_path: Path) -> None:

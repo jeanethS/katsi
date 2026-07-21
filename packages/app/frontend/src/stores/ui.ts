@@ -10,8 +10,8 @@ interface UiState {
   setTheme: (theme: Theme) => void;
 }
 
-const storedLanguage = localStorage.getItem("mnemo-language");
-const storedTheme = localStorage.getItem("mnemo-theme");
+const storedLanguage = localStorage.getItem("katsi-language");
+const storedTheme = localStorage.getItem("katsi-theme");
 
 export const useUiStore = create<UiState>((set) => ({
   language:
@@ -20,11 +20,11 @@ export const useUiStore = create<UiState>((set) => ({
       : "en",
   theme: storedTheme === "light" ? "light" : "dark",
   setLanguage: (language) => {
-    localStorage.setItem("mnemo-language", language);
+    localStorage.setItem("katsi-language", language);
     set({ language });
   },
   setTheme: (theme) => {
-    localStorage.setItem("mnemo-theme", theme);
+    localStorage.setItem("katsi-theme", theme);
     set({ theme });
   },
 }));

@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from mnemo_core.clients.llm import ExtractionError, LLMClient
-from mnemo_core.models import Extraction
+from katsi_core.clients.llm import ExtractionError, LLMClient
+from katsi_core.models import Extraction
 
 
 class _FakeChatResp:

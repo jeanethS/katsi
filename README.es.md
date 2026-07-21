@@ -1,4 +1,6 @@
-# mnemo
+# katsi
+
+> La palabra *katsi* significa "saber" o "entender" en totonaco.
 
 Servidor MCP local-first y orientado a la privacidad que brinda a cualquier
 cliente MCP (Claude Desktop, Code, Cursor, ...) contexto **relacional** y
@@ -36,7 +38,7 @@ en lugar de explorar el sistema de archivos.
 
 ```bash
 # 1. Instalar y ejecutar (una línea)
-uvx mnemo-mcp
+uvx katsi-mcp
 ```
 
 Eso es todo para el servidor. Para obtener valor real, indexa una carpeta y
@@ -45,8 +47,8 @@ conecta el servidor a tu cliente MCP (siguiente bloque).
 Para indexar y buscar en el árbol indexado localmente:
 
 ```bash
-uvx --from mnemo-cli mnemo index ~/mi-carpeta
-uvx --from mnemo-cli mnemo ask "¿de qué trata este proyecto?"
+uvx --from katsi-cli katsi index ~/mi-carpeta
+uvx --from katsi-cli katsi ask "¿de qué trata este proyecto?"
 ```
 
 ## Configuración del cliente MCP (Claude Desktop)
@@ -58,9 +60,9 @@ Agrega a la configuración de Claude Desktop
 ```json
 {
   "mcpServers": {
-    "mnemo": {
+    "katsi": {
       "command": "uvx",
-      "args": ["mnemo-mcp"]
+      "args": ["katsi-mcp"]
     }
   }
 }
@@ -68,9 +70,9 @@ Agrega a la configuración de Claude Desktop
 
 ### Otros clientes
 
-- **Cursor**: Settings → MCP → Add MCP → `uvx mnemo-mcp`.
+- **Cursor**: Settings → MCP → Add MCP → `uvx katsi-mcp`.
 - **MCP genérico**: cualquier cliente que hable MCP stdio puede ejecutar
-  `uvx mnemo-mcp`.
+  `uvx katsi-mcp`.
 
 ## Herramientas MCP proporcionadas
 
@@ -87,12 +89,12 @@ Agrega a la configuración de Claude Desktop
 ## Superficie CLI
 
 ```bash
-mnemo index ./una-carpeta        # recorrido recursivo con globos include/exclude + progreso Rich
-mnemo status                      # conteos + última indexación
-mnemo search "aprendizaje automático"  # archivos clasificados
-mnemo ask "¿de qué trata este proyecto?"        # imprime el paquete de contexto curado
-mnemo ask "¿de qué trata esto?" --mode local    # + síntesis con modelo local (Ollama)
-mnemo ask "compara estos diseños" --mode auto   # local, escalando a la nube si lo amerita
+katsi index ./una-carpeta        # recorrido recursivo con globos include/exclude + progreso Rich
+katsi status                      # conteos + última indexación
+katsi search "aprendizaje automático"  # archivos clasificados
+katsi ask "¿de qué trata este proyecto?"        # imprime el paquete de contexto curado
+katsi ask "¿de qué trata esto?" --mode local    # + síntesis con modelo local (Ollama)
+katsi ask "compara estos diseños" --mode auto   # local, escalando a la nube si lo amerita
 ```
 
 `ask` imprime qué modo se ejecutó realmente y si escaló. (`--local` sigue
@@ -100,39 +102,39 @@ funcionando pero está obsoleto en favor de `--mode local`.)
 
 ## Configuración
 
-Un archivo `mnemo.toml` (o `~/.mnemo/mnemo.toml`) es opcional. Todos los campos
-tienen valores predeterminados. Consulta `mnemo.toml.example` para el esquema
+Un archivo `katsi.toml` (o `~/.katsi/katsi.toml`) es opcional. Todos los campos
+tienen valores predeterminados. Consulta `katsi.toml.example` para el esquema
 completo. Campos clave:
 
 ```toml
-[mnemo.ollama]
+[katsi.ollama]
 host = "http://localhost:11434"
 embed_model = "bge-m3"              # multilingüe ES/EN/ZH
 llm_model = "qwen2.5:7b"
 
-[mnemo.ingest]
+[katsi.ingest]
 chunk_token_target = 512
 chunk_token_overlap = 64
 
-[mnemo.retrieve]
+[katsi.retrieve]
 top_k_chunks = 16
 top_k_files = 8
 default_context_max_tokens = 3000
 
-[mnemo.mcp]
+[katsi.mcp]
 enable_answer_tool = false          # síntesis del lado del servidor (herramienta answer), desactivado por defecto
 ```
 
 ## Modos de síntesis
 
-mnemo realiza toda la recuperación localmente. Tú eliges dónde se sintetizan las respuestas:
+katsi realiza toda la recuperación localmente. Tú eliges dónde se sintetizan las respuestas:
 
-- **return_only** (predeterminado) — mnemo devuelve el `ContextBundle` curado; el modelo de tu cliente MCP responde. Cero gasto en la nube por parte de mnemo.
+- **return_only** (predeterminado) — katsi devuelve el `ContextBundle` curado; el modelo de tu cliente MCP responde. Cero gasto en la nube por parte de katsi.
 - **local** — un modelo local (Ollama) escribe la respuesta. $0, privado, sin conexión.
-- **cloud** — tu propia clave API; mnemo envía solo un paquete de contexto ajustado (no todo el árbol). Anthropic por defecto, proveedor conectable.
+- **cloud** — tu propia clave API; katsi envía solo un paquete de contexto ajustado (no todo el árbol). Anthropic por defecto, proveedor conectable.
 - **auto** — responde localmente, escalando a la nube solo para preguntas entre documentos (cantidad de archivos, estimación de tokens o palabras clave de intención).
 
-Configura `synth.backend` en `mnemo.toml`, o sobrescribe por llamada:
+Configura `synth.backend` en `katsi.toml`, o sobrescribe por llamada:
 
 | Superficie | Sobrescritura |
 |---|---|
@@ -142,22 +144,22 @@ Configura `synth.backend` en `mnemo.toml`, o sobrescribe por llamada:
 Ejemplo de configuración:
 
 ```toml
-[mnemo.synth]
+[katsi.synth]
 backend = "auto"
 allow_per_call_override = true
 
-[mnemo.synth.local]
+[katsi.synth.local]
 model = "qwen2.5:7b"
 max_tokens = 800
 
-[mnemo.synth.cloud]
+[katsi.synth.cloud]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 api_key_env = "ANTHROPIC_API_KEY"
 enable_prompt_caching = true
 max_tokens = 1024
 
-[mnemo.synth.auto]
+[katsi.synth.auto]
 escalate_when_files_gte = 4
 escalate_when_tokens_gte = 2500
 escalate_on_intents = ["compare", "contrast", "synthesize", "across", "difference"]
@@ -169,11 +171,11 @@ El valor predeterminado es sin costo de nube. Los desarrolladores optan por la n
 ## Arquitectura
 
 ```
-mnemo/
+katsi/
 ├── packages/
-│   ├── core/mnemo_core/   modelos, configuración, almacenes, clientes, ingesta, recuperación
-│   ├── mcp_server/        herramientas FastMCP (este paquete es lo que ejecuta `mnemo-mcp`)
-│   └── cli/               CLI `mnemo`: index, status, search, ask
+│   ├── core/katsi_core/   modelos, configuración, almacenes, clientes, ingesta, recuperación
+│   ├── mcp_server/        herramientas FastMCP (este paquete es lo que ejecuta `katsi-mcp`)
+│   └── cli/               CLI `katsi`: index, status, search, ask
 └── tests/
 ```
 

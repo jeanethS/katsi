@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from mnemo_core.models import FileRecord, IndexStatus
-from mnemo_core.store.graph import GraphStore
+from katsi_core.models import FileRecord, IndexStatus
+from katsi_core.store.graph import GraphStore
 
 
 def test_schema_init_idempotent(tmp_path):
@@ -127,3 +127,59 @@ def test_neighbors_hops_other_than_1_raises(tmp_path):
     import pytest
     with pytest.raises(NotImplementedError):
         gs.neighbors("f1", hops=2)
+
+
+def _pair(gs, w1=1.0, w2=1.0):
+    """Two files, both mentioning 'Acme' at the given edge weights."""
+    f1 = FileRecord(id="f1", path="/a.md", name="a.md", ext=".md", mime="",
+                    size_bytes=0, mtime=1.0, content_hash="", summary=None)
+    f2 = FileRecord(id="f2", path="/b.md", name="b.md", ext=".md", mime="",
+                    size_bytes=0, mtime=2.0, content_hash="", summary=None)
+    gs.upsert_file(f1)
+    gs.upsert_file(f2)
+    gs.add_mentions("f1", [{"name": "Acme", "kind": "org"}], weight=w1)
+    gs.add_mentions("f2", [{"name": "Acme", "kind": "org"}], weight=w2)
+
+
+def test_neighbors_rows_carry_weight_and_hops(tmp_path):
+    gs = GraphStore(tmp_path / "graph")
+    _pair(gs, w1=0.8, w2=0.6)
+
+    row = [n for n in gs.neighbors("f1") if n["file_id"] == "f2"][0]
+    assert "weight" in row
+    assert "hops" in row
+    assert row["hops"] == 1
+    # Connector strength is bounded by the weaker of the two edges.
+    assert row["weight"] == 0.6
+
+
+def test_neighbors_min_weight_filters_weak_edges(tmp_path):
+    gs = GraphStore(tmp_path / "graph")
+    _pair(gs, w1=0.2, w2=0.2)
+
+    assert [n for n in gs.neighbors("f1") if n["file_id"] == "f2"]  # ungated: present
+    gated = [n for n in gs.neighbors("f1", min_weight=0.35) if n["file_id"] == "f2"]
+    assert gated == []  # below gate: filtered
+
+
+def test_neighbors_min_weight_keeps_strong_edges(tmp_path):
+    gs = GraphStore(tmp_path / "graph")
+    _pair(gs, w1=0.9, w2=0.9)
+
+    kept = [n for n in gs.neighbors("f1", min_weight=0.35) if n["file_id"] == "f2"]
+    assert len(kept) == 1
+
+
+def test_neighbors_min_weight_does_not_gate_references(tmp_path):
+    gs = GraphStore(tmp_path / "graph")
+    f1 = FileRecord(id="f1", path="/a.md", name="a.md", ext=".md", mime="",
+                    size_bytes=0, mtime=1.0, content_hash="", summary=None)
+    f2 = FileRecord(id="f2", path="/b.md", name="b.md", ext=".md", mime="",
+                    size_bytes=0, mtime=2.0, content_hash="", summary=None)
+    gs.upsert_file(f1)
+    gs.upsert_file(f2)
+    gs.add_reference("f1", "f2")
+
+    # Structural edges are explicit, not gated by min_weight.
+    refs = [n for n in gs.neighbors("f1", min_weight=0.99) if n["via"] == "references"]
+    assert len(refs) == 1

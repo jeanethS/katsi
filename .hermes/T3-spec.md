@@ -1,6 +1,6 @@
 # T3 — Extract + chunk
 
-Extends the existing mnemo workspace. T0/T1/T2 already done — add only the new files.
+Extends the existing katsi workspace. T0/T1/T2 already done — add only the new files.
 
 ## TOOL RULES (read first)
 
@@ -34,27 +34,27 @@ Each Chunk's `token_count` field uses this estimate.
 
 ## 2. Existing models you can import
 
-From `mnemo_core.models`:
+From `katsi_core.models`:
 - `Chunk(id: str, file_id: str, ordinal: int, text: str, token_count: int)`
 - `FileRecord(...)` is not used in T3.
 
 ## 3. Files to create (5 new files)
 
 ```
-packages/core/mnemo_core/ingest/__init__.py
-packages/core/mnemo_core/ingest/extract.py
-packages/core/mnemo_core/ingest/chunk.py
+packages/core/katsi_core/ingest/__init__.py
+packages/core/katsi_core/ingest/extract.py
+packages/core/katsi_core/ingest/chunk.py
 tests/test_extract.py
 tests/test_chunk.py
 ```
 
-## 4. Contract: `packages/core/mnemo_core/ingest/__init__.py`
+## 4. Contract: `packages/core/katsi_core/ingest/__init__.py`
 
 ```python
-"""mnemo ingest pipeline."""
+"""katsi ingest pipeline."""
 ```
 
-## 5. Contract: `packages/core/mnemo_core/ingest/extract.py`
+## 5. Contract: `packages/core/katsi_core/ingest/extract.py`
 
 ```python
 from __future__ import annotations
@@ -121,12 +121,12 @@ Notes:
   as `BLE001`. Use `except Exception` as written; ruff should pass.
 - Callers will treat `""` as "skip this file" upstream.
 
-## 6. Contract: `packages/core/mnemo_core/ingest/chunk.py`
+## 6. Contract: `packages/core/katsi_core/ingest/chunk.py`
 
 ```python
 from __future__ import annotations
 
-from mnemo_core.models import Chunk
+from katsi_core.models import Chunk
 
 
 def estimate_tokens(text: str) -> int:
@@ -165,7 +165,7 @@ Implementation reference (use this):
 ```python
 from __future__ import annotations
 
-from mnemo_core.models import Chunk
+from katsi_core.models import Chunk
 
 
 def estimate_tokens(text: str) -> int:
@@ -259,7 +259,7 @@ Coverage (minimum 6 tests):
 
 ## 9. Constraints
 
-- Do NOT add new dependencies. markitdown is already in mnemo-core deps.
+- Do NOT add new dependencies. markitdown is already in katsi-core deps.
 - Do NOT modify models.py, config.py, store/, clients/, mcp_server/, cli/.
 - Do NOT leave TODO comments.
 - Do NOT try to install optional converter dependencies (e.g. pdfminer) — rely

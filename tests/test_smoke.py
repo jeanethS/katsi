@@ -1,7 +1,7 @@
 """Smoke tests for T0 scaffold: imports + model construction."""
 
-from mnemo_core.config import Settings
-from mnemo_core.models import (
+from katsi_core.config import Settings
+from katsi_core.models import (
     Chunk,
     ContextBundle,
     Extraction,
@@ -12,7 +12,7 @@ from mnemo_core.models import (
 
 
 def test_imports_core():
-    """All mnemo_core public symbols can be imported."""
+    """All katsi_core public symbols can be imported."""
     assert FileRecord is not None
     assert Chunk is not None
     assert Extraction is not None

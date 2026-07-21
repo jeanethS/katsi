@@ -1,14 +1,14 @@
-"""Tests for the mnemo Typer CLI."""
+"""Tests for the katsi Typer CLI."""
 
 from __future__ import annotations
 
 import pytest
 
-from mnemo_core.config import Settings
-from mnemo_core.ingest.pipeline import IngestPipeline
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.config import Settings
+from katsi_core.ingest.pipeline import IngestPipeline
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 
 class _FakeEmbed:
@@ -30,7 +30,7 @@ class _FakeLLM:
         import json as _json
 
         self.calls += 1
-        from mnemo_core.models import Extraction  # noqa: PLC0415
+        from katsi_core.models import Extraction  # noqa: PLC0415
 
         return Extraction(**_json.loads(self.json_str))
 
@@ -47,15 +47,15 @@ EXTRACTION_JSON = '{"summary":"doc summary","entities":[{"name":"Acme","kind":"o
 @pytest.fixture
 def cli_runner(tmp_path):
     """Return (runner, services dict) wired to tmp_path."""
-    import mnemo_cli.main as cli_main
+    import katsi_cli.main as cli_main
 
     # Build local stores pointing at tmp_path
     s = Settings()
-    s.store.data_dir = tmp_path / "mnemo_data"
-    vectors = VectorStore(tmp_path / "mnemo_data" / "vectors")
+    s.store.data_dir = tmp_path / "katsi_data"
+    vectors = VectorStore(tmp_path / "katsi_data" / "vectors")
     vectors.init_table(8)
-    graph = GraphStore(tmp_path / "mnemo_data" / "graph")
-    records = FileRecordStore(tmp_path / "mnemo_data" / "records")
+    graph = GraphStore(tmp_path / "katsi_data" / "graph")
+    records = FileRecordStore(tmp_path / "katsi_data" / "records")
     embed = _FakeEmbed(dim=8)
     llm = _FakeLLM(EXTRACTION_JSON)
     pipeline = IngestPipeline(

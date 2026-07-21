@@ -1,6 +1,6 @@
-"""Tests for mnemo_core.ingest.chunk."""
+"""Tests for katsi_core.ingest.chunk."""
 
-from mnemo_core.ingest.chunk import chunk, estimate_tokens
+from katsi_core.ingest.chunk import chunk, estimate_tokens
 
 
 def test_chunk_empty_returns_empty_list() -> None:

@@ -7,9 +7,8 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-.mnemo/
-mnemo.toml
+.katsi/
+katsi.toml
 .hermes/
 packages/app/frontend/node_modules/
 packages/app/frontend/.vite/
-packages/app/mnemo_app/static/

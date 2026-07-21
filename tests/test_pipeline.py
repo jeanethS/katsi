@@ -1,4 +1,4 @@
-"""Tests for mnemo_core.ingest.pipeline.
+"""Tests for katsi_core.ingest.pipeline.
 
 Critical test: test_second_call_skips_when_unchanged (the saver).
 No network calls. Uses fake embed/llm clients that count calls.
@@ -12,12 +12,12 @@ from types import SimpleNamespace
 
 import blake3
 
-from mnemo_core.clients.llm import ExtractionError
-from mnemo_core.ingest.pipeline import IngestPipeline
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.models import Extraction, IndexStatus
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.clients.llm import ExtractionError
+from katsi_core.ingest.pipeline import IngestPipeline
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.models import Extraction, IndexStatus
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 
 class _FakeEmbed:

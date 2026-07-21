@@ -1,6 +1,6 @@
 # T4 — Ingest pipeline (the saver path)
 
-Extends the existing mnemo workspace. T0/T1/T2/T3 already done — add only the new files.
+Extends the existing katsi workspace. T0/T1/T2/T3 already done — add only the new files.
 
 ## TOOL RULES (read first)
 
@@ -20,16 +20,16 @@ Keep it simple — no extra deps.
 
 ## 1. Existing pieces you wire together
 
-From `mnemo_core.models`: `FileRecord`, `Chunk`, `Extraction`, `IndexStatus`.
-From `mnemo_core.config`: `Settings`.
-From `mnemo_core.store.graph`: `GraphStore`.
-From `mnemo_core.store.vectors`: `VectorStore`.
-From `mnemo_core.clients.embed`: `EmbedClient`.
-From `mnemo_core.clients.llm`: `LLMClient`, `ExtractionError`.
-From `mnemo_core.ingest.extract`: `extract_text`.
-From `mnemo_core.ingest.chunk`: `chunk`.
+From `katsi_core.models`: `FileRecord`, `Chunk`, `Extraction`, `IndexStatus`.
+From `katsi_core.config`: `Settings`.
+From `katsi_core.store.graph`: `GraphStore`.
+From `katsi_core.store.vectors`: `VectorStore`.
+From `katsi_core.clients.embed`: `EmbedClient`.
+From `katsi_core.clients.llm`: `LLMClient`, `ExtractionError`.
+From `katsi_core.ingest.extract`: `extract_text`.
+From `katsi_core.ingest.chunk`: `chunk`.
 
-blake3 is in mnemo-core deps:
+blake3 is in katsi-core deps:
 ```python
 import blake3
 h = blake3.blake3(some_bytes)
@@ -41,16 +41,16 @@ mimetypes from stdlib for mime type guess.
 ## 2. Files to create (5 new files)
 
 ```
-packages/core/mnemo_core/ingest/records.py
-packages/core/mnemo_core/ingest/enrich.py
-packages/core/mnemo_core/ingest/pipeline.py
+packages/core/katsi_core/ingest/records.py
+packages/core/katsi_core/ingest/enrich.py
+packages/core/katsi_core/ingest/pipeline.py
 tests/test_enrich.py
 tests/test_pipeline.py
 ```
 
 Do NOT modify the existing `ingest/__init__.py`, `extract.py`, or `chunk.py`.
 
-## 3. Contract: `packages/core/mnemo_core/ingest/records.py`
+## 3. Contract: `packages/core/katsi_core/ingest/records.py`
 
 A tiny JSON-backed FileRecord store. Atomic-ish writes (write to .tmp + os.replace).
 
@@ -62,7 +62,7 @@ import logging
 import os
 from pathlib import Path
 
-from mnemo_core.models import FileRecord
+from katsi_core.models import FileRecord
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ class FileRecordStore:
         return out
 ```
 
-## 4. Contract: `packages/core/mnemo_core/ingest/enrich.py`
+## 4. Contract: `packages/core/katsi_core/ingest/enrich.py`
 
 Maps an `Extraction` JSON-LLM result to graph writes.
 
@@ -143,9 +143,9 @@ from __future__ import annotations
 
 import logging
 
-from mnemo_core.models import FileRecord
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.models import Extraction  # noqa: F401  (used in type hint below)
+from katsi_core.models import FileRecord
+from katsi_core.store.graph import GraphStore
+from katsi_core.models import Extraction  # noqa: F401  (used in type hint below)
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +236,7 @@ def apply_extraction(file_record, extraction, graph):
                                  file_record.id, target_id, e)
 ```
 
-## 5. Contract: `packages/core/mnemo_core/ingest/pipeline.py`
+## 5. Contract: `packages/core/katsi_core/ingest/pipeline.py`
 
 ```python
 from __future__ import annotations
@@ -248,16 +248,16 @@ from pathlib import Path
 
 import blake3
 
-from mnemo_core.clients.embed import EmbedClient
-from mnemo_core.clients.llm import ExtractionError, LLMClient
-from mnemo_core.config import Settings
-from mnemo_core.ingest.chunk import chunk
-from mnemo_core.ingest.enrich import apply_extraction
-from mnemo_core.ingest.extract import extract_text
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.models import FileRecord, IndexStatus
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.clients.embed import EmbedClient
+from katsi_core.clients.llm import ExtractionError, LLMClient
+from katsi_core.config import Settings
+from katsi_core.ingest.chunk import chunk
+from katsi_core.ingest.enrich import apply_extraction
+from katsi_core.ingest.extract import extract_text
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.models import FileRecord, IndexStatus
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -468,11 +468,11 @@ Use Fake embed/llm clients that count calls:
 
 ```python
 from types import SimpleNamespace
-from mnemo_core.ingest.pipeline import IngestPipeline
-from mnemo_core.ingest.records import FileRecordStore
-from mnemo_core.models import Extraction, IndexStatus
-from mnemo_core.store.graph import GraphStore
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.ingest.pipeline import IngestPipeline
+from katsi_core.ingest.records import FileRecordStore
+from katsi_core.models import Extraction, IndexStatus
+from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 
 class _FakeEmbed:
@@ -547,13 +547,13 @@ class _FakeLLMError:
         self.extract_call_count = 0
     def extract(self, text, *, attempts=2):
         self.extract_call_count += 1
-        from mnemo_core.clients.llm import ExtractionError
+        from katsi_core.clients.llm import ExtractionError
         raise ExtractionError("fake failure")
 ```
 
 Note about settings: to prevent IngestPipeline() from constructing a Settings
-that requires ~/.mnemo or hits network, explicitly pass `settings=None` will try
-Settings() which reads TOML/env — that may pick up `.mnemo.toml` in cwd if any
+that requires ~/.katsi or hits network, explicitly pass `settings=None` will try
+Settings() which reads TOML/env — that may pick up `.katsi.toml` in cwd if any
 exists; in tests with tmp_path cwd there is no such file, so the defaults are
 used and GraphStore/VectorStore/FileRecordStore get tmp_path-rooted dirs. Pass
 explicit graph/vectors/records via the constructor so settings is irrelevant for

@@ -1,4 +1,4 @@
-"""Tests for mnemo_core.ingest.enrich.
+"""Tests for katsi_core.ingest.enrich.
 
 No network calls. Uses real GraphStore with tmp_path.
 """
@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mnemo_core.ingest.enrich import apply_extraction
-from mnemo_core.models import Extraction, FileRecord, IndexStatus
-from mnemo_core.store.graph import GraphStore
+from katsi_core.ingest.enrich import apply_extraction
+from katsi_core.models import Extraction, FileRecord, IndexStatus
+from katsi_core.store.graph import GraphStore
 
 
 def _make_record(

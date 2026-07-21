@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from mnemo_core.models import Chunk
-from mnemo_core.store.vectors import VectorStore
+from katsi_core.models import Chunk
+from katsi_core.store.vectors import VectorStore
 
 
 def test_init_creates_table(tmp_path):

@@ -4,9 +4,9 @@ import os
 
 import pytest
 
-from mnemo_core.config import Settings
-from mnemo_core.models import Chunk, ContextBundle, FileHit
-from mnemo_core.synth import (
+from katsi_core.config import Settings
+from katsi_core.models import Chunk, ContextBundle, FileHit
+from katsi_core.synth import (
     AutoSynthesizer,
     CloudSynthesizer,
     LocalSynthesizer,
