@@ -22,15 +22,15 @@ Repository = "https://github.com/jeanethS/katsi"
 Issues = "https://github.com/jeanethS/katsi/issues"
 
 # Explicit members, not packages/* — packages/app is a container (JS frontend +
-# future katsi_app backend), not itself a Python package. Add packages/app/katsi_app
-# here once the backend exists.
+# katsi_app backend), not itself a Python package.
 [tool.uv.workspace]
-members = ["packages/core", "packages/cli", "packages/mcp_server"]
+members = ["packages/core", "packages/cli", "packages/mcp_server", "packages/app/katsi_app"]
 
 [tool.uv.sources]
 katsi-core = { workspace = true }
 katsi-mcp = { workspace = true }
 katsi-cli = { workspace = true }
+katsi-app = { workspace = true }
 
 [dependency-groups]
 dev = [

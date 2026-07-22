@@ -11,6 +11,7 @@ resolution-markers = [
 [manifest]
 members = [
     "katsi",
+    "katsi-app",
     "katsi-cli",
     "katsi-core",
     "katsi-mcp",
@@ -405,6 +406,23 @@ dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "ruff", specifier = ">=0.6" },
+]
+
+[[package]]
+name = "katsi-app"
+version = "0.1.0"
+source = { editable = "packages/app/katsi_app" }
+dependencies = [
+    { name = "katsi-core" },
+    { name = "starlette" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "katsi-core", editable = "packages/core" },
+    { name = "starlette", specifier = ">=0.40" },
+    { name = "uvicorn", specifier = ">=0.30" },
 ]
 
 [[package]]

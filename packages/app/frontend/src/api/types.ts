@@ -14,7 +14,7 @@ export interface Status {
   ollama: { reachable: boolean; models: string[] };
   counts: { files: number; chunks: number; entities: number; topics: number };
   db_bytes: { vectors: number; graph: number };
-  synth: { backend: SynthesisMode; cloud_configured: boolean };
+  synth: { backend: SynthesisMode | "return_only"; cloud_configured: boolean };
 }
 
 export interface Source {

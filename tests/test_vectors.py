@@ -15,6 +15,19 @@ def test_init_creates_table(tmp_path):
     assert vs.count() == 0
 
 
+def test_count_opens_existing_table(tmp_path):
+    first = VectorStore(tmp_path / "vectors", "test_chunks")
+    first.init_table(embed_dim=4)
+    first.upsert_chunks(
+        [Chunk(id="c1", file_id="f1", ordinal=0, text="hello", token_count=1)],
+        [[1.0, 0.0, 0.0, 0.0]],
+    )
+
+    reopened = VectorStore(tmp_path / "vectors", "test_chunks")
+
+    assert reopened.count() == 1
+
+
 def test_upsert_and_search(tmp_path):
     vs = VectorStore(tmp_path / "vectors", "test_chunks")
     vs.init_table(embed_dim=4)

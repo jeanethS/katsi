@@ -33,7 +33,7 @@ class VectorStore:
             ("vector", pa.list_(pa.float32(), embed_dim)),
             ("token_count", pa.int32()),
         ])
-        if self._table_name not in self._db.list_tables():
+        if self._table_name not in self._db.list_tables().tables:
             self._tbl = self._db.create_table(
                 self._table_name, schema=schema, mode="overwrite"
             )
@@ -86,6 +86,10 @@ class VectorStore:
 
     def count(self) -> int:
         """Number of rows in the chunks table."""
+        if self._tbl is None:
+            if self._table_name not in self._db.list_tables().tables:
+                return 0
+            self._tbl = self._db.open_table(self._table_name)
         return self._tbl.count_rows()
 
     def close(self) -> None:

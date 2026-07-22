@@ -39,6 +39,14 @@ def test_get_missing_file_returns_none(tmp_path):
     assert gs.get_file("nope") is None
 
 
+def test_count_nodes(tmp_path):
+    gs = GraphStore(tmp_path / "graph")
+    gs.upsert_entity("Acme", "organization")
+    gs.upsert_topic("AI")
+
+    assert gs.count_nodes() == {"entities": 1, "topics": 1}
+
+
 def test_mentions_and_peers(tmp_path):
     gs = GraphStore(tmp_path / "graph")
     f1 = FileRecord(id="f1", path="/a.md", name="a.md", ext=".md", mime="",

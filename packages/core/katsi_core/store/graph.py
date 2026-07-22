@@ -275,3 +275,15 @@ class GraphStore:
             "MATCH (f:File {id: $id}) DETACH DELETE f",
             {"id": file_id},
         )
+
+    def count_nodes(self) -> dict[str, int]:
+        """Return entity and topic counts for status surfaces."""
+        counts: dict[str, int] = {}
+        for label, key in (("Entity", "entities"), ("Topic", "topics")):
+            result = self._conn.execute(f"MATCH (n:{label}) RETURN count(n)")
+            counts[key] = int(_unwrap(result.get_next()[0]))
+        return counts
+
+    def close(self) -> None:
+        self._conn.close()
+        self._db.close()
