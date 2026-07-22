@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { BookOpen, ChatCircleText, Cloud, Gear, Moon, Sun } from "@phosphor-icons/react";
 import { Button, Card, ProgressBar, SourceChip } from "./components/primitives";
+import { request } from "./api/client";
+import type { Status as ApiStatus } from "./api/types";
 import { useT } from "./i18n/useT";
 import { useUiStore } from "./stores/ui";
 
@@ -150,23 +152,34 @@ function Ask({ t }: { t: ReturnType<typeof useT> }) {
 }
 
 function Status({ t }: { t: ReturnType<typeof useT> }) {
-  const [saved, setSaved] = useState(false);
+  const [status, setStatus] = useState<ApiStatus | null>(null);
+  const [error, setError] = useState(false);
+  const [reload, setReload] = useState(0);
   const { language, setLanguage, theme, setTheme } = useUiStore();
+  useEffect(() => {
+    const controller = new AbortController();
+    setError(false);
+    request<ApiStatus>("/api/status", { signal: controller.signal })
+      .then(setStatus)
+      .catch((cause: unknown) => {
+        if ((cause as Error).name !== "AbortError") setError(true);
+      });
+    return () => controller.abort();
+  }, [reload]);
   return (
     <section className="screen stack">
       <h1 className="display screen-title">{t("status.title")}</h1>
-      <Card><h2 className="display section-heading">{t("status.engine")}</h2><div className="status-grid"><p><span className="status-dot" />{t("status.reachable")}</p><p className="engine-data">bge-m3 / qwen2.5:7b</p><p className="engine-data">1,204 files / 18,344 chunks / 512 entities / 88 topics</p></div></Card>
-      <Card>
-        <h2 className="display section-heading">{t("status.synthesis")}</h2>
-        <div className="settings-row"><label htmlFor="model">{t("status.models")}</label><input defaultValue="qwen2.5:7b" id="model" /></div>
-        <div className="utility-row"><Button onClick={() => setSaved(true)}>{t("status.save")}</Button></div>
-      </Card>
+      {!status && !error && <Card><p>{t("status.loading")}</p></Card>}
+      {error && <Card><div role="alert"><h2 className="display section-heading">{t("status.apiError")}</h2><Button onClick={() => setReload((value) => value + 1)}>{t("status.retry")}</Button></div></Card>}
+      {status && <>
+        <Card><h2 className="display section-heading">{t("status.engine")}</h2><div className="status-grid"><p><span className={`status-dot ${status.ollama.reachable ? "" : "is-error"}`} />{status.ollama.reachable ? t("status.reachable") : t("error.title")}</p><p className="engine-data">{status.ollama.models.join(" / ") || t("status.noModels")}</p><p className="engine-data">{status.counts.files} {t("status.files")} / {status.counts.chunks} {t("status.chunks")} / {status.counts.entities} {t("status.entities")} / {status.counts.topics} {t("status.topics")}</p><p className="engine-data">{status.db_bytes.vectors} B {t("status.vectors")} / {status.db_bytes.graph} B {t("status.graph")}</p></div></Card>
+        <Card><h2 className="display section-heading">{t("status.synthesis")}</h2><p className="engine-data">{status.synth.backend} / {status.synth.cloud_configured ? t("privacy.cloud") : t("status.cloudUnavailable")}</p></Card>
+      </>}
       <Card>
         <h2 className="display section-heading">{t("status.about")}</h2>
         <div className="settings-row"><label>{t("status.language")}</label><div className="segmented"><button className={`segment ${language === "en" ? "is-auto" : ""}`} onClick={() => setLanguage("en")} type="button">EN</button><button className={`segment ${language === "es" ? "is-auto" : ""}`} onClick={() => setLanguage("es")} type="button">ES</button></div></div>
         <div className="settings-row"><label>{t("status.theme")}</label><div className="segmented"><button className={`segment ${theme === "dark" ? "is-auto" : ""}`} onClick={() => setTheme("dark")} type="button">{t("status.dark")}</button><button className={`segment ${theme === "light" ? "is-auto" : ""}`} onClick={() => setTheme("light")} type="button">{t("status.light")}</button></div></div>
       </Card>
-      {saved && <div className="toast" role="status">{t("status.saved")}</div>}
     </section>
   );
 }
