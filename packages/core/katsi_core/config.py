@@ -26,6 +26,77 @@ class StoreSettings(BaseModel):
     kuzu_db: str = "graph"
 
 
+class SQLiteSettings(BaseModel):
+    """Configuration for the private authoritative workspace database."""
+
+    filename: str = "workspace.sqlite3"
+    busy_timeout_ms: int = Field(default=5_000, ge=0)
+    schema_version: int = Field(default=1, ge=1)
+
+
+class PortableStateSettings(BaseModel):
+    """Location of owner-approved metadata relative to each workspace root."""
+
+    relative_path: Path = Path(".katsi/project-state.json")
+
+
+class ObserverSettings(BaseModel):
+    enabled: bool = True
+    debounce_seconds: float = Field(default=0.5, ge=0)
+    stable_read_retries: int = Field(default=2, ge=0)
+    stable_read_retry_seconds: float = Field(default=0.1, ge=0)
+    max_file_bytes: int = Field(default=20_000_000, gt=0)
+    reserved_path_prefix: str = ".katsi-stage-"
+
+
+class LeaseSettings(BaseModel):
+    advisory_ttl_seconds: int = Field(default=1_800, gt=0)
+    exclusive_ttl_seconds: int = Field(default=300, gt=0)
+
+
+class OperationLimitSettings(BaseModel):
+    max_operations: int = Field(default=100, gt=0)
+    max_affected_bytes: int = Field(default=100_000_000, gt=0)
+    max_risk_class: str = "medium"
+
+
+class RecoverySettings(BaseModel):
+    blob_directory: str = "recovery"
+    retention_days: int = Field(default=30, ge=0)
+    staging_prefix: str = ".katsi-stage-"
+
+
+class ProjectionWorkerSettings(BaseModel):
+    batch_size: int = Field(default=100, gt=0)
+    retry_delay_seconds: float = Field(default=1.0, ge=0)
+
+
+class VerifierDefinitionSettings(BaseModel):
+    id: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    executable: str = Field(min_length=1)
+    fixed_args: list[str] = Field(default_factory=list)
+    allowed_args: list[str] = Field(default_factory=list)
+    working_directory: Path = Path(".")
+    environment_allowlist: list[str] = Field(default_factory=list)
+    timeout_seconds: float = Field(default=60.0, gt=0)
+    output_limit_bytes: int = Field(default=65_536, gt=0)
+    applicable_globs: list[str] = Field(default_factory=list)
+    required: bool = False
+    success_exit_codes: list[int] = Field(default_factory=lambda: [0])
+
+
+class WorkspaceSettings(BaseModel):
+    sqlite: SQLiteSettings = Field(default_factory=SQLiteSettings)
+    portable_state: PortableStateSettings = Field(default_factory=PortableStateSettings)
+    observer: ObserverSettings = Field(default_factory=ObserverSettings)
+    leases: LeaseSettings = Field(default_factory=LeaseSettings)
+    operations: OperationLimitSettings = Field(default_factory=OperationLimitSettings)
+    recovery: RecoverySettings = Field(default_factory=RecoverySettings)
+    projection_worker: ProjectionWorkerSettings = Field(default_factory=ProjectionWorkerSettings)
+    verifiers: list[VerifierDefinitionSettings] = Field(default_factory=list)
+
+
 class IngestSettings(BaseModel):
     chunk_token_target: int = 512
     chunk_token_overlap: int = 64
@@ -128,6 +199,7 @@ class Settings(BaseSettings):
     retrieve: RetrieveSettings = Field(default_factory=RetrieveSettings)
     mcp: MCPSettings = Field(default_factory=MCPSettings)
     synth: SynthSettings = Field(default_factory=SynthSettings)
+    workspace: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> Settings:
