@@ -62,6 +62,5 @@ def test_settings_defaults():
 def test_filehit_and_bundle_construction():
     h = FileHit(file_id="f", path="/p", summary="s", score=0.5, why="because")
     assert h.why == "because"
-    b = ContextBundle(query="q", files=[h], chunks=[], relationships=[],
-                      token_estimate=10)
+    b = ContextBundle(query="q", files=[h], chunks=[], relationships=[], token_estimate=10)
     assert b.files == [h]

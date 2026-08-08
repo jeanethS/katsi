@@ -24,9 +24,11 @@ class _FakeOllama:
 
 
 def test_extract_happy_path():
-    fake = _FakeOllama([
-        '{"summary": "ok", "entities": [], "topics": [], "references": []}',
-    ])
+    fake = _FakeOllama(
+        [
+            '{"summary": "ok", "entities": [], "topics": [], "references": []}',
+        ]
+    )
     c = LLMClient(client=fake)
     e = c.extract("doc text")
     assert isinstance(e, Extraction)
@@ -38,19 +40,23 @@ def test_extract_happy_path():
 
 
 def test_extract_strips_fenced_json():
-    fake = _FakeOllama([
-        '```json\n{"summary": "s", "entities": [], "topics": [], "references": []}\n```',
-    ])
+    fake = _FakeOllama(
+        [
+            '```json\n{"summary": "s", "entities": [], "topics": [], "references": []}\n```',
+        ]
+    )
     c = LLMClient(client=fake)
     e = c.extract("doc text")
     assert e.summary == "s"
 
 
 def test_extract_retries_once_on_bad_json():
-    fake = _FakeOllama([
-        "not json {{",
-        '{"summary": "ok", "entities": [], "topics": [], "references": []}',
-    ])
+    fake = _FakeOllama(
+        [
+            "not json {{",
+            '{"summary": "ok", "entities": [], "topics": [], "references": []}',
+        ]
+    )
     c = LLMClient(client=fake)
     e = c.extract("doc text")
     assert e.summary == "ok"
@@ -67,10 +73,12 @@ def test_extract_raises_after_two_failures():
 
 def test_extract_validates_pydantic_shape():
     """Missing entities/topics/references triggers retry via ValidationError."""
-    fake = _FakeOllama([
-        '{"summary": "x"}',
-        '{"summary": "full", "entities": [], "topics": [], "references": []}',
-    ])
+    fake = _FakeOllama(
+        [
+            '{"summary": "x"}',
+            '{"summary": "full", "entities": [], "topics": [], "references": []}',
+        ]
+    )
     c = LLMClient(client=fake)
     e = c.extract("doc text")
     assert e.summary == "full"

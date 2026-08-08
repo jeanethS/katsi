@@ -32,9 +32,15 @@ def setup_stores(tmp_path):
 
 def _index_file_summary(records, graph, file_id, path, summary, content_hash="h"):
     rec = FileRecord(
-        id=file_id, path=path, name=path.split("/")[-1],
-        ext=".md", mime="", size_bytes=0, mtime=0.0,
-        content_hash=content_hash, status=IndexStatus.INDEXED,
+        id=file_id,
+        path=path,
+        name=path.split("/")[-1],
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=0.0,
+        content_hash=content_hash,
+        status=IndexStatus.INDEXED,
         summary=summary,
     )
     records.put(rec)
@@ -44,8 +50,9 @@ def _index_file_summary(records, graph, file_id, path, summary, content_hash="h"
 
 def test_build_context_empty_query_returns_empty_bundle(setup_stores):
     s, vectors, graph, records, embed = setup_stores
-    bundle = build_context("", max_tokens=3000, settings=s, vectors=vectors,
-                           graph=graph, embed=embed, records=records)
+    bundle = build_context(
+        "", max_tokens=3000, settings=s, vectors=vectors, graph=graph, embed=embed, records=records
+    )
     assert bundle.token_estimate == 0
     assert bundle.files == []
     assert bundle.chunks == []
@@ -61,8 +68,9 @@ def test_build_context_never_exceeds_max_tokens(setup_stores):
     vecs = [[0.5] * 8]
     vectors.upsert_chunks(chunks, vecs)
 
-    bundle = build_context("q", max_tokens=200, settings=s, vectors=vectors,
-                           graph=graph, embed=embed, records=records)
+    bundle = build_context(
+        "q", max_tokens=200, settings=s, vectors=vectors, graph=graph, embed=embed, records=records
+    )
 
     assert bundle.token_estimate <= 200
     assert bundle.chunks == []
@@ -84,8 +92,9 @@ def test_build_context_includes_relationships_for_in_bundle_files(setup_stores):
     graph.add_mentions("f1", [{"name": "Acme", "kind": "org"}])
     graph.add_mentions("f2", [{"name": "Acme", "kind": "org"}])
 
-    bundle = build_context("q", max_tokens=3000, settings=s, vectors=vectors,
-                           graph=graph, embed=embed, records=records)
+    bundle = build_context(
+        "q", max_tokens=3000, settings=s, vectors=vectors, graph=graph, embed=embed, records=records
+    )
 
     assert len(bundle.relationships) > 0
 
@@ -98,8 +107,9 @@ def test_build_context_dedups_files(setup_stores):
     vecs = [[0.5] * 8]
     vectors.upsert_chunks(chunks, vecs)
 
-    bundle = build_context("q", max_tokens=3000, settings=s, vectors=vectors,
-                           graph=graph, embed=embed, records=records)
+    bundle = build_context(
+        "q", max_tokens=3000, settings=s, vectors=vectors, graph=graph, embed=embed, records=records
+    )
 
     fids = [h.file_id for h in bundle.files]
     assert len(fids) == len(set(fids))
@@ -117,8 +127,9 @@ def test_build_context_returns_at_most_k_files(setup_stores, max_k):
         vectors.upsert_chunks(chunks, vecs)
 
     s.retrieve.top_k_files = max_k
-    bundle = build_context("q", max_tokens=5000, settings=s, vectors=vectors,
-                           graph=graph, embed=embed, records=records)
+    bundle = build_context(
+        "q", max_tokens=5000, settings=s, vectors=vectors, graph=graph, embed=embed, records=records
+    )
 
     assert len(bundle.files) <= max_k
 
@@ -132,8 +143,9 @@ def test_build_context_includes_top_chunk_when_budget_allows(setup_stores):
     vecs = [[0.5] * 8]
     vectors.upsert_chunks(chunks, vecs)
 
-    bundle = build_context("q", max_tokens=500, settings=s, vectors=vectors,
-                           graph=graph, embed=embed, records=records)
+    bundle = build_context(
+        "q", max_tokens=500, settings=s, vectors=vectors, graph=graph, embed=embed, records=records
+    )
 
     assert len(bundle.chunks) == 1
     assert bundle.token_estimate <= 500

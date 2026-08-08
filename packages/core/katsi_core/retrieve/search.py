@@ -54,7 +54,9 @@ def search(
     8. Use rank_hits() for deterministic sort; slice top k.
     """
     s = settings or Settings()
-    vectors = _resolve(s, vectors, lambda: VectorStore(s.store.data_dir / "vectors", s.store.lancedb_table))  # type: ignore[arg-type]
+    vectors = _resolve(
+        s, vectors, lambda: VectorStore(s.store.data_dir / "vectors", s.store.lancedb_table)
+    )  # type: ignore[arg-type]
     graph = _resolve(s, graph, lambda: GraphStore(s.store.data_dir / s.store.kuzu_db))  # type: ignore[arg-type]
     embed = _resolve(s, embed, lambda: EmbedClient(s))  # type: ignore[arg-type]
     records = _resolve(s, records, lambda: FileRecordStore(s.store.data_dir / "records"))  # type: ignore[arg-type]
@@ -151,10 +153,16 @@ def search(
 
         score = score_file(evidence, weights)
         why = render_why(evidence)
-        fused.append(FileHit(
-            file_id=fid, path=path, summary=summary,
-            score=score, why=why, evidence=evidence,
-        ))
+        fused.append(
+            FileHit(
+                file_id=fid,
+                path=path,
+                summary=summary,
+                score=score,
+                why=why,
+                evidence=evidence,
+            )
+        )
 
     fused = rank_hits(fused)
     return fused[:k]

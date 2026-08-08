@@ -15,8 +15,11 @@ from katsi_core.ingest.enrich import apply_extraction
 from katsi_core.ingest.extract import extract_text
 from katsi_core.ingest.records import FileRecordStore
 from katsi_core.models import FileRecord, IndexStatus
+from katsi_core.store.enrichment_cache import EnrichmentCache
 from katsi_core.store.graph import GraphStore
 from katsi_core.store.vectors import VectorStore
+from katsi_core.workspace.enrichment import EnrichmentFingerprint
+from katsi_core.workspace.extraction_gate import ExtractionGate
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,7 @@ class IngestPipeline:
         embed: EmbedClient | None = None,
         llm: LLMClient | None = None,
         records: FileRecordStore | None = None,
+        enrichment_cache: EnrichmentCache | None = None,
     ) -> None:
         """
         Lazily construct any of graph/vectors/embed/llm/records from settings
@@ -46,15 +50,14 @@ class IngestPipeline:
         self._embed = embed
         self._llm = llm
         self._records = records
+        self._enrichment_cache = enrichment_cache
         self._vectors_inited = False
 
     # --- lazy accessors ---
 
     def _graph_store(self) -> GraphStore:
         if self._graph is None:
-            self._graph = GraphStore(
-                self._settings.store.data_dir / self._settings.store.kuzu_db
-            )
+            self._graph = GraphStore(self._settings.store.data_dir / self._settings.store.kuzu_db)
         return self._graph
 
     def _vector_store(self) -> VectorStore:
@@ -77,9 +80,7 @@ class IngestPipeline:
 
     def _record_store(self) -> FileRecordStore:
         if self._records is None:
-            self._records = FileRecordStore(
-                self._settings.store.data_dir / "records"
-            )
+            self._records = FileRecordStore(self._settings.store.data_dir / "records")
         return self._records
 
     # --- main entry ---
@@ -136,14 +137,18 @@ class IngestPipeline:
 
         # ---- saver: skip-if-unchanged ---------------------------------
         existing = self._record_store().get(file_id)
-        if existing is not None and existing.content_hash == content_hash \
-                and existing.status == IndexStatus.INDEXED:
+        if (
+            existing is not None
+            and existing.content_hash == content_hash
+            and existing.status == IndexStatus.INDEXED
+        ):
             logger.info("index_file: skip unchanged %s", p)
             return existing
 
         # ---- extract text ----------------------------------------------
         text = extract_text(p)
         if not text:
+            self._delete_current_projections(file_id)
             record = FileRecord(
                 **record_template,
                 status=IndexStatus.ERROR,
@@ -160,10 +165,44 @@ class IngestPipeline:
             overlap=self._settings.ingest.chunk_token_overlap,
         )
         if not chunks:
+            self._delete_current_projections(file_id)
             record = FileRecord(
                 **record_template,
                 status=IndexStatus.ERROR,
                 error="chunker produced zero chunks",
+            )
+            self._record_store().put(record)
+            return record
+
+        # ---- summarize-once + strict extraction -----------------------
+        fingerprint = EnrichmentFingerprint(
+            content_hash=content_hash,
+            extraction_contract_version=self._settings.workspace.enrichment.extraction_contract_version,
+            model_identity=self._settings.ollama.llm_model,
+            prompt_version=self._settings.workspace.enrichment.prompt_version,
+            chunking_version=self._settings.workspace.enrichment.chunking_version,
+            semantic_settings_version=self._settings.workspace.enrichment.semantic_settings_version,
+        )
+        try:
+            cached = self._enrichment_cache.get(fingerprint) if self._enrichment_cache else None
+            raw_extraction = cached or self._llm_client().extract(text).model_dump()
+            strict_extraction = ExtractionGate().validate(lambda: raw_extraction)
+            if cached is None and self._enrichment_cache is not None:
+                self._enrichment_cache.put(fingerprint, strict_extraction.model_dump())
+            extraction = strict_extraction
+        except Exception as error:
+            if self._enrichment_cache is not None:
+                self._enrichment_cache.put_error(fingerprint, str(error))
+            if not isinstance(error, ExtractionError):
+                logger.warning("index_file: extraction validation failed for %s: %r", p, error)
+            else:
+                logger.warning("index_file: extraction failed for %s: %r", p, error)
+            self._delete_current_projections(file_id)
+            record = FileRecord(
+                **record_template,
+                status=IndexStatus.ERROR,
+                error=f"extraction error: {error}",
+                summary=None,
             )
             self._record_store().put(record)
             return record
@@ -178,31 +217,14 @@ class IngestPipeline:
             chunk_texts = [c.text for c in chunks]
             vectors = embed_client.embed(chunk_texts)
             vs.upsert_chunks(chunks, vectors)
-        except Exception as e:
-            logger.warning(
-                "index_file: embed/vector upsert failed for %s: %r", p, e
-            )
+        except Exception as error:
+            logger.warning("index_file: embed/vector upsert failed for %s: %r", p, error)
             record = FileRecord(
                 **record_template,
                 status=IndexStatus.ERROR,
-                error=f"embed/vector failure: {e}",
+                error=f"embed/vector failure: {error}",
                 summary=None,
             )
-            self._record_store().put(record)
-            return record
-
-        # ---- summarize-once + extract entities -------------------------
-        try:
-            extraction = self._llm_client().extract(text)
-        except ExtractionError as e:
-            logger.warning("index_file: extraction failed for %s: %r", p, e)
-            record = FileRecord(
-                **record_template,
-                status=IndexStatus.ERROR,
-                error=f"extraction error: {e}",
-                summary=None,
-            )
-            # Still keep the chunks we just upserted in the vector store.
             self._record_store().put(record)
             return record
 
@@ -232,3 +254,13 @@ class IngestPipeline:
             record.status,
         )
         return record
+
+    def _delete_current_projections(self, file_id: str) -> None:
+        """Remove stale current graph/vector data after terminal ingestion failure."""
+        try:
+            self._vector_store().delete_by_file(file_id)
+            self._graph_store().delete_by_file(file_id)
+        except Exception as error:
+            logger.warning(
+                "index_file: failed to remove stale projections for %s: %r", file_id, error
+            )

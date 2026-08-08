@@ -83,8 +83,39 @@ class ClaimStatus(StrEnum):
     PROPOSED = "proposed"
     CORROBORATED = "corroborated"
     VERIFIED = "verified"
+    INVALIDATED = "invalidated"
     CONTRADICTED = "contradicted"
     SUPERSEDED = "superseded"
+
+
+class ClaimEvidenceKind(StrEnum):
+    """Provenance category for evidence attached to a durable Claim."""
+
+    AGENT = "agent"
+    RESOURCE_VERSION = "resource_version"
+    DETERMINISTIC = "deterministic"
+    AUTHORITATIVE = "authoritative"
+    OWNER = "owner"
+
+
+class WorkspaceRecordKind(StrEnum):
+    DECISION = "decision"
+    BLOCKER = "blocker"
+    OPEN_QUESTION = "open_question"
+
+
+class WorkspaceRecordStatus(StrEnum):
+    OPEN = "open"
+    VERIFIED = "verified"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
+
+
+class OpenWorkStatus(StrEnum):
+    OPEN = "open"
+    BLOCKED = "blocked"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
 
 
 class CapabilityOperationClass(StrEnum):
@@ -184,6 +215,65 @@ class Claim(ImmutableModel):
     confidence: float = Field(ge=0, le=1)
     status: ClaimStatus = ClaimStatus.PROPOSED
     created_at: datetime
+
+
+class ClaimEvidence(ImmutableModel):
+    id: UUID
+    claim_id: ClaimId
+    kind: ClaimEvidenceKind
+    reference: dict[str, str] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ClaimTransition(ImmutableModel):
+    id: UUID
+    claim_id: ClaimId
+    from_status: ClaimStatus
+    to_status: ClaimStatus
+    actor_id: AgentIdentityId | None = None
+    occurred_at: datetime
+    evidence: dict[str, str] = Field(default_factory=dict)
+
+
+class WorkspaceRecord(ImmutableModel):
+    id: UUID
+    workspace_id: WorkspaceId
+    author_id: AgentIdentityId
+    kind: WorkspaceRecordKind
+    text: str = Field(min_length=1, max_length=20_000)
+    status: WorkspaceRecordStatus = WorkspaceRecordStatus.OPEN
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkspaceRecordTransition(ImmutableModel):
+    id: UUID
+    record_id: UUID
+    from_status: WorkspaceRecordStatus
+    to_status: WorkspaceRecordStatus
+    actor_id: AgentIdentityId
+    occurred_at: datetime
+    evidence: dict[str, str] = Field(default_factory=dict)
+
+
+class OpenWork(ImmutableModel):
+    id: UUID
+    workspace_id: WorkspaceId
+    author_id: AgentIdentityId
+    description: str = Field(min_length=1, max_length=20_000)
+    status: OpenWorkStatus = OpenWorkStatus.OPEN
+    created_at: datetime
+    updated_at: datetime
+
+
+class OpenWorkTransition(ImmutableModel):
+    id: UUID
+    open_work_id: UUID
+    from_status: OpenWorkStatus
+    to_status: OpenWorkStatus
+    actor_id: AgentIdentityId
+    occurred_at: datetime
+    evidence: dict[str, str] = Field(default_factory=dict)
 
 
 class AgentIdentity(StrictModel):
@@ -386,3 +476,123 @@ class ActionOutcome(ImmutableModel):
     status: ActionOutcomeStatus
     occurred_at: datetime
     receipt: dict[str, str] = Field(default_factory=dict)
+
+
+class PortableProjectState(ImmutableModel):
+    """Owner-approved project intent that may travel with a workspace."""
+
+    schema_version: int = Field(ge=1)
+    workspace_id: WorkspaceId
+    display_name: str = Field(min_length=1, max_length=256)
+    active_intent: str | None = Field(default=None, max_length=20_000)
+    invariant_definitions: tuple[str, ...] = ()
+    verified_decisions: tuple[str, ...] = ()
+    selected_metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class BriefSection(StrEnum):
+    """Logical content sections assembled into a Workspace Brief."""
+
+    GOAL = "goal"
+    CLAIM = "claim"
+    DECISION = "decision"
+    BLOCKER = "blocker"
+    OPEN_QUESTION = "open_question"
+    OPEN_WORK = "open_work"
+    LEASE = "lease"
+    RECENT_EVENT = "recent_event"
+
+
+class BriefClaim(StrictModel):
+    """A durable Claim projected into a brief with its current verification state."""
+
+    id: ClaimId
+    text: str = Field(min_length=1)
+    author_id: AgentIdentityId
+    status: ClaimStatus
+    confidence: float = Field(ge=0, le=1)
+    scope_paths: tuple[RelativePath, ...] = ()
+    created_at: datetime
+    invalidated: bool = False
+
+
+class BriefRecord(StrictModel):
+    """A workspace record (decision, blocker, or question) projected into a brief."""
+
+    id: UUID
+    kind: WorkspaceRecordKind
+    text: str = Field(min_length=1)
+    status: WorkspaceRecordStatus
+    author_id: AgentIdentityId
+    created_at: datetime
+
+
+class BriefOpenWork(StrictModel):
+    """Active agent work projected into a brief."""
+
+    id: UUID
+    description: str = Field(min_length=1)
+    status: OpenWorkStatus
+    author_id: AgentIdentityId
+    created_at: datetime
+
+
+class BriefLease(StrictModel):
+    """An overlapping advisory Work Lease visible to other agents."""
+
+    id: WorkLeaseId
+    holder_id: AgentIdentityId
+    task_description: str = Field(min_length=1)
+    resource_scope: tuple[RelativePath, ...] = ()
+    expires_at: datetime
+
+
+class BriefRecentEvent(StrictModel):
+    """A recent authoritative workspace event surfaced as fresh context."""
+
+    event_sequence: int = Field(ge=1)
+    kind: WorkspaceEventKind
+    occurred_at: datetime
+    path: str | None = None
+    correlation_id: ChangeSetId | None = None
+    detail: dict[str, str] = Field(default_factory=dict)
+
+
+class ProjectionFreshness(StrictModel):
+    """Lag of a rebuildable projection relative to authoritative workspace state."""
+
+    projection_name: str = Field(min_length=1)
+    applied_outbox_id: int = Field(ge=0)
+    latest_outbox_id: int = Field(ge=0)
+    lag: int = Field(ge=0)
+    lagging: bool = False
+
+
+class OmittedSection(StrictModel):
+    """A brief section whose entries were held back, with the reason why."""
+
+    section: BriefSection
+    count: int = Field(ge=1)
+    reason: str = Field(min_length=1)
+
+
+class WorkspaceBrief(StrictModel):
+    """Budget-bounded, provenance-backed snapshot of authoritative workspace state."""
+
+    workspace_id: WorkspaceId
+    state_version: int = Field(ge=0)
+    last_event_sequence: int = Field(ge=0)
+    intent: tuple[str, int] | None = None
+    claims: tuple[BriefClaim, ...] = ()
+    decisions: tuple[BriefRecord, ...] = ()
+    blockers: tuple[BriefRecord, ...] = ()
+    open_questions: tuple[BriefRecord, ...] = ()
+    open_work: tuple[BriefOpenWork, ...] = ()
+    leases: tuple[BriefLease, ...] = ()
+    recent_events: tuple[BriefRecentEvent, ...] = ()
+    projection_freshness: tuple[ProjectionFreshness, ...] = ()
+    budget_bytes: int = Field(ge=0)
+    bytes_used: int = Field(ge=0)
+    omitted: tuple[OmittedSection, ...] = ()
+    provisional: tuple[BriefSection, ...] = ()
+    projection_lag: bool = False

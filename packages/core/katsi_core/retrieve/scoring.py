@@ -80,9 +80,7 @@ def entity_evidence(shared: list[tuple[str, float]], w: RetrievalWeights) -> Evi
 
 
 def topic_evidence(shared: list[tuple[str, float]], w: RetrievalWeights) -> Evidence | None:
-    return _overlap_evidence(
-        shared, EvidenceKind.TOPIC, w.topic_per_shared, w.topic_cap, "topics"
-    )
+    return _overlap_evidence(shared, EvidenceKind.TOPIC, w.topic_per_shared, w.topic_cap, "topics")
 
 
 def reference_evidence(direction: str, w: RetrievalWeights) -> Evidence | None:
@@ -136,9 +134,9 @@ def _vector_contribution(hit: FileHit) -> float:
 def _rank_key(hit: FileHit) -> tuple[int, int, float, str]:
     return (
         -round(hit.score / SCORE_QUANTUM),  # 1. score, quantized, descending
-        -len(hit.evidence),                 # 2. more independent signals, descending
-        -_vector_contribution(hit),         # 3. vector similarity, descending
-        hit.path,                           # 4. path ascending — unique, so order is total
+        -len(hit.evidence),  # 2. more independent signals, descending
+        -_vector_contribution(hit),  # 3. vector similarity, descending
+        hit.path,  # 4. path ascending — unique, so order is total
     )
 
 

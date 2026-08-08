@@ -109,6 +109,7 @@ def test_upsert_mismatched_lengths_raises(tmp_path):
     vs = VectorStore(tmp_path / "vectors", "test_chunks")
     vs.init_table(embed_dim=4)
     import pytest
+
     with pytest.raises(ValueError, match="len.*!=.*len"):
         vs.upsert_chunks(
             [Chunk(id="c1", file_id="f1", ordinal=0, text="a", token_count=1)],

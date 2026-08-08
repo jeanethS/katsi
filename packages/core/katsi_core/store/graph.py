@@ -32,30 +32,18 @@ class GraphStore:
             "PRIMARY KEY(id))"
         )
         self._conn.execute(
-            "CREATE NODE TABLE IF NOT EXISTS Entity("
-            "name STRING, kind STRING, "
-            "PRIMARY KEY(name))"
+            "CREATE NODE TABLE IF NOT EXISTS Entity(name STRING, kind STRING, PRIMARY KEY(name))"
+        )
+        self._conn.execute("CREATE NODE TABLE IF NOT EXISTS Topic(name STRING, PRIMARY KEY(name))")
+        self._conn.execute("CREATE REL TABLE IF NOT EXISTS REFERENCES(FROM File TO File)")
+        self._conn.execute(
+            "CREATE REL TABLE IF NOT EXISTS MENTIONS(FROM File TO Entity, weight DOUBLE)"
         )
         self._conn.execute(
-            "CREATE NODE TABLE IF NOT EXISTS Topic("
-            "name STRING, "
-            "PRIMARY KEY(name))"
+            "CREATE REL TABLE IF NOT EXISTS ABOUT(FROM File TO Topic, weight DOUBLE)"
         )
         self._conn.execute(
-            "CREATE REL TABLE IF NOT EXISTS REFERENCES("
-            "FROM File TO File)"
-        )
-        self._conn.execute(
-            "CREATE REL TABLE IF NOT EXISTS MENTIONS("
-            "FROM File TO Entity, weight DOUBLE)"
-        )
-        self._conn.execute(
-            "CREATE REL TABLE IF NOT EXISTS ABOUT("
-            "FROM File TO Topic, weight DOUBLE)"
-        )
-        self._conn.execute(
-            "CREATE REL TABLE IF NOT EXISTS DUPLICATE_OF("
-            "FROM File TO File, similarity DOUBLE)"
+            "CREATE REL TABLE IF NOT EXISTS DUPLICATE_OF(FROM File TO File, similarity DOUBLE)"
         )
 
     def upsert_file(self, file: FileRecord) -> None:
@@ -117,8 +105,7 @@ class GraphStore:
         if not r.has_next():
             return
         self._conn.execute(
-            "MATCH (src:File {id: $src}), (dst:File {id: $dst}) "
-            "MERGE (src)-[:REFERENCES]->(dst)",
+            "MATCH (src:File {id: $src}), (dst:File {id: $dst}) MERGE (src)-[:REFERENCES]->(dst)",
             {"src": src_file_id, "dst": dst_file_id},
         )
 
@@ -153,14 +140,16 @@ class GraphStore:
         )
         while r.has_next():
             row = r.get_next()
-            results.append({
-                "file_id": _unwrap(row[0]),
-                "via": "references",
-                "name": None,
-                "score": 1.0,
-                "weight": 1.0,
-                "hops": 1,
-            })
+            results.append(
+                {
+                    "file_id": _unwrap(row[0]),
+                    "via": "references",
+                    "name": None,
+                    "score": 1.0,
+                    "weight": 1.0,
+                    "hops": 1,
+                }
+            )
 
         # b) MENTIONS shared entity: (f)-[:MENTIONS]->(e)<-[:MENTIONS]-(o:File).
         #    Connector weight = the weaker of the two MENTIONS edges. Gated.
@@ -175,14 +164,16 @@ class GraphStore:
             weight = min(_unwrap(row[2]), _unwrap(row[3]))
             if min_weight is not None and weight < min_weight:
                 continue
-            results.append({
-                "file_id": _unwrap(row[0]),
-                "via": "mentioned-entity",
-                "name": _unwrap(row[1]),
-                "score": 1.0,
-                "weight": weight,
-                "hops": 1,
-            })
+            results.append(
+                {
+                    "file_id": _unwrap(row[0]),
+                    "via": "mentioned-entity",
+                    "name": _unwrap(row[1]),
+                    "score": 1.0,
+                    "weight": weight,
+                    "hops": 1,
+                }
+            )
 
         # c) ABOUT shared topic: (f)-[:ABOUT]->(t)<-[:ABOUT]-(o:File). Gated.
         r = self._conn.execute(
@@ -196,14 +187,16 @@ class GraphStore:
             weight = min(_unwrap(row[2]), _unwrap(row[3]))
             if min_weight is not None and weight < min_weight:
                 continue
-            results.append({
-                "file_id": _unwrap(row[0]),
-                "via": "shared-topic",
-                "name": _unwrap(row[1]),
-                "score": 1.0,
-                "weight": weight,
-                "hops": 1,
-            })
+            results.append(
+                {
+                    "file_id": _unwrap(row[0]),
+                    "via": "shared-topic",
+                    "name": _unwrap(row[1]),
+                    "score": 1.0,
+                    "weight": weight,
+                    "hops": 1,
+                }
+            )
 
         # d) DUPLICATE_OF: (f)-[:DUPLICATE_OF]->(o:File). Explicit — not gated.
         r = self._conn.execute(
@@ -214,14 +207,16 @@ class GraphStore:
         while r.has_next():
             row = r.get_next()
             sim = _unwrap(row[1])
-            results.append({
-                "file_id": _unwrap(row[0]),
-                "via": "duplicate",
-                "name": None,
-                "score": sim,
-                "weight": sim,
-                "hops": 1,
-            })
+            results.append(
+                {
+                    "file_id": _unwrap(row[0]),
+                    "via": "duplicate",
+                    "name": None,
+                    "score": sim,
+                    "weight": sim,
+                    "hops": 1,
+                }
+            )
 
         return results
 
@@ -251,9 +246,10 @@ class GraphStore:
             )
         # Fallback: try treating as kuzu node struct
         try:
-            vals = {col: _unwrap(node[i]) for i, col in enumerate(
-                ["id", "path", "name", "ext", "summary", "mtime"]
-            )}
+            vals = {
+                col: _unwrap(node[i])
+                for i, col in enumerate(["id", "path", "name", "ext", "summary", "mtime"])
+            }
         except (TypeError, IndexError):
             return None
         return FileRecord(

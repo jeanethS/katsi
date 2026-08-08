@@ -40,12 +40,14 @@ def _fetch_top_chunk_per_file(
     for row in rows:
         fid = row.get("file_id")
         if fid in wanted and fid not in seen:
-            out.append((
-                fid,
-                row.get("id", ""),
-                row.get("text", ""),
-                1.0 / (1.0 + float(row.get("_distance", 0.0))),
-            ))
+            out.append(
+                (
+                    fid,
+                    row.get("id", ""),
+                    row.get("text", ""),
+                    1.0 / (1.0 + float(row.get("_distance", 0.0))),
+                )
+            )
             seen.add(fid)
         if len(seen) == len(wanted):
             break
@@ -89,19 +91,27 @@ def build_context(
     embed = embed or EmbedClient(s)
     records = records or FileRecordStore(s.store.data_dir / "records")
 
-    hits = search(query, k=s.retrieve.top_k_files,
-                  settings=s, vectors=vectors, graph=graph,
-                  embed=embed, records=records)
+    hits = search(
+        query,
+        k=s.retrieve.top_k_files,
+        settings=s,
+        vectors=vectors,
+        graph=graph,
+        embed=embed,
+        records=records,
+    )
     if not hits:
         return ContextBundle(
-            query=query, files=[], chunks=[],
-            relationships=[], token_estimate=0,
+            query=query,
+            files=[],
+            chunks=[],
+            relationships=[],
+            token_estimate=0,
         )
 
     qv = embed.embed([query])[0]
     file_ids = [h.file_id for h in hits]
-    top_chunks = _fetch_top_chunk_per_file(vectors, qv, file_ids,
-                                           s.retrieve.top_k_chunks)
+    top_chunks = _fetch_top_chunk_per_file(vectors, qv, file_ids, s.retrieve.top_k_chunks)
     chunk_by_file: dict[str, tuple[str, str, float]] = {
         fid: (chunk_id, text, score) for fid, chunk_id, text, score in top_chunks
     }
@@ -120,10 +130,15 @@ def build_context(
         tc = max(1, len(text) // 4)
         if tokens_used + tc > max_tokens:
             break
-        included_chunks.append(Chunk(
-            id=chunk_id, file_id=hit.file_id, ordinal=-1,
-            text=text, token_count=tc,
-        ))
+        included_chunks.append(
+            Chunk(
+                id=chunk_id,
+                file_id=hit.file_id,
+                ordinal=-1,
+                text=text,
+                token_count=tc,
+            )
+        )
         tokens_used += tc
 
     # Relationship sketch lines

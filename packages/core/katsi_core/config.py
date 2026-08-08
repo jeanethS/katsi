@@ -31,7 +31,7 @@ class SQLiteSettings(BaseModel):
 
     filename: str = "workspace.sqlite3"
     busy_timeout_ms: int = Field(default=5_000, ge=0)
-    schema_version: int = Field(default=1, ge=1)
+    schema_version: int = Field(default=3, ge=1)
 
 
 class PortableStateSettings(BaseModel):
@@ -71,6 +71,25 @@ class ProjectionWorkerSettings(BaseModel):
     retry_delay_seconds: float = Field(default=1.0, ge=0)
 
 
+class BriefSettings(BaseModel):
+    """Serialization controls for Workspace Brief assembly.
+
+    The byte budget itself is caller-supplied on each assembly call (OpenSpec
+    task 10.5); these controls only bound how much recent history is consulted.
+    """
+
+    recent_event_limit: int = Field(default=20, gt=0)
+
+
+class EnrichmentSettings(BaseModel):
+    """Versioned inputs that decide whether local enrichment may be reused."""
+
+    extraction_contract_version: str = "v1"
+    prompt_version: str = "v1"
+    chunking_version: str = "v1"
+    semantic_settings_version: str = "v1"
+
+
 class VerifierDefinitionSettings(BaseModel):
     id: str = Field(min_length=1)
     version: str = Field(min_length=1)
@@ -94,6 +113,8 @@ class WorkspaceSettings(BaseModel):
     operations: OperationLimitSettings = Field(default_factory=OperationLimitSettings)
     recovery: RecoverySettings = Field(default_factory=RecoverySettings)
     projection_worker: ProjectionWorkerSettings = Field(default_factory=ProjectionWorkerSettings)
+    enrichment: EnrichmentSettings = Field(default_factory=EnrichmentSettings)
+    brief: BriefSettings = Field(default_factory=BriefSettings)
     verifiers: list[VerifierDefinitionSettings] = Field(default_factory=list)
 
 
@@ -152,6 +173,7 @@ class RetrieveSettings(BaseModel):
 
 class MCPSettings(BaseModel):
     enable_answer_tool: bool = False
+    agent_credential_env: str = "KATSI_AGENT_CREDENTIAL"
 
 
 class SynthLocalSettings(BaseModel):

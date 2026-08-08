@@ -41,11 +41,16 @@ def apply_extraction(
     """Push the Extraction result into the graph.
 
     Order matters for idempotency:
-      1. upsert_file(file_record)
-      2. add_mentions(file_id, entities)
-      3. add_about(file_id, topics)
-      4. add_reference edges for resolvable references.
+      1. remove the resource's previous current projection
+      2. upsert_file(file_record)
+      3. add_mentions(file_id, entities)
+      4. add_about(file_id, topics)
+      5. add_reference edges for resolvable references.
+
+    The graph is a current projection, not historical provenance. Removing the
+    old File node prevents changed extraction from retaining stale edges.
     """
+    graph.delete_by_file(file_record.id)
     graph.upsert_file(file_record)
     if extraction.entities:
         graph.add_mentions(file_record.id, extraction.entities)

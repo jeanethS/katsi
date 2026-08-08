@@ -32,9 +32,15 @@ def setup_stores(tmp_path):
 
 def _index_file_summary(records, graph, file_id, path, summary, content_hash="h"):
     rec = FileRecord(
-        id=file_id, path=path, name=path.split("/")[-1],
-        ext=".md", mime="", size_bytes=0, mtime=0.0,
-        content_hash=content_hash, status=IndexStatus.INDEXED,
+        id=file_id,
+        path=path,
+        name=path.split("/")[-1],
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=0.0,
+        content_hash=content_hash,
+        status=IndexStatus.INDEXED,
         summary=summary,
     )
     records.put(rec)
@@ -44,8 +50,7 @@ def _index_file_summary(records, graph, file_id, path, summary, content_hash="h"
 
 def test_search_empty_query_returns_empty(setup_stores):
     s, vectors, graph, records, embed = setup_stores
-    result = search("", k=8, settings=s, vectors=vectors,
-                     graph=graph, embed=embed, records=records)
+    result = search("", k=8, settings=s, vectors=vectors, graph=graph, embed=embed, records=records)
     assert result == []
 
 
@@ -59,12 +64,12 @@ def test_search_returns_vector_hits_in_order(setup_stores):
         Chunk(id="f1:0", file_id="f1", ordinal=0, text="close match", token_count=3),
         Chunk(id="f2:0", file_id="f2", ordinal=0, text="distant match", token_count=3),
     ]
-    vecs = [[0.9, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
+    vecs = [[0.9, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
     vectors.upsert_chunks(chunks, vecs)
 
-    result = search("test", k=8, settings=s, vectors=vectors,
-                     graph=graph, embed=embed, records=records)
+    result = search(
+        "test", k=8, settings=s, vectors=vectors, graph=graph, embed=embed, records=records
+    )
 
     assert len(result) == 2
     assert result[0].file_id == "f1"
@@ -89,8 +94,9 @@ def test_search_surfaces_graph_neighbors(setup_stores):
     graph.add_mentions("f1", [{"name": "Acme", "kind": "org"}])
     graph.add_mentions("f2", [{"name": "Acme", "kind": "org"}])
 
-    result = search("test", k=8, settings=s, vectors=vectors,
-                     graph=graph, embed=embed, records=records)
+    result = search(
+        "test", k=8, settings=s, vectors=vectors, graph=graph, embed=embed, records=records
+    )
 
     fids = {h.file_id for h in result}
     assert "f1" in fids
@@ -118,8 +124,9 @@ def test_search_fused_score_better_than_pure_vector(setup_stores):
     graph.add_mentions("f1", [{"name": "Acme", "kind": "org"}])
     graph.add_mentions("f2", [{"name": "Acme", "kind": "org"}])
 
-    result = search("test", k=8, settings=s, vectors=vectors,
-                     graph=graph, embed=embed, records=records)
+    result = search(
+        "test", k=8, settings=s, vectors=vectors, graph=graph, embed=embed, records=records
+    )
 
     assert len(result) == 2
     # f1: 0.6 * 1.0 + 0.4 * 0.0 = 0.6

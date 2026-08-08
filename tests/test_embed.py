@@ -20,9 +20,7 @@ class _FakeOllama:
 
     def embed(self, model, input):
         self.calls.append(list(input))
-        return _FakeEmbedResp(
-            [[0.01 * (i + 1)] * self.dim for i in range(len(input))]
-        )
+        return _FakeEmbedResp([[0.01 * (i + 1)] * self.dim for i in range(len(input))])
 
 
 def test_embed_batches_returns_vectors():

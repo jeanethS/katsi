@@ -47,18 +47,14 @@ def test_apply_extraction_creates_entities_and_topics(tmp_path):
     apply_extraction(record, extraction, graph)
 
     # Entity node exists
-    res = graph._conn.execute(
-        "MATCH (e:Entity {name:$name}) RETURN e.kind", {"name": "Acme"}
-    )
+    res = graph._conn.execute("MATCH (e:Entity {name:$name}) RETURN e.kind", {"name": "Acme"})
     assert res.has_next()
     row = res.get_next()
     kind = row[0].value if hasattr(row[0], "value") else row[0]
     assert kind == "org"
 
     # Topic node exists
-    res = graph._conn.execute(
-        "MATCH (t:Topic {name:$name}) RETURN t.name", {"name": "ai"}
-    )
+    res = graph._conn.execute("MATCH (t:Topic {name:$name}) RETURN t.name", {"name": "ai"})
     assert res.has_next()
 
     # MENTIONS edge
@@ -98,8 +94,7 @@ def test_apply_extraction_resolves_reference_by_name(tmp_path):
 
     # REFERENCES edge F1 -> F2
     res = graph._conn.execute(
-        "MATCH (src:File {id:$src})-[:REFERENCES]->(dst:File {id:$dst}) "
-        "RETURN dst.id",
+        "MATCH (src:File {id:$src})-[:REFERENCES]->(dst:File {id:$dst}) RETURN dst.id",
         {"src": f1_id, "dst": f2_id},
     )
     assert res.has_next()
@@ -155,3 +150,44 @@ def test_apply_extraction_idempotent(tmp_path):
     r2b = graph._conn.execute("MATCH ()-[:MENTIONS]->() RETURN count(*)")
     mentions_count_2 = r2b.get_next()[0]
     assert mentions_count_2 == mentions_count_1
+
+
+def test_reapplying_extraction_replaces_stale_current_relationships(tmp_path):
+    graph = GraphStore(tmp_path / "graph")
+    record = _make_record(tmp_path, "f1", "current.md")
+    apply_extraction(
+        record,
+        Extraction(
+            summary="first",
+            entities=[{"name": "Old", "kind": "project"}],
+            topics=["old-topic"],
+            references=[],
+        ),
+        graph,
+    )
+    apply_extraction(
+        record,
+        Extraction(
+            summary="second",
+            entities=[{"name": "New", "kind": "project"}],
+            topics=["new-topic"],
+            references=[],
+        ),
+        graph,
+    )
+
+    old_edges = graph._conn.execute(
+        "MATCH (:File {id: $id})-[:MENTIONS]->(:Entity {name: 'Old'}) RETURN 1",
+        {"id": record.id},
+    )
+    old_topics = graph._conn.execute(
+        "MATCH (:File {id: $id})-[:ABOUT]->(:Topic {name: 'old-topic'}) RETURN 1",
+        {"id": record.id},
+    )
+    new_edges = graph._conn.execute(
+        "MATCH (:File {id: $id})-[:MENTIONS]->(:Entity {name: 'New'}) RETURN 1",
+        {"id": record.id},
+    )
+    assert not old_edges.has_next()
+    assert not old_topics.has_next()
+    assert new_edges.has_next()

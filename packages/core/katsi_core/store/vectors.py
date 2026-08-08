@@ -25,18 +25,18 @@ class VectorStore:
 
     def init_table(self, embed_dim: int) -> None:
         """Create the chunks table with the fixed schema if it does not exist."""
-        schema = pa.schema([
-            ("id", pa.string()),
-            ("file_id", pa.string()),
-            ("ordinal", pa.int32()),
-            ("text", pa.string()),
-            ("vector", pa.list_(pa.float32(), embed_dim)),
-            ("token_count", pa.int32()),
-        ])
+        schema = pa.schema(
+            [
+                ("id", pa.string()),
+                ("file_id", pa.string()),
+                ("ordinal", pa.int32()),
+                ("text", pa.string()),
+                ("vector", pa.list_(pa.float32(), embed_dim)),
+                ("token_count", pa.int32()),
+            ]
+        )
         if self._table_name not in self._db.list_tables().tables:
-            self._tbl = self._db.create_table(
-                self._table_name, schema=schema, mode="overwrite"
-            )
+            self._tbl = self._db.create_table(self._table_name, schema=schema, mode="overwrite")
         else:
             self._tbl = self._db.open_table(self._table_name)
 
@@ -82,6 +82,10 @@ class VectorStore:
 
     def delete_by_file(self, file_id: str) -> None:
         """Delete all chunks belonging to file_id."""
+        if self._tbl is None:
+            if self._table_name not in self._db.list_tables().tables:
+                return
+            self._tbl = self._db.open_table(self._table_name)
         self._tbl.delete(f"file_id = '{file_id}'")
 
     def count(self) -> int:

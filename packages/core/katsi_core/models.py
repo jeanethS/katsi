@@ -20,14 +20,14 @@ class IndexStatus(StrEnum):
 
 
 class FileRecord(BaseModel):
-    id: str                      # blake3(realpath), stable across content changes
-    path: str                    # absolute realpath
+    id: str  # blake3(realpath), stable across content changes
+    path: str  # absolute realpath
     name: str
     ext: str
     mime: str
     size_bytes: int
     mtime: float
-    content_hash: str            # blake3 of file bytes — drives skip/reindex
+    content_hash: str  # blake3 of file bytes — drives skip/reindex
     status: IndexStatus = IndexStatus.PENDING
     summary: str | None = None
     last_indexed_at: datetime | None = None
@@ -35,7 +35,7 @@ class FileRecord(BaseModel):
 
 
 class Chunk(BaseModel):
-    id: str                      # f"{file_id}:{ordinal}"
+    id: str  # f"{file_id}:{ordinal}"
     file_id: str
     ordinal: int
     text: str
@@ -46,9 +46,9 @@ class Extraction(BaseModel):
     """Strict JSON contract the local model must return."""
 
     summary: str
-    entities: list[dict]         # {"name": str, "kind": "person|org|project"}
+    entities: list[dict]  # {"name": str, "kind": "person|org|project"}
     topics: list[str]
-    references: list[str]        # paths/filenames this file points at, if any
+    references: list[str]  # paths/filenames this file points at, if any
 
 
 class EvidenceKind(StrEnum):
@@ -67,8 +67,8 @@ class Evidence(BaseModel):
     """
 
     kind: EvidenceKind
-    contribution: float          # signed points added to the score
-    detail: str                  # human-readable, e.g. "shares 3 entities: Kùzu, Leiden, bge-m3"
+    contribution: float  # signed points added to the score
+    detail: str  # human-readable, e.g. "shares 3 entities: Kùzu, Leiden, bge-m3"
 
 
 class FileHit(BaseModel):
@@ -76,13 +76,13 @@ class FileHit(BaseModel):
     path: str
     summary: str
     score: float
-    why: str                     # short relevance/relationship explanation
+    why: str  # short relevance/relationship explanation
     evidence: list[Evidence] = []  # per-signal receipt; derives `why`
 
 
 class ContextBundle(BaseModel):
     query: str
     files: list[FileHit]
-    chunks: list[Chunk]          # only the few highest-scoring raw chunks
-    relationships: list[str]     # human-readable graph sketch lines
+    chunks: list[Chunk]  # only the few highest-scoring raw chunks
+    relationships: list[str]  # human-readable graph sketch lines
     token_estimate: int

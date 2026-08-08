@@ -49,10 +49,28 @@ def test_count_nodes(tmp_path):
 
 def test_mentions_and_peers(tmp_path):
     gs = GraphStore(tmp_path / "graph")
-    f1 = FileRecord(id="f1", path="/a.md", name="a.md", ext=".md", mime="",
-                    size_bytes=0, mtime=1.0, content_hash="", summary=None)
-    f2 = FileRecord(id="f2", path="/b.md", name="b.md", ext=".md", mime="",
-                    size_bytes=0, mtime=2.0, content_hash="", summary=None)
+    f1 = FileRecord(
+        id="f1",
+        path="/a.md",
+        name="a.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=1.0,
+        content_hash="",
+        summary=None,
+    )
+    f2 = FileRecord(
+        id="f2",
+        path="/b.md",
+        name="b.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=2.0,
+        content_hash="",
+        summary=None,
+    )
     gs.upsert_file(f1)
     gs.upsert_file(f2)
     gs.add_mentions("f1", [{"name": "Acme", "kind": "org"}])
@@ -67,10 +85,28 @@ def test_mentions_and_peers(tmp_path):
 
 def test_references(tmp_path):
     gs = GraphStore(tmp_path / "graph")
-    f1 = FileRecord(id="f1", path="/a.md", name="a.md", ext=".md", mime="",
-                    size_bytes=0, mtime=1.0, content_hash="", summary=None)
-    f2 = FileRecord(id="f2", path="/b.md", name="b.md", ext=".md", mime="",
-                    size_bytes=0, mtime=2.0, content_hash="", summary=None)
+    f1 = FileRecord(
+        id="f1",
+        path="/a.md",
+        name="a.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=1.0,
+        content_hash="",
+        summary=None,
+    )
+    f2 = FileRecord(
+        id="f2",
+        path="/b.md",
+        name="b.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=2.0,
+        content_hash="",
+        summary=None,
+    )
     gs.upsert_file(f1)
     gs.upsert_file(f2)
     # f2 doesn't exist yet on first call — skip
@@ -84,10 +120,28 @@ def test_references(tmp_path):
 
 def test_about_shared_topic(tmp_path):
     gs = GraphStore(tmp_path / "graph")
-    f1 = FileRecord(id="f1", path="/a.md", name="a.md", ext=".md", mime="",
-                    size_bytes=0, mtime=1.0, content_hash="", summary=None)
-    f2 = FileRecord(id="f2", path="/b.md", name="b.md", ext=".md", mime="",
-                    size_bytes=0, mtime=2.0, content_hash="", summary=None)
+    f1 = FileRecord(
+        id="f1",
+        path="/a.md",
+        name="a.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=1.0,
+        content_hash="",
+        summary=None,
+    )
+    f2 = FileRecord(
+        id="f2",
+        path="/b.md",
+        name="b.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=2.0,
+        content_hash="",
+        summary=None,
+    )
     gs.upsert_file(f1)
     gs.upsert_file(f2)
     gs.add_about("f1", ["AI"])
@@ -104,8 +158,17 @@ def test_about_shared_topic(tmp_path):
 
 def test_delete_by_file_removes_node(tmp_path):
     gs = GraphStore(tmp_path / "graph")
-    f1 = FileRecord(id="f1", path="/a.md", name="a.md", ext=".md", mime="",
-                    size_bytes=0, mtime=1.0, content_hash="", summary=None)
+    f1 = FileRecord(
+        id="f1",
+        path="/a.md",
+        name="a.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=1.0,
+        content_hash="",
+        summary=None,
+    )
     gs.upsert_file(f1)
     gs.add_mentions("f1", [{"name": "Acme", "kind": "org"}])
 
@@ -115,10 +178,28 @@ def test_delete_by_file_removes_node(tmp_path):
 
 def test_duplicate(tmp_path):
     gs = GraphStore(tmp_path / "graph")
-    f1 = FileRecord(id="f1", path="/a.md", name="a.md", ext=".md", mime="",
-                    size_bytes=0, mtime=1.0, content_hash="", summary=None)
-    f2 = FileRecord(id="f2", path="/b.md", name="b.md", ext=".md", mime="",
-                    size_bytes=0, mtime=2.0, content_hash="", summary=None)
+    f1 = FileRecord(
+        id="f1",
+        path="/a.md",
+        name="a.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=1.0,
+        content_hash="",
+        summary=None,
+    )
+    f2 = FileRecord(
+        id="f2",
+        path="/b.md",
+        name="b.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=2.0,
+        content_hash="",
+        summary=None,
+    )
     gs.upsert_file(f1)
     gs.upsert_file(f2)
     gs.add_duplicate("f1", "f2", 0.95)
@@ -133,16 +214,35 @@ def test_duplicate(tmp_path):
 def test_neighbors_hops_other_than_1_raises(tmp_path):
     gs = GraphStore(tmp_path / "graph")
     import pytest
+
     with pytest.raises(NotImplementedError):
         gs.neighbors("f1", hops=2)
 
 
 def _pair(gs, w1=1.0, w2=1.0):
     """Two files, both mentioning 'Acme' at the given edge weights."""
-    f1 = FileRecord(id="f1", path="/a.md", name="a.md", ext=".md", mime="",
-                    size_bytes=0, mtime=1.0, content_hash="", summary=None)
-    f2 = FileRecord(id="f2", path="/b.md", name="b.md", ext=".md", mime="",
-                    size_bytes=0, mtime=2.0, content_hash="", summary=None)
+    f1 = FileRecord(
+        id="f1",
+        path="/a.md",
+        name="a.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=1.0,
+        content_hash="",
+        summary=None,
+    )
+    f2 = FileRecord(
+        id="f2",
+        path="/b.md",
+        name="b.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=2.0,
+        content_hash="",
+        summary=None,
+    )
     gs.upsert_file(f1)
     gs.upsert_file(f2)
     gs.add_mentions("f1", [{"name": "Acme", "kind": "org"}], weight=w1)
@@ -180,10 +280,28 @@ def test_neighbors_min_weight_keeps_strong_edges(tmp_path):
 
 def test_neighbors_min_weight_does_not_gate_references(tmp_path):
     gs = GraphStore(tmp_path / "graph")
-    f1 = FileRecord(id="f1", path="/a.md", name="a.md", ext=".md", mime="",
-                    size_bytes=0, mtime=1.0, content_hash="", summary=None)
-    f2 = FileRecord(id="f2", path="/b.md", name="b.md", ext=".md", mime="",
-                    size_bytes=0, mtime=2.0, content_hash="", summary=None)
+    f1 = FileRecord(
+        id="f1",
+        path="/a.md",
+        name="a.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=1.0,
+        content_hash="",
+        summary=None,
+    )
+    f2 = FileRecord(
+        id="f2",
+        path="/b.md",
+        name="b.md",
+        ext=".md",
+        mime="",
+        size_bytes=0,
+        mtime=2.0,
+        content_hash="",
+        summary=None,
+    )
     gs.upsert_file(f1)
     gs.upsert_file(f2)
     gs.add_reference("f1", "f2")

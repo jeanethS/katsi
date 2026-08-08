@@ -80,8 +80,7 @@ class LocalSynthesizer:
             )
         except Exception as exc:
             raise SynthUnavailableError(
-                f"Local model {local.model} at "
-                f"{self._settings.ollama.host} unavailable: {exc}"
+                f"Local model {local.model} at {self._settings.ollama.host} unavailable: {exc}"
             ) from exc
         return SynthResult(text=text, bundle=bundle, mode="local")
 

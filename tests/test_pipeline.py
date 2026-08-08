@@ -13,11 +13,15 @@ from types import SimpleNamespace
 import blake3
 
 from katsi_core.clients.llm import ExtractionError
+from katsi_core.config import Settings, SQLiteSettings
 from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
 from katsi_core.models import Extraction, IndexStatus
+from katsi_core.store.enrichment_cache import EnrichmentCache
 from katsi_core.store.graph import GraphStore
 from katsi_core.store.vectors import VectorStore
+from katsi_core.store.workspace_migrations import apply_migrations
+from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 
 
 class _FakeEmbed:
@@ -63,13 +67,18 @@ EXTRACTION_JSON = (
 )
 
 
-def make_pipeline(tmp_path, embed, llm):
+def make_pipeline(tmp_path, embed, llm, enrichment_cache=None):
     s = GraphStore(tmp_path / "graph")
     v = VectorStore(tmp_path / "vectors")
     r = FileRecordStore(tmp_path / "records")
     p = IngestPipeline(
         settings=None,
-        graph=s, vectors=v, embed=embed, llm=llm, records=r,
+        graph=s,
+        vectors=v,
+        embed=embed,
+        llm=llm,
+        records=r,
+        enrichment_cache=enrichment_cache,
     )
     return p, s, v, r
 
@@ -119,9 +128,7 @@ def test_second_call_skips_when_unchanged(tmp_path):
     # Second call: should skip (unchanged)
     second_result = pipeline.index_file(p)
     assert second_result.status == IndexStatus.INDEXED
-    assert embed.embed_call_count == 1, (
-        f"Expected embed_call_count=1, got {embed.embed_call_count}"
-    )
+    assert embed.embed_call_count == 1, f"Expected embed_call_count=1, got {embed.embed_call_count}"
     assert llm.extract_call_count == 1, (
         f"Expected extract_call_count=1, got {llm.extract_call_count}"
     )
@@ -141,20 +148,119 @@ def test_index_file_marks_error_on_empty_text(tmp_path):
     assert llm.extract_call_count == 0
 
 
-def test_index_file_marks_error_on_extraction_failure(tmp_path):
-    """LLM raises ExtractionError -> status=ERROR, embed happened, LLM called."""
+def test_index_file_marks_error_before_semantic_projection_on_extraction_failure(tmp_path):
+    """An invalid extraction persists an error without publishing vector data."""
     p = _write_file(tmp_path / "x.md", "# Hello\n\nSome content.\n")
     embed = _FakeEmbed()
     llm = _FakeLLMError()
-    pipeline, _, _, _ = make_pipeline(tmp_path, embed, llm)
+    database = WorkspaceSQLite(tmp_path / "workspace.sqlite3", SQLiteSettings())
+    with database.connection() as connection:
+        apply_migrations(connection, target_version=1)
+    pipeline, _, _, _ = make_pipeline(tmp_path, embed, llm, EnrichmentCache(database))
 
     result = pipeline.index_file(p)
 
     assert result.status == IndexStatus.ERROR
     assert result.error is not None
     assert "extraction error" in result.error
-    assert embed.embed_call_count == 1
+    assert embed.embed_call_count == 0
     assert llm.extract_call_count == 1
+    with database.connection() as connection:
+        assert (
+            connection.execute("SELECT status FROM content_enrichments").fetchone()["status"]
+            == "error"
+        )
+
+
+def test_compatible_content_reuses_cached_extraction_across_paths_and_histories(tmp_path):
+    """Copied content and A→B→A do not re-run local extraction."""
+    database = WorkspaceSQLite(tmp_path / "workspace.sqlite3", SQLiteSettings())
+    with database.connection() as connection:
+        apply_migrations(connection, target_version=1)
+    cache = EnrichmentCache(database)
+    first_path = _write_file(tmp_path / "first.md", "# Same\n\nshared content\n")
+    second_path = _write_file(tmp_path / "second.md", "# Same\n\nshared content\n")
+    embed = _FakeEmbed()
+    llm = _FakeLLM(EXTRACTION_JSON)
+    pipeline, _, _, _ = make_pipeline(tmp_path, embed, llm, cache)
+
+    first = pipeline.index_file(first_path)
+    copied = pipeline.index_file(second_path)
+    _write_file(first_path, "# Different\n\ncontent\n")
+    pipeline.index_file(first_path)
+    _write_file(first_path, "# Same\n\nshared content\n")
+    returned = pipeline.index_file(first_path)
+
+    assert first.status == copied.status == returned.status == IndexStatus.INDEXED
+    assert llm.extract_call_count == 2
+
+
+def test_changed_enrichment_fingerprint_intentionally_reenriches_content(tmp_path):
+    database = WorkspaceSQLite(tmp_path / "workspace.sqlite3", SQLiteSettings())
+    with database.connection() as connection:
+        apply_migrations(connection, target_version=1)
+    cache = EnrichmentCache(database)
+    first_path = _write_file(tmp_path / "first.md", "# Same\n\nshared content\n")
+    second_path = _write_file(tmp_path / "second.md", "# Same\n\nshared content\n")
+    graph = GraphStore(tmp_path / "graph")
+    vectors = VectorStore(tmp_path / "vectors")
+    records = FileRecordStore(tmp_path / "records")
+    first_llm = _FakeLLM(EXTRACTION_JSON)
+    IngestPipeline(
+        graph=graph,
+        vectors=vectors,
+        embed=_FakeEmbed(),
+        llm=first_llm,
+        records=records,
+        enrichment_cache=cache,
+    ).index_file(first_path)
+
+    changed_llm = _FakeLLM(EXTRACTION_JSON)
+    changed_settings = Settings(ollama={"llm_model": "different-local-model"})
+    second = IngestPipeline(
+        settings=changed_settings,
+        graph=graph,
+        vectors=vectors,
+        embed=_FakeEmbed(),
+        llm=changed_llm,
+        records=records,
+        enrichment_cache=cache,
+    ).index_file(second_path)
+
+    assert second.status == IndexStatus.INDEXED
+    assert first_llm.extract_call_count == 1
+    assert changed_llm.extract_call_count == 1
+
+
+def test_terminal_extraction_error_removes_previous_current_projections(tmp_path):
+    path = _write_file(tmp_path / "x.md", "# First\n\ncontent\n")
+    embed = _FakeEmbed()
+    graph = GraphStore(tmp_path / "graph")
+    vectors = VectorStore(tmp_path / "vectors")
+    records = FileRecordStore(tmp_path / "records")
+    successful = IngestPipeline(
+        graph=graph,
+        vectors=vectors,
+        embed=embed,
+        llm=_FakeLLM(EXTRACTION_JSON),
+        records=records,
+    )
+    first = successful.index_file(path)
+    assert graph.get_file(first.id) is not None
+    assert vectors.count() > 0
+
+    _write_file(path, "# Changed\n\ncontent\n")
+    failed = IngestPipeline(
+        graph=graph,
+        vectors=vectors,
+        embed=_FakeEmbed(),
+        llm=_FakeLLMError(),
+        records=records,
+    ).index_file(path)
+
+    assert failed.status == IndexStatus.ERROR
+    assert graph.get_file(first.id) is None
+    assert vectors.count() == 0
 
 
 def test_index_file_reindexes_when_content_changes(tmp_path):
@@ -188,8 +294,11 @@ def test_record_store_persists_across_pipeline_instances(tmp_path):
 
     pipe1 = IngestPipeline(
         settings=None,
-        graph=graph1, vectors=vectors1,
-        embed=embed1, llm=llm1, records=records1,
+        graph=graph1,
+        vectors=vectors1,
+        embed=embed1,
+        llm=llm1,
+        records=records1,
     )
     result1 = pipe1.index_file(p)
     assert result1.status == IndexStatus.INDEXED
@@ -208,8 +317,11 @@ def test_record_store_persists_across_pipeline_instances(tmp_path):
 
     pipe2 = IngestPipeline(
         settings=None,
-        graph=graph2, vectors=vectors2,
-        embed=embed2, llm=llm2, records=records2,
+        graph=graph2,
+        vectors=vectors2,
+        embed=embed2,
+        llm=llm2,
+        records=records2,
     )
     result2 = pipe2.index_file(p)
 

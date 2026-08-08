@@ -223,10 +223,7 @@ def test_scores_within_quantum_are_treated_as_tied():
 
 
 def test_identical_input_shuffled_produces_identical_order():
-    hits = [
-        _hit(f"f{i}", f"/p{i}", [_ev(EvidenceKind.VECTOR, 0.30)])
-        for i in range(10)
-    ]
+    hits = [_hit(f"f{i}", f"/p{i}", [_ev(EvidenceKind.VECTOR, 0.30)]) for i in range(10)]
     baseline = [h.file_id for h in rank_hits(hits)]
     rng = random.Random(123)
     for _ in range(20):
@@ -250,12 +247,16 @@ def test_ranking_is_deterministic_across_hash_seeds():
         "score=score_file([ev(0.3)],W),why='',evidence=[ev(0.3)]) for i in range(30)];"
         "print(','.join(h.file_id for h in rank_hits(hits)))"
     )
+
     def run_with_seed(seed: str) -> str:
         env = dict(os.environ)
         env["PYTHONHASHSEED"] = seed
         return subprocess.run(
             [sys.executable, "-c", script],
-            capture_output=True, text=True, env=env, check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
         ).stdout.strip()
 
     assert run_with_seed("0") == run_with_seed("1")

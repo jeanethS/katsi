@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -15,7 +16,10 @@ from katsi_core.retrieve.context import build_context
 from katsi_core.retrieve.search import search
 from katsi_core.store.graph import GraphStore
 from katsi_core.store.vectors import VectorStore
+from katsi_core.store.workspace_migrations import apply_migrations
+from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.synth import build_synthesizer
+from katsi_core.workspace.identity import IdentityService
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +42,14 @@ def _services():
     _state["graph"] = GraphStore(s.store.data_dir / s.store.kuzu_db)
     _state["vectors"] = VectorStore(s.store.data_dir / "vectors", s.store.lancedb_table)
     _state["records"] = FileRecordStore(s.store.data_dir / "records")
+    database = WorkspaceSQLite(s.store.data_dir / s.workspace.sqlite.filename, s.workspace.sqlite)
+    with database.connection() as connection:
+        apply_migrations(connection, s.workspace.sqlite.schema_version)
+    _state["workspace_database"] = database
+    _state["identity_service"] = IdentityService(database)
+    credential = os.environ.get(s.mcp.agent_credential_env)
+    if credential:
+        _state["authenticated_identity"] = _state["identity_service"].authenticate(credential)
     _state["pipeline"] = IngestPipeline(
         s,
         graph=_state["graph"],

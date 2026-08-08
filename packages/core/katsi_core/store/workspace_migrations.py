@@ -214,6 +214,52 @@ CREATE INDEX IF NOT EXISTS projection_outbox_workspace_idx ON projection_outbox(
 
 _MIGRATIONS: dict[int, str] = {1: _INITIAL_SCHEMA}
 
+_DURABLE_RECORDS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS workspace_records (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+    author_id TEXT NOT NULL REFERENCES agent_identities(id),
+    kind TEXT NOT NULL,
+    text TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workspace_record_transitions (
+    id TEXT PRIMARY KEY,
+    record_id TEXT NOT NULL REFERENCES workspace_records(id),
+    from_status TEXT NOT NULL,
+    to_status TEXT NOT NULL,
+    actor_id TEXT NOT NULL REFERENCES agent_identities(id),
+    occurred_at TEXT NOT NULL,
+    evidence_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS open_work_transitions (
+    id TEXT PRIMARY KEY,
+    open_work_id TEXT NOT NULL REFERENCES open_work(id),
+    from_status TEXT NOT NULL,
+    to_status TEXT NOT NULL,
+    actor_id TEXT NOT NULL REFERENCES agent_identities(id),
+    occurred_at TEXT NOT NULL,
+    evidence_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS workspace_records_workspace_idx ON workspace_records(workspace_id, kind, status);
+CREATE INDEX IF NOT EXISTS open_work_workspace_idx ON open_work(workspace_id, status);
+"""
+
+_MIGRATIONS[2] = _DURABLE_RECORDS_SCHEMA
+
+_INTENT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS workspace_intents (
+    workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
+    goal TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+_MIGRATIONS[3] = _INTENT_SCHEMA
+
 
 def apply_migrations(connection: sqlite3.Connection, target_version: int) -> None:
     """Apply every pending schema migration in one short SQLite transaction."""

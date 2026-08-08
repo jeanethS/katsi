@@ -128,6 +128,9 @@ class WorkspaceRepository:
         path: str,
         content_hash: str,
         byte_count: int,
+        *,
+        event_kind: WorkspaceEventKind = WorkspaceEventKind.RESOURCE_CREATED,
+        correlation_id: ChangeSetId | None = None,
     ) -> ResourceVersion:
         """Create a stable logical resource and its first immutable content version."""
         resource_id = uuid4()
@@ -140,7 +143,8 @@ class WorkspaceRepository:
             content_hash=content_hash,
             byte_count=byte_count,
             status=ResourceStatus.CURRENT,
-            kind=WorkspaceEventKind.RESOURCE_CREATED,
+            kind=event_kind,
+            correlation_id=correlation_id,
         )
 
     def update_resource(
@@ -151,6 +155,9 @@ class WorkspaceRepository:
         expected_resource_version: int,
         content_hash: str,
         byte_count: int,
+        *,
+        event_kind: WorkspaceEventKind = WorkspaceEventKind.RESOURCE_UPDATED,
+        correlation_id: ChangeSetId | None = None,
     ) -> ResourceVersion:
         """Record an immutable content version while retaining logical resource identity."""
         resource = self.get_resource(resource_id)
@@ -165,7 +172,8 @@ class WorkspaceRepository:
             content_hash=content_hash,
             byte_count=byte_count,
             status=ResourceStatus.CURRENT,
-            kind=WorkspaceEventKind.RESOURCE_UPDATED,
+            kind=event_kind,
+            correlation_id=correlation_id,
         )
 
     def move_resource(
@@ -175,6 +183,9 @@ class WorkspaceRepository:
         resource_id: ResourceId,
         expected_resource_version: int,
         destination_path: str,
+        *,
+        event_kind: WorkspaceEventKind = WorkspaceEventKind.RESOURCE_MOVED,
+        correlation_id: ChangeSetId | None = None,
     ) -> WorkspaceEvent:
         """Move a resource without changing its stable identity or content history."""
         return self._transition_resource(
@@ -184,7 +195,8 @@ class WorkspaceRepository:
             expected_resource_version,
             path=destination_path,
             status=ResourceStatus.CURRENT,
-            kind=WorkspaceEventKind.RESOURCE_MOVED,
+            kind=event_kind,
+            correlation_id=correlation_id,
         )
 
     def delete_resource(
@@ -193,6 +205,9 @@ class WorkspaceRepository:
         expected_workspace_version: int,
         resource_id: ResourceId,
         expected_resource_version: int,
+        *,
+        event_kind: WorkspaceEventKind = WorkspaceEventKind.RESOURCE_DELETED,
+        correlation_id: ChangeSetId | None = None,
     ) -> WorkspaceEvent:
         """Preserve historical resource evidence while removing it from current state."""
         return self._transition_resource(
@@ -202,7 +217,8 @@ class WorkspaceRepository:
             expected_resource_version,
             path=None,
             status=ResourceStatus.DELETED,
-            kind=WorkspaceEventKind.RESOURCE_DELETED,
+            kind=event_kind,
+            correlation_id=correlation_id,
         )
 
     def mark_resource_ambiguous(
@@ -222,6 +238,7 @@ class WorkspaceRepository:
             path=resource.current_path if resource else None,
             status=ResourceStatus.AMBIGUOUS,
             kind=WorkspaceEventKind.RESOURCE_AMBIGUOUS,
+            correlation_id=None,
         )
 
     def _record_resource_version(
@@ -236,6 +253,7 @@ class WorkspaceRepository:
         byte_count: int,
         status: ResourceStatus,
         kind: WorkspaceEventKind,
+        correlation_id: ChangeSetId | None,
     ) -> ResourceVersion:
         timestamp = _utc_now()
         with self._database.connection() as connection, write_transaction(connection):
@@ -248,6 +266,7 @@ class WorkspaceRepository:
                 kind=kind,
                 occurred_at=timestamp,
                 resource_id=resource_id,
+                correlation_id=correlation_id,
                 detail={"path": path, "content_hash": content_hash},
             )
             if expected_resource_version is None:
@@ -278,7 +297,10 @@ class WorkspaceRepository:
             )
             self._insert_event(connection, event)
             existing = connection.execute(
-                "SELECT id FROM resource_versions WHERE resource_id = ? AND content_hash = ?",
+                """
+                SELECT id, byte_count, observed_at, source_event_id FROM resource_versions
+                WHERE resource_id = ? AND content_hash = ?
+                """,
                 (str(resource_id), content_hash),
             ).fetchone()
             version_id = UUID(existing["id"]) if existing else uuid4()
@@ -294,6 +316,15 @@ class WorkspaceRepository:
                         str(event.id),
                     ),
                 )
+        if existing is not None:
+            return ResourceVersion(
+                id=version_id,
+                resource_id=resource_id,
+                content_hash=content_hash,
+                byte_count=existing["byte_count"],
+                observed_at=datetime.fromisoformat(existing["observed_at"]),
+                source_event_id=UUID(existing["source_event_id"]),
+            )
         return ResourceVersion(
             id=version_id,
             resource_id=resource_id,
@@ -313,6 +344,7 @@ class WorkspaceRepository:
         path: str | None,
         status: ResourceStatus,
         kind: WorkspaceEventKind,
+        correlation_id: ChangeSetId | None,
     ) -> WorkspaceEvent:
         timestamp = _utc_now()
         with self._database.connection() as connection, write_transaction(connection):
@@ -326,6 +358,7 @@ class WorkspaceRepository:
                 kind=kind,
                 occurred_at=timestamp,
                 resource_id=resource_id,
+                correlation_id=correlation_id,
                 detail={"path": path or ""},
             )
             connection.execute(
@@ -472,6 +505,33 @@ class WorkspaceRepository:
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 
+    def list_current_resources(self, workspace_id: WorkspaceId) -> list[Resource]:
+        with self._database.connection() as connection:
+            rows = connection.execute(
+                "SELECT * FROM resources WHERE workspace_id = ? AND status = 'current'",
+                (str(workspace_id),),
+            ).fetchall()
+        return [
+            Resource(
+                id=UUID(row["id"]),
+                workspace_id=UUID(row["workspace_id"]),
+                current_path=row["current_path"],
+                status=ResourceStatus(row["status"]),
+                state_version=row["state_version"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+            for row in rows
+        ]
+
+    def current_content_hash(self, resource_id: ResourceId) -> str | None:
+        with self._database.connection() as connection:
+            row = connection.execute(
+                "SELECT content_hash FROM resource_versions WHERE resource_id = ? ORDER BY observed_at DESC LIMIT 1",
+                (str(resource_id),),
+            ).fetchone()
+        return row["content_hash"] if row else None
+
     def list_events(
         self, workspace_id: WorkspaceId, *, after_sequence: int = 0, limit: int = 100
     ) -> list[WorkspaceEvent]:
@@ -490,16 +550,42 @@ class WorkspaceRepository:
                 """,
                 (str(workspace_id), after_sequence, limit),
             ).fetchall()
-        return [
-            WorkspaceEvent(
-                id=UUID(row["id"]),
-                workspace_id=UUID(row["workspace_id"]),
-                sequence=row["sequence"],
-                kind=WorkspaceEventKind(row["kind"]),
-                occurred_at=datetime.fromisoformat(row["occurred_at"]),
-                resource_id=UUID(row["resource_id"]) if row["resource_id"] else None,
-                correlation_id=UUID(row["correlation_id"]) if row["correlation_id"] else None,
-                detail=json.loads(row["detail_json"]),
-            )
-            for row in rows
-        ]
+        return [self._event_from_row(row) for row in rows]
+
+    def last_event_sequence(self, workspace_id: WorkspaceId) -> int:
+        """Return the highest sequenced event for a workspace (0 when none)."""
+        with self._database.connection() as connection:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) AS seq FROM workspace_events WHERE workspace_id = ?",
+                (str(workspace_id),),
+            ).fetchone()
+        return int(row["seq"])
+
+    def recent_events(self, workspace_id: WorkspaceId, *, limit: int) -> list[WorkspaceEvent]:
+        """Return the most recent workspace events, newest first."""
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self._database.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM workspace_events
+                WHERE workspace_id = ?
+                ORDER BY sequence DESC
+                LIMIT ?
+                """,
+                (str(workspace_id), limit),
+            ).fetchall()
+        return [self._event_from_row(row) for row in rows]
+
+    @staticmethod
+    def _event_from_row(row: object) -> WorkspaceEvent:
+        return WorkspaceEvent(
+            id=UUID(row["id"]),
+            workspace_id=UUID(row["workspace_id"]),
+            sequence=row["sequence"],
+            kind=WorkspaceEventKind(row["kind"]),
+            occurred_at=datetime.fromisoformat(row["occurred_at"]),
+            resource_id=UUID(row["resource_id"]) if row["resource_id"] else None,
+            correlation_id=UUID(row["correlation_id"]) if row["correlation_id"] else None,
+            detail=json.loads(row["detail_json"]),
+        )

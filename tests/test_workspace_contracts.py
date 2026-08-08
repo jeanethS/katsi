@@ -1,6 +1,7 @@
 """Tests for public workspace coordination contracts."""
 
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -13,6 +14,7 @@ from katsi_core import (
     ChangeSet,
     ChangeSetTransition,
     Claim,
+    PortableProjectState,
     Resource,
     ResourceVersion,
     WorkLease,
@@ -32,6 +34,7 @@ from katsi_core.workspace.contracts import (
     WorkLeaseKind,
     WorkspaceEventKind,
 )
+from katsi_core.workspace.portable_state import PortableStateStore
 
 NOW = datetime(2026, 8, 7, tzinfo=UTC)
 HASH = "a" * 64
@@ -249,3 +252,26 @@ def test_verifier_configuration_validates_limits() -> None:
 
 def test_event_kind_is_serializable() -> None:
     assert WorkspaceEventKind.EXTERNAL_CHANGE.value == "external_change"
+
+
+def test_portable_state_round_trip_excludes_private_operational_data(tmp_path: Path) -> None:
+    state = PortableProjectState(
+        schema_version=1,
+        workspace_id=uuid4(),
+        display_name="Katsi",
+        active_intent="Keep local files reconciled.",
+        invariant_definitions=("no permanent deletion",),
+        verified_decisions=("SQLite is authoritative.",),
+        selected_metadata={"language": "Python"},
+    )
+    store = PortableStateStore(Path(".katsi/state.json"))
+
+    destination = store.export(tmp_path, state)
+    restored = store.import_state(tmp_path)
+
+    assert restored == state
+    assert destination.read_text("utf-8") == state.model_dump_json()
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        PortableProjectState.model_validate_json(
+            state.model_dump_json()[:-1] + ',"credential":"secret"}'
+        )
