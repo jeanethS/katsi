@@ -83,3 +83,24 @@ def test_worker_does_not_advance_offset_when_projection_fails(tmp_path: Path) ->
     delivered: list[int] = []
     assert worker.run(workspace_id, "vector", lambda entry: delivered.append(entry.id)) == 1
     assert len(delivered) == 1
+
+
+def test_worker_reports_freshness_and_lag_for_each_workspace(tmp_path: Path) -> None:
+    repository, workspace_id, worker = _repository(tmp_path)
+    repository.append_event(
+        workspace_id,
+        1,
+        WorkspaceEventKind.RESOURCE_UPDATED,
+        projection_payloads={"graph": {"action": "replace"}, "vector": {"action": "replace"}},
+    )
+
+    initial = {entry.projection_name: entry for entry in worker.freshness(workspace_id)}
+    assert {name: entry.lag for name, entry in initial.items()} == {"graph": 1, "vector": 1}
+    assert all(entry.lagging for entry in initial.values())
+
+    assert worker.run(workspace_id, "graph", lambda _entry: None) == 1
+    refreshed = {entry.projection_name: entry for entry in worker.all_freshness()[workspace_id]}
+    assert refreshed["graph"].lag == 0
+    assert refreshed["graph"].lagging is False
+    assert refreshed["vector"].lag == 1
+    assert refreshed["vector"].lagging is True

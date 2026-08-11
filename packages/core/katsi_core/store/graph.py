@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import kuzu
@@ -35,6 +36,10 @@ class GraphStore:
             "CREATE NODE TABLE IF NOT EXISTS Entity(name STRING, kind STRING, PRIMARY KEY(name))"
         )
         self._conn.execute("CREATE NODE TABLE IF NOT EXISTS Topic(name STRING, PRIMARY KEY(name))")
+        self._conn.execute(
+            "CREATE NODE TABLE IF NOT EXISTS ReferenceIntent("
+            "id STRING, source_id STRING, reference STRING, PRIMARY KEY(id))"
+        )
         self._conn.execute("CREATE REL TABLE IF NOT EXISTS REFERENCES(FROM File TO File)")
         self._conn.execute(
             "CREATE REL TABLE IF NOT EXISTS MENTIONS(FROM File TO Entity, weight DOUBLE)"
@@ -108,6 +113,60 @@ class GraphStore:
             "MATCH (src:File {id: $src}), (dst:File {id: $dst}) MERGE (src)-[:REFERENCES]->(dst)",
             {"src": src_file_id, "dst": dst_file_id},
         )
+
+    def replace_reference_intents(self, source_id: str, references: list[str]) -> None:
+        """Persist a source's declared references before resolving their targets."""
+        self._conn.execute(
+            "MATCH (intent:ReferenceIntent {source_id: $source_id}) DELETE intent",
+            {"source_id": source_id},
+        )
+        for reference in sorted(set(references)):
+            value = reference.strip()
+            if not value:
+                continue
+            intent_id = hashlib.sha256(f"{source_id}\\0{value}".encode()).hexdigest()
+            self._conn.execute(
+                "CREATE (:ReferenceIntent {id: $id, source_id: $source_id, reference: $reference})",
+                {"id": intent_id, "source_id": source_id, "reference": value},
+            )
+
+    def backfill_references(self) -> None:
+        """Rebuild current reference edges from intent, independent of ingest order."""
+        self._conn.execute("MATCH ()-[reference:REFERENCES]->() DELETE reference")
+        intents = self._conn.execute(
+            "MATCH (intent:ReferenceIntent) RETURN intent.source_id, intent.reference "
+            "ORDER BY intent.source_id, intent.reference"
+        )
+        while intents.has_next():
+            row = intents.get_next()
+            source_id = str(_unwrap(row[0]))
+            target_id = self.resolve_reference(str(_unwrap(row[1])))
+            if target_id is not None and target_id != source_id:
+                self.add_reference(source_id, target_id)
+
+    def resolve_reference(self, reference: str) -> str | None:
+        """Resolve exact paths first; basenames only when unambiguous."""
+        normalized = reference.strip().replace("\\\\", "/").rstrip("/")
+        if not normalized:
+            return None
+        candidates = self._conn.execute(
+            "MATCH (file:File) RETURN file.id, file.path, file.name ORDER BY file.path, file.id"
+        )
+        exact: list[str] = []
+        basename: list[str] = []
+        expected_path = normalized.removeprefix("./")
+        expected_name = Path(normalized).name
+        while candidates.has_next():
+            row = candidates.get_next()
+            file_id, path, name = (_unwrap(value) for value in row)
+            normalized_path = str(path).replace("\\\\", "/").rstrip("/")
+            if normalized_path == normalized or normalized_path.endswith(f"/{expected_path}"):
+                exact.append(str(file_id))
+            if str(name) == expected_name:
+                basename.append(str(file_id))
+        if len(exact) == 1:
+            return exact[0]
+        return basename[0] if len(basename) == 1 else None
 
     def add_duplicate(self, src_file_id: str, dst_file_id: str, similarity: float) -> None:
         """MATCH both File nodes, MERGE DUPLICATE_OF edge."""
@@ -267,6 +326,10 @@ class GraphStore:
 
     def delete_by_file(self, file_id: str) -> None:
         """DETACH DELETE the File node and its edges."""
+        self._conn.execute(
+            "MATCH (intent:ReferenceIntent {source_id: $source_id}) DELETE intent",
+            {"source_id": file_id},
+        )
         self._conn.execute(
             "MATCH (f:File {id: $id}) DETACH DELETE f",
             {"id": file_id},

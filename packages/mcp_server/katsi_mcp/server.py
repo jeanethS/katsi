@@ -15,6 +15,7 @@ from katsi_core.models import ContextBundle, FileHit, FileRecord
 from katsi_core.retrieve.context import build_context
 from katsi_core.retrieve.search import search
 from katsi_core.store.graph import GraphStore
+from katsi_core.store.projection_worker import ProjectionWorker
 from katsi_core.store.vectors import VectorStore
 from katsi_core.store.workspace_migrations import apply_migrations
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
@@ -61,6 +62,26 @@ def _services():
     return _state
 
 
+def _projection_diagnostics(svc: dict) -> list[dict[str, object]]:
+    """Serialize authoritative projection offsets for status and retrieval output."""
+    database = svc.get("workspace_database")
+    if database is None:
+        return []
+    worker = ProjectionWorker(database, svc["settings"].workspace.projection_worker)
+    return [
+        {
+            "workspace_id": str(workspace_id),
+            "projection_name": entry.projection_name,
+            "applied_outbox_id": entry.applied_outbox_id,
+            "latest_outbox_id": entry.latest_outbox_id,
+            "lag": entry.lag,
+            "lagging": entry.lagging,
+        }
+        for workspace_id, entries in worker.all_freshness().items()
+        for entry in entries
+    ]
+
+
 # --- MCP tools ---
 
 
@@ -81,11 +102,14 @@ def index_status() -> dict:
     except Exception as e:
         logger.warning("index_status: vector count failed: %r", e)
         total_chunks = 0
+    diagnostics = _projection_diagnostics(svc)
     return {
         "counts_by_status": counts,
         "total_files": total_files,
         "total_chunks": total_chunks,
         "last_indexed_at": last_indexed.isoformat() if last_indexed else None,
+        "projection_diagnostics": diagnostics,
+        "projection_lag": any(item["lagging"] for item in diagnostics),
     }
 
 
@@ -110,7 +134,7 @@ def get_context(query: str, max_tokens: int = 3000) -> ContextBundle:
     """PRIMARY TOOL. Curated, budget-capped context for the client to answer over:
     file summaries + the few most relevant raw chunks + a graph relationship sketch."""
     svc = _services()
-    return build_context(
+    bundle = build_context(
         query,
         max_tokens=max_tokens,
         settings=svc["settings"],
@@ -118,6 +142,13 @@ def get_context(query: str, max_tokens: int = 3000) -> ContextBundle:
         graph=svc["graph"],
         embed=svc["embed"],
         records=svc["records"],
+    )
+    diagnostics = _projection_diagnostics(svc)
+    return bundle.model_copy(
+        update={
+            "projection_diagnostics": diagnostics,
+            "projection_lag": any(item["lagging"] for item in diagnostics),
+        }
     )
 
 

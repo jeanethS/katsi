@@ -1,36 +1,17 @@
 from __future__ import annotations
 
 import logging
-import os
 
-from katsi_core.models import FileRecord
+from katsi_core.models import Chunk, FileRecord, IndexStatus
 from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 logger = logging.getLogger(__name__)
 
-
-def _basename(ref: str) -> str:
-    """Strip whitespace and path separators, return basename."""
-    return os.path.basename(ref.strip().rstrip("/\\").strip())
-
-
-def _resolve_reference(graph: GraphStore, ref: str) -> str | None:
-    """Try to find a File node whose name matches the reference basename."""
-    base = _basename(ref)
-    if not base:
-        return None
-    try:
-        res = graph._conn.execute(
-            "MATCH (o:File {name:$name}) RETURN o.id",
-            {"name": base},
-        )
-        if res.has_next():
-            row = res.get_next()
-            val = row[0]
-            return val.value if hasattr(val, "value") else val
-    except Exception as e:
-        logger.warning("enrich._resolve_reference: lookup failed for %r: %r", ref, e)
-    return None
+# A resource publishes current chunks only while its content was successfully
+# processed. Deleted, errored, or not-yet-indexed resources are excluded so
+# stale vectors never pollute current retrieval.
+_PUBLISHABLE_STATUSES: frozenset[IndexStatus] = frozenset({IndexStatus.INDEXED, IndexStatus.STALE})
 
 
 def apply_extraction(
@@ -45,7 +26,7 @@ def apply_extraction(
       2. upsert_file(file_record)
       3. add_mentions(file_id, entities)
       4. add_about(file_id, topics)
-      5. add_reference edges for resolvable references.
+      5. persist reference intent and backfill current edges.
 
     The graph is a current projection, not historical provenance. Removing the
     old File node prevents changed extraction from retaining stale edges.
@@ -56,16 +37,28 @@ def apply_extraction(
         graph.add_mentions(file_record.id, extraction.entities)
     if extraction.topics:
         graph.add_about(file_record.id, extraction.topics)
-    if extraction.references:
-        for ref in extraction.references:
-            target_id = _resolve_reference(graph, ref)
-            if target_id is not None and target_id != file_record.id:
-                try:
-                    graph.add_reference(file_record.id, target_id)
-                except Exception as e:
-                    logger.debug(
-                        "add_reference %s->%s failed: %r",
-                        file_record.id,
-                        target_id,
-                        e,
-                    )
+    graph.replace_reference_intents(file_record.id, extraction.references)
+    graph.backfill_references()
+
+
+def project_chunks(
+    file_record: FileRecord,
+    chunks: list[Chunk],
+    vectors: list[list[float]],
+    vector_store: VectorStore,
+) -> None:
+    """Push chunks into the vector projection.
+
+    Mirrors ``apply_extraction``'s replace semantics for the graph projection:
+      1. remove the resource's previous current chunks
+      2. publish the new chunks only when the resource is current.
+
+    Deleted or errored resources are excluded: their previous chunks are
+    removed and no new chunks are written, so stale vectors never survive a
+    failed re-index or a resource leaving current state.
+    """
+    vector_store.delete_by_file(file_record.id)
+    if file_record.status not in _PUBLISHABLE_STATUSES:
+        return
+    if chunks:
+        vector_store.upsert_chunks(chunks, vectors)

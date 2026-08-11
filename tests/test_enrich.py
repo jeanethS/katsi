@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from katsi_core.ingest.enrich import apply_extraction
-from katsi_core.models import Extraction, FileRecord, IndexStatus
+from katsi_core.ingest.enrich import apply_extraction, project_chunks
+from katsi_core.models import Chunk, Extraction, FileRecord, IndexStatus
 from katsi_core.store.graph import GraphStore
+from katsi_core.store.vectors import VectorStore
 
 
 def _make_record(
@@ -119,6 +120,42 @@ def test_apply_extraction_skips_unresolvable_reference(tmp_path):
     assert graph.get_file(f1_id) is not None
 
 
+def test_apply_extraction_backfills_reference_when_target_arrives_later(tmp_path):
+    """Reference edges converge regardless of which file is projected first."""
+    graph = GraphStore(tmp_path / "graph")
+    source = _make_record(tmp_path, "source", "source.md")
+    target = _make_record(tmp_path, "target", "target.md")
+    apply_extraction(
+        source,
+        Extraction(summary="source", entities=[], topics=[], references=["target.md"]),
+        graph,
+    )
+    assert graph.neighbors("source") == []
+
+    apply_extraction(
+        target,
+        Extraction(summary="target", entities=[], topics=[], references=[]),
+        graph,
+    )
+    assert [neighbor["file_id"] for neighbor in graph.neighbors("source")] == ["target"]
+
+
+def test_reference_backfill_refuses_ambiguous_basename(tmp_path):
+    """Duplicate basenames must not make reference resolution order-dependent."""
+    graph = GraphStore(tmp_path / "graph")
+    source = _make_record(tmp_path, "source", "source.md")
+    left = _make_record(tmp_path, "left", "one/target.md")
+    right = _make_record(tmp_path, "right", "two/target.md")
+    for record, references in ((source, ["target.md"]), (left, []), (right, [])):
+        apply_extraction(
+            record,
+            Extraction(summary=record.id, entities=[], topics=[], references=references),
+            graph,
+        )
+
+    assert graph.neighbors("source") == []
+
+
 def test_apply_extraction_idempotent(tmp_path):
     """Call apply_extraction twice -> same nodes (counts unchanged on second call)."""
     graph = GraphStore(tmp_path / "graph")
@@ -191,3 +228,94 @@ def test_reapplying_extraction_replaces_stale_current_relationships(tmp_path):
     assert not old_edges.has_next()
     assert not old_topics.has_next()
     assert new_edges.has_next()
+
+
+def test_project_chunks_replaces_current_chunks(tmp_path):
+    """Re-projecting a resource replaces its previous current chunks."""
+    vectors = VectorStore(tmp_path / "vectors")
+    vectors.init_table(embed_dim=4)
+    record = _make_record(tmp_path, "f1", "a.md")
+
+    first = [
+        Chunk(id="f1:0", file_id="f1", ordinal=0, text="a", token_count=1),
+        Chunk(id="f1:1", file_id="f1", ordinal=1, text="b", token_count=1),
+    ]
+    project_chunks(record, first, [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]], vectors)
+    assert vectors.count() == 2
+
+    second = [Chunk(id="f1:0", file_id="f1", ordinal=0, text="c", token_count=1)]
+    project_chunks(record, second, [[0.5, 0.5, 0.0, 0.0]], vectors)
+    # Old chunks replaced; only the new current set remains.
+    assert vectors.count() == 1
+
+
+def test_project_chunks_excludes_errored_resource(tmp_path):
+    """An errored resource's previous chunks are removed and none published."""
+    vectors = VectorStore(tmp_path / "vectors")
+    vectors.init_table(embed_dim=4)
+    indexed = _make_record(tmp_path, "f1", "a.md")
+
+    project_chunks(
+        indexed,
+        [Chunk(id="f1:0", file_id="f1", ordinal=0, text="a", token_count=1)],
+        [[1.0, 0.0, 0.0, 0.0]],
+        vectors,
+    )
+    assert vectors.count() == 1
+
+    errored = indexed.model_copy(update={"status": IndexStatus.ERROR})
+    project_chunks(
+        errored,
+        [Chunk(id="f1:0", file_id="f1", ordinal=0, text="b", token_count=1)],
+        [[0.0, 1.0, 0.0, 0.0]],
+        vectors,
+    )
+    # The errored resource is excluded: stale chunks gone, none re-published.
+    assert vectors.count() == 0
+
+
+def test_project_chunks_excludes_non_current_resource(tmp_path):
+    """A resource leaving current state (e.g. deleted) drops its chunks."""
+    vectors = VectorStore(tmp_path / "vectors")
+    vectors.init_table(embed_dim=4)
+    indexed = _make_record(tmp_path, "f1", "a.md")
+
+    project_chunks(
+        indexed,
+        [Chunk(id="f1:0", file_id="f1", ordinal=0, text="a", token_count=1)],
+        [[1.0, 0.0, 0.0, 0.0]],
+        vectors,
+    )
+    assert vectors.count() == 1
+
+    # A resource no longer current is represented by a non-publishable status.
+    pending = indexed.model_copy(update={"status": IndexStatus.PENDING})
+    project_chunks(pending, [], [], vectors)
+    assert vectors.count() == 0
+
+
+def test_project_chunks_excluded_resource_is_not_searchable(tmp_path):
+    """Deleted or errored resources cannot remain searchable after re-projection."""
+    vectors = VectorStore(tmp_path / "vectors")
+    vectors.init_table(embed_dim=4)
+    indexed = _make_record(tmp_path, "f1", "a.md")
+
+    project_chunks(
+        indexed,
+        [Chunk(id="f1:0", file_id="f1", ordinal=0, text="a", token_count=1)],
+        [[1.0, 0.0, 0.0, 0.0]],
+        vectors,
+    )
+    assert vectors.search([1.0, 0.0, 0.0, 0.0], k=5) != []
+
+    # A later errored re-projection removes the stale chunks and publishes none,
+    # so the resource cannot be found through current retrieval.
+    errored = indexed.model_copy(update={"status": IndexStatus.ERROR})
+    project_chunks(
+        errored,
+        [Chunk(id="f1:0", file_id="f1", ordinal=0, text="b", token_count=1)],
+        [[0.0, 1.0, 0.0, 0.0]],
+        vectors,
+    )
+    assert vectors.search([1.0, 0.0, 0.0, 0.0], k=5) == []
+    assert vectors.search([0.0, 1.0, 0.0, 0.0], k=5) == []

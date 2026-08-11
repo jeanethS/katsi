@@ -428,6 +428,42 @@ def test_brief_reports_projection_lag_and_clears_when_caught_up(tmp_path: Path) 
     assert caught_up.projection_lag is False
 
 
+def test_authoritative_claim_operation_succeeds_while_projections_lag(tmp_path: Path) -> None:
+    """Projection lag reduces retrieval freshness but never blocks durable state writes."""
+    (
+        workspace,
+        author,
+        _intents,
+        claims,
+        _records,
+        _leases,
+        brief,
+        repository,
+        _database,
+    ) = _build(tmp_path)
+    _append(
+        repository,
+        workspace,
+        WorkspaceEventKind.RESOURCE_UPDATED,
+        projection_payloads={"graph": {"action": "replace"}, "vector": {"action": "replace"}},
+    )
+    assert brief.assemble(workspace.id, byte_budget=_BUDGET).projection_lag is True
+
+    claim = Claim(
+        id=uuid4(),
+        workspace_id=workspace.id,
+        author_id=author.id,
+        text="Authoritative SQLite operations remain available during projection lag.",
+        confidence=0.7,
+        created_at=datetime.now(UTC),
+    )
+    claims.publish(claim)
+
+    result = brief.assemble(workspace.id, byte_budget=_BUDGET)
+    assert result.projection_lag is True
+    assert [included.id for included in result.claims] == [claim.id]
+
+
 def test_brief_unknown_workspace_raises(tmp_path: Path) -> None:
     (
         _workspace,

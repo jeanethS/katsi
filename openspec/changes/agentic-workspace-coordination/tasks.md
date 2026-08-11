@@ -60,9 +60,9 @@
 
 - [x] 7.1 Implement an idempotent projection worker that consumes ordered outbox entries and records per-projection offsets.
 - [x] 7.2 Change graph enrichment to replace a resource version's current entities, topics, and references instead of accumulating stale edges.
-- [ ] 7.3 Change vector projection to replace current chunks and exclude deleted or errored resources.
-- [ ] 7.4 Implement reference backfill and deterministic resolution without depending on ingest order.
-- [ ] 7.5 Expose projection lag and last applied offsets in status and retrieval diagnostics.
+- [x] 7.3 Change vector projection to replace current chunks and exclude deleted or errored resources.
+- [x] 7.4 Implement reference backfill and deterministic resolution without depending on ingest order.
+- [x] 7.5 Expose projection lag and last applied offsets in status and retrieval diagnostics.
 - [ ] 7.6 Implement full Kùzu and LanceDB rebuilds from authoritative resources and cached enrichment.
 - [ ] 7.7 Add failure-injection tests proving authoritative events survive graph/vector failure and rebuild invokes no unnecessary local-model calls.
 
@@ -91,8 +91,8 @@
 - [x] 10.2 Expose overlapping active advisory work without blocking exploration or Change Set proposal.
 - [ ] 10.3 Implement brief assembly from authoritative goal, intent, Claims, decisions, open work, leases, changes, and invalidation state.
 - [ ] 10.4 Fuse graph/vector context into Workspace Briefs while preserving provenance, evidence status, projection offsets, and lag warnings.
-- [ ] 10.5 Replace fixed per-file token estimates with serialized budget accounting and explicit omission/provisional markers.
-- [ ] 10.6 Add tests for lease expiry, overlap visibility, strict brief budgets, stale context labeling, and operation while projections lag.
+- [x] 10.5 Replace fixed per-file token estimates with serialized budget accounting and explicit omission/provisional markers.
+- [x] 10.6 Add tests for lease expiry, overlap visibility, strict brief budgets, stale context labeling, and operation while projections lag.
 
 ## 11. MCP and CLI Coordination Surfaces
 
@@ -106,7 +106,7 @@
 ## 12. Change Set Models and Lifecycle
 
 - [ ] 12.1 Implement strict immutable Change Set, dependency, precondition, operation, postcondition, rollback, idempotency, and successor-version models.
-- [ ] 12.2 Implement append-only transition history and reject every lifecycle transition not allowed by the design state machine.
+- [x] 12.2 Implement append-only transition history and reject every lifecycle transition not allowed by the design state machine.
 - [ ] 12.3 Implement proposal submission that freezes content and creates a linked successor for every revision.
 - [ ] 12.4 Persist exact resource-version dependencies, absence assertions, invariant versions, intended outputs, operation/byte limits, and risk class.
 - [ ] 12.5 Add query APIs for current status, full transition history, validation evidence, authorization evidence, and terminal action receipts.

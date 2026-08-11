@@ -80,6 +80,43 @@ def test_delete_by_file(tmp_path):
     assert vs.count() == 0
 
 
+def test_search_reflects_replaced_current_chunks(tmp_path):
+    """Re-upserting a file's chunks must drop the previous version from search."""
+    vs = VectorStore(tmp_path / "vectors", "test_chunks")
+    vs.init_table(embed_dim=4)
+
+    vs.upsert_chunks(
+        [Chunk(id="c1", file_id="f1", ordinal=0, text="old", token_count=1)],
+        [[1.0, 0.0, 0.0, 0.0]],
+    )
+    # Replace f1's current chunks with a new resource version.
+    vs.upsert_chunks(
+        [Chunk(id="c2", file_id="f1", ordinal=0, text="new", token_count=1)],
+        [[0.0, 1.0, 0.0, 0.0]],
+    )
+
+    # A query matching the replaced chunk cannot surface the old version.
+    hits = vs.search([1.0, 0.0, 0.0, 0.0], k=5)
+    assert all(cid != "c1" for cid, _fid, _score in hits)
+    assert any(cid == "c2" for cid, _fid, _score in hits)
+
+
+def test_delete_by_file_makes_chunks_unsearchable(tmp_path):
+    """Deleted resources cannot remain in current search results."""
+    vs = VectorStore(tmp_path / "vectors", "test_chunks")
+    vs.init_table(embed_dim=4)
+
+    vs.upsert_chunks(
+        [Chunk(id="c1", file_id="f1", ordinal=0, text="a", token_count=1)],
+        [[1.0, 0.0, 0.0, 0.0]],
+    )
+    vs.delete_by_file("f1")
+
+    hits = vs.search([1.0, 0.0, 0.0, 0.0], k=5)
+    assert hits == []
+    assert all(fid != "f1" for _cid, fid, _score in hits)
+
+
 def test_search_returns_three_tuple(tmp_path):
     vs = VectorStore(tmp_path / "vectors", "test_chunks")
     vs.init_table(embed_dim=4)

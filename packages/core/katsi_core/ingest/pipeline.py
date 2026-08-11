@@ -11,7 +11,7 @@ from katsi_core.clients.embed import EmbedClient
 from katsi_core.clients.llm import ExtractionError, LLMClient
 from katsi_core.config import Settings
 from katsi_core.ingest.chunk import chunk
-from katsi_core.ingest.enrich import apply_extraction
+from katsi_core.ingest.enrich import apply_extraction, project_chunks
 from katsi_core.ingest.extract import extract_text
 from katsi_core.ingest.records import FileRecordStore
 from katsi_core.models import FileRecord, IndexStatus
@@ -207,7 +207,15 @@ class IngestPipeline:
             self._record_store().put(record)
             return record
 
-        # ---- embed + vector upsert ------------------------------------
+        # ---- current record (shared by vector + graph projections) ----
+        record = FileRecord(
+            **record_template,
+            status=IndexStatus.INDEXED,
+            summary=extraction.summary,
+            last_indexed_at=datetime.now(timezone.utc),  # noqa: UP017
+        )
+
+        # ---- embed + vector projection --------------------------------
         try:
             embed_client = self._embed_client()
             vs = self._vector_store()
@@ -216,25 +224,23 @@ class IngestPipeline:
                 self._vectors_inited = True
             chunk_texts = [c.text for c in chunks]
             vectors = embed_client.embed(chunk_texts)
-            vs.upsert_chunks(chunks, vectors)
+            project_chunks(record, chunks, vectors, vs)
         except Exception as error:
-            logger.warning("index_file: embed/vector upsert failed for %s: %r", p, error)
-            record = FileRecord(
-                **record_template,
-                status=IndexStatus.ERROR,
-                error=f"embed/vector failure: {error}",
-                summary=None,
+            # An errored resource is excluded from current projections so stale
+            # chunks never survive a failed re-index.
+            logger.warning("index_file: vector projection failed for %s: %r", p, error)
+            self._delete_current_projections(file_id)
+            record = record.model_copy(
+                update={
+                    "status": IndexStatus.ERROR,
+                    "error": f"embed/vector failure: {error}",
+                    "summary": None,
+                }
             )
             self._record_store().put(record)
             return record
 
-        # ---- graph writes ---------------------------------------------
-        record = FileRecord(
-            **record_template,
-            status=IndexStatus.INDEXED,
-            summary=extraction.summary,
-            last_indexed_at=datetime.now(timezone.utc),  # noqa: UP017
-        )
+        # ---- graph projection -----------------------------------------
         try:
             apply_extraction(record, extraction, self._graph_store())
         except Exception as e:

@@ -12,7 +12,11 @@ from katsi_core.ingest.records import FileRecordStore
 from katsi_core.models import Extraction
 from katsi_core.store.graph import GraphStore
 from katsi_core.store.vectors import VectorStore
+from katsi_core.store.workspace_migrations import apply_migrations
+from katsi_core.store.workspace_repository import WorkspaceRepository
+from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.synth import SynthConfigError
+from katsi_core.workspace.contracts import WorkspaceEventKind
 
 
 class _FakeEmbed:
@@ -89,6 +93,43 @@ def test_index_status_counts_zero_when_empty(server_state):
     assert res["total_files"] == 0
     assert res["total_chunks"] == 0
     assert res["last_indexed_at"] is None
+    assert res["projection_diagnostics"] == []
+    assert res["projection_lag"] is False
+
+
+def test_status_and_context_expose_authoritative_projection_lag(server_state, tmp_path):
+    srv, _embed, _llm, _records = server_state
+    database = WorkspaceSQLite(
+        tmp_path / "workspace.sqlite3", srv._state["settings"].workspace.sqlite
+    )
+    with database.connection() as connection:
+        apply_migrations(connection, target_version=3)
+    root = tmp_path / "workspace"
+    root.mkdir()
+    workspace = WorkspaceRepository(database).register_workspace(root, "Workspace")
+    WorkspaceRepository(database).append_event(
+        workspace.id,
+        workspace.state_version,
+        WorkspaceEventKind.RESOURCE_UPDATED,
+        projection_payloads={"vector": {"action": "replace"}},
+    )
+    srv._state["workspace_database"] = database
+
+    status = srv.index_status()
+    assert status["projection_lag"] is True
+    assert status["projection_diagnostics"] == [
+        {
+            "workspace_id": str(workspace.id),
+            "projection_name": "vector",
+            "applied_outbox_id": 0,
+            "latest_outbox_id": 1,
+            "lag": 1,
+            "lagging": True,
+        }
+    ]
+    context = srv.get_context("anything", max_tokens=500)
+    assert context.projection_lag is True
+    assert context.projection_diagnostics == status["projection_diagnostics"]
 
 
 def test_get_context_returns_empty_bundle_when_unindexed(server_state):

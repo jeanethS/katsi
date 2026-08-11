@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class IndexStatus(StrEnum):
@@ -86,3 +86,5 @@ class ContextBundle(BaseModel):
     chunks: list[Chunk]  # only the few highest-scoring raw chunks
     relationships: list[str]  # human-readable graph sketch lines
     token_estimate: int
+    projection_diagnostics: list[dict[str, object]] = Field(default_factory=list)
+    projection_lag: bool = False

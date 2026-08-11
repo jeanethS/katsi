@@ -14,7 +14,8 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from katsi_core.config import BriefSettings
+from katsi_core.config import BriefSettings, ProjectionWorkerSettings
+from katsi_core.store.projection_worker import ProjectionWorker
 from katsi_core.store.workspace_repository import WorkspaceRepository
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.workspace.budget import BudgetItem, BudgetResult, SerializedBudgeter
@@ -265,28 +266,9 @@ class BriefService:
         return [self._brief_event(event) for event in events]
 
     def _projection_freshness(self, workspace_id: WorkspaceId) -> list[ProjectionFreshness]:
-        with self._database.connection() as connection:
-            offset_rows = connection.execute(
-                "SELECT projection_name, outbox_id FROM projection_offsets WHERE workspace_id = ?",
-                (str(workspace_id),),
-            ).fetchall()
-            latest_rows = connection.execute(
-                "SELECT projection_name, MAX(id) AS latest FROM projection_outbox "
-                "WHERE workspace_id = ? GROUP BY projection_name",
-                (str(workspace_id),),
-            ).fetchall()
-        applied = {row["projection_name"]: int(row["outbox_id"]) for row in offset_rows}
-        latest = {row["projection_name"]: int(row["latest"]) for row in latest_rows}
-        return [
-            ProjectionFreshness(
-                projection_name=name,
-                applied_outbox_id=applied.get(name, 0),
-                latest_outbox_id=latest.get(name, 0),
-                lag=max(0, latest.get(name, 0) - applied.get(name, 0)),
-                lagging=latest.get(name, 0) > applied.get(name, 0),
-            )
-            for name in sorted(set(applied) | set(latest))
-        ]
+        return list(
+            ProjectionWorker(self._database, ProjectionWorkerSettings()).freshness(workspace_id)
+        )
 
     @staticmethod
     def _selected(

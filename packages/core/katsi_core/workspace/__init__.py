@@ -1,6 +1,7 @@
 """Authoritative workspace coordination contracts and errors."""
 
 from katsi_core.workspace.brief import BriefService
+from katsi_core.workspace.change_sets import ChangeSetService
 from katsi_core.workspace.claims import ClaimService
 from katsi_core.workspace.contracts import (
     ActionOutcome,
@@ -101,6 +102,7 @@ __all__ = [
     "IntentService",
     "WorkLeaseService",
     "ClaimService",
+    "ChangeSetService",
     "FilesystemEvent",
     "FilesystemEventKind",
     "FilesystemObserver",

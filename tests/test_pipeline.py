@@ -36,6 +36,18 @@ class _FakeEmbed:
         return [[0.5] * self.dim for _ in texts]
 
 
+class _FakeEmbedError:
+    """Always fails embedding, simulating a vector-projection failure."""
+
+    def __init__(self, dim: int = 8):
+        self.dim = dim
+        self.embed_call_count = 0
+
+    def embed(self, texts):
+        self.embed_call_count += 1
+        raise RuntimeError("embed failure")
+
+
 class _FakeOllama:
     def __init__(self, content: str):
         self.message = SimpleNamespace(content=content)
@@ -261,6 +273,41 @@ def test_terminal_extraction_error_removes_previous_current_projections(tmp_path
     assert failed.status == IndexStatus.ERROR
     assert graph.get_file(first.id) is None
     assert vectors.count() == 0
+
+
+def test_vector_projection_failure_excludes_resource_from_current_projections(tmp_path):
+    """A resource whose vector projection fails is excluded from current projections."""
+    path = _write_file(tmp_path / "x.md", "# First\n\ncontent\n")
+    graph = GraphStore(tmp_path / "graph")
+    vectors = VectorStore(tmp_path / "vectors")
+    records = FileRecordStore(tmp_path / "records")
+    successful = IngestPipeline(
+        graph=graph,
+        vectors=vectors,
+        embed=_FakeEmbed(),
+        llm=_FakeLLM(EXTRACTION_JSON),
+        records=records,
+    )
+    first = successful.index_file(path)
+    assert first.status == IndexStatus.INDEXED
+    assert vectors.count() > 0
+    assert graph.get_file(first.id) is not None
+
+    _write_file(path, "# Changed\n\ncontent\n")
+    failed = IngestPipeline(
+        graph=graph,
+        vectors=vectors,
+        embed=_FakeEmbedError(),
+        llm=_FakeLLM(EXTRACTION_JSON),
+        records=records,
+    ).index_file(path)
+
+    assert failed.status == IndexStatus.ERROR
+    assert failed.error is not None
+    assert "embed/vector failure" in failed.error
+    # The errored resource is excluded from current search and relationships.
+    assert vectors.count() == 0
+    assert graph.get_file(first.id) is None
 
 
 def test_index_file_reindexes_when_content_changes(tmp_path):

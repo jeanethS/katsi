@@ -6,11 +6,12 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from uuid import UUID
 
 from katsi_core.config import ProjectionWorkerSettings
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.store.workspace_transactions import write_transaction
-from katsi_core.workspace.contracts import WorkspaceId
+from katsi_core.workspace.contracts import ProjectionFreshness, WorkspaceId
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +70,48 @@ class ProjectionWorker:
             workspace_id=workspace_id,
             outbox_id=int(row["outbox_id"]) if row else 0,
         )
+
+    def freshness(self, workspace_id: WorkspaceId) -> tuple[ProjectionFreshness, ...]:
+        """Report applied and latest offsets for one authoritative workspace."""
+        with self._database.connection() as connection:
+            offsets = connection.execute(
+                "SELECT projection_name, outbox_id FROM projection_offsets WHERE workspace_id = ?",
+                (str(workspace_id),),
+            ).fetchall()
+            outbox_rows = connection.execute(
+                "SELECT projection_name, id FROM projection_outbox WHERE workspace_id = ?",
+                (str(workspace_id),),
+            ).fetchall()
+        applied_by_name = {row["projection_name"]: int(row["outbox_id"]) for row in offsets}
+        latest_by_name: dict[str, int] = {}
+        lag_by_name: dict[str, int] = {}
+        for row in outbox_rows:
+            name = row["projection_name"]
+            outbox_id = int(row["id"])
+            latest_by_name[name] = max(latest_by_name.get(name, 0), outbox_id)
+            if outbox_id > applied_by_name.get(name, 0):
+                lag_by_name[name] = lag_by_name.get(name, 0) + 1
+        return tuple(
+            ProjectionFreshness(
+                projection_name=name,
+                applied_outbox_id=applied_by_name.get(name, 0),
+                latest_outbox_id=latest_by_name.get(name, 0),
+                lag=lag_by_name.get(name, 0),
+                lagging=lag_by_name.get(name, 0) > 0,
+            )
+            for name in sorted(set(applied_by_name) | set(latest_by_name))
+        )
+
+    def all_freshness(self) -> dict[WorkspaceId, tuple[ProjectionFreshness, ...]]:
+        """Report projection freshness for every workspace with projection state."""
+        with self._database.connection() as connection:
+            rows = connection.execute(
+                "SELECT workspace_id FROM projection_outbox "
+                "UNION SELECT workspace_id FROM projection_offsets ORDER BY workspace_id"
+            ).fetchall()
+        return {
+            UUID(row["workspace_id"]): self.freshness(UUID(row["workspace_id"])) for row in rows
+        }
 
     def _entries_after_offset(
         self, workspace_id: WorkspaceId, projection_name: str
