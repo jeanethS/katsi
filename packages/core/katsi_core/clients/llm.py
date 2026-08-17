@@ -43,6 +43,34 @@ Return ONLY the JSON object. No prose, no code fences, no markdown, no
 preamble, no trailing text. Output nothing else."""
 
 
+# Handed to ollama as a decoding constraint. Written out explicitly rather than
+# derived from Extraction.model_json_schema(): `entities` is typed `list[dict]`
+# there, which produces `additionalProperties: true` with no required keys, so
+# the model may emit entities lacking name/kind that StrictExtraction rejects.
+EXTRACTION_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "entities": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["person", "org", "project"]},
+                },
+                "required": ["name", "kind"],
+                "additionalProperties": False,
+            },
+        },
+        "topics": {"type": "array", "items": {"type": "string"}},
+        "references": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["summary", "entities", "topics", "references"],
+    "additionalProperties": False,
+}
+
+
 class LLMClient:
     """Ollama chat client with strict-JSON extraction.  Retries ONCE on a parse
     failure, then raises :class:`ExtractionError`."""
@@ -66,9 +94,11 @@ class LLMClient:
             )
         return self._client
 
-    def _chat(self, system_prompt: str, user_text: str) -> str:
-        """Internal: invoke ollama chat with ``format='json'`` and return
-        the content string.
+    def _chat(self, system_prompt: str, user_text: str, format: object = "json") -> str:
+        """Internal: invoke ollama chat and return the content string.
+
+        ``format`` accepts ollama's ``"json"`` free-form mode or a JSON Schema
+        dict, which constrains decoding to that exact shape.
 
         Uses ``self._settings.ollama.llm_model``.
         """
@@ -78,8 +108,8 @@ class LLMClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_text},
             ],
-            format="json",
-            options={"temperature": 0.1},
+            format=format,
+            options={"temperature": 0.1, "num_ctx": self._settings.ollama.num_ctx},
         )
         return resp.message.content
 
@@ -130,9 +160,14 @@ class LLMClient:
         """
         last_err: Exception | None = None
         last_raw = ""
+        # Anything past the context window is dropped by ollama anyway; cutting
+        # it here keeps the prompt coherent instead of silently truncated.
+        budget = self._settings.ingest.max_extraction_chars
+        if len(text) > budget:
+            text = text[:budget]
         for _ in range(attempts):
             try:
-                raw = self._chat(SYSTEM_PROMPT, text)
+                raw = self._chat(SYSTEM_PROMPT, text, format=EXTRACTION_SCHEMA)
                 last_raw = raw
                 cleaned = _clean_json(raw)
                 parsed = json.loads(cleaned)

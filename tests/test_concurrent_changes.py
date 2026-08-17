@@ -471,8 +471,14 @@ def test_various_dependency_scenarios_version_based(tmp_path: Path) -> None:
     validation_after = validation_service.validate_dependency_closure(proposal)
     assert validation_after.is_valid, "Version dependency should still be satisfied"
 
-    # But if we delete the version, it should fail
+    # But if we delete the version and its dependency reference, it should fail
     with database.connection() as connection:
+        # First remove the foreign key reference
+        connection.execute(
+            "DELETE FROM change_set_dependencies WHERE change_set_id = ? AND resource_id = ?",
+            (str(proposal.id), str(resource_id)),
+        )
+        # Then delete the version (now safe due to no FK references)
         connection.execute(
             "DELETE FROM resource_versions WHERE id = ?",
             (str(version_id),),
@@ -493,35 +499,42 @@ def test_various_dependency_scenarios_absence_assertion(tmp_path: Path) -> None:
     change_set_service = ChangeSetService(database)
     validation_service = ValidationService(database)
 
-    # Proposal expecting a resource to be absent
-    absent_resource_id = uuid4()
+    # First create a resource, then delete it to create a real resource_id
+    existing_resource_id, _ = _create_resource(repository, workspace, "will_delete.py", HASH_A)
+
+    # Delete the resource so it no longer exists
+    with database.connection() as connection:
+        connection.execute(
+            "UPDATE resources SET status = ? WHERE id = ?",
+            (ResourceStatus.DELETED.value, str(existing_resource_id)),
+        )
+
+    # Proposal expecting the deleted resource to remain absent
     proposal = _submit_proposal(
         change_set_service, workspace, agent,
         title="Absence assertion proposal",
         idempotency_key="absence-test",
         dependencies=(ResourceDependency(
-            resource_id=absent_resource_id,
+            resource_id=existing_resource_id,
             expected_absent=True,
         ),),
         operations=(CreateFileOperation(path="new_file.py", byte_count=1, result_content_hash=HASH_A),),
     )
 
-    # Initial validation succeeds (resource doesn't exist)
+    # Initial validation succeeds (resource doesn't exist - was deleted)
     validation = validation_service.validate_dependency_closure(proposal)
     assert validation.is_valid
 
-    # Someone creates the resource concurrently
+    # Someone recreates the resource concurrently
     with database.connection() as connection:
         connection.execute(
-            """INSERT INTO resources VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (str(absent_resource_id), str(workspace.id), "unexpected.py",
-             ResourceStatus.CURRENT.value, 0, datetime.now(UTC).isoformat(),
-             datetime.now(UTC).isoformat()),
+            "UPDATE resources SET status = ? WHERE id = ?",
+            (ResourceStatus.CURRENT.value, str(existing_resource_id)),
         )
         version_id = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(version_id), str(absent_resource_id), HASH_B, 500,
+            (str(version_id), str(existing_resource_id), HASH_B, 500,
              datetime.now(UTC).isoformat(), str(uuid4())),
         )
 
@@ -529,7 +542,7 @@ def test_various_dependency_scenarios_absence_assertion(tmp_path: Path) -> None:
     failed_validation = validation_service.validate_dependency_closure(proposal)
     assert not failed_validation.is_valid
     assert len(failed_validation.unexpected_presence) == 1
-    assert failed_validation.unexpected_presence[0] == absent_resource_id
+    assert failed_validation.unexpected_presence[0] == existing_resource_id
 
 
 def test_race_condition_handling_during_validation(tmp_path: Path) -> None:
@@ -612,6 +625,8 @@ def test_revalidation_before_authorization_freshness(tmp_path: Path) -> None:
     )
 
     # Submit and validate
+    validation_result = validation_service.validate_dependency_closure(proposal)
+    validation_service.record_validation(proposal.id, validation_result)
     change_set_service.transition(proposal.id, ChangeSetStatus.VALIDATED, agent.id)
 
     # Check freshness immediately after validation (should be fresh)

@@ -1217,7 +1217,7 @@ class TestComprehensiveBoundaryScenarios:
                     path="src/original.py",
                     byte_count=100,
                     expected_content_hash="0123456789abcdef0123456789abcdef",
-                    result_content_hash="new",
+                    result_content_hash="fedcba9876543210fedcba9876543210",
                 ),
             ),
             risk=RiskClass.LOW,

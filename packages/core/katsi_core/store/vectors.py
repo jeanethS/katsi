@@ -40,6 +40,20 @@ class VectorStore:
         else:
             self._tbl = self._db.open_table(self._table_name)
 
+    def _require_table(self):
+        """Open the existing table on demand.
+
+        Read-only callers (search) never go through init_table, so the handle
+        is opened lazily here rather than left as None.
+        """
+        if self._tbl is None:
+            if self._table_name not in self._db.list_tables().tables:
+                raise RuntimeError(
+                    f"vector table {self._table_name!r} does not exist; index files first"
+                )
+            self._tbl = self._db.open_table(self._table_name)
+        return self._tbl
+
     def upsert_chunks(self, chunks: list[Chunk], vectors: list[list[float]]) -> None:
         """Add chunks; for each chunk's file_id, delete any existing rows first."""
         if not chunks and not vectors:
@@ -73,7 +87,7 @@ class VectorStore:
 
         Score = 1 / (1 + _distance), so higher is better.
         """
-        results = self._tbl.search(query_vector).limit(k).to_list()
+        results = self._require_table().search(query_vector).limit(k).to_list()
 
         class SearchResult:
             def __init__(self, id: str, file_id: str, score: float):

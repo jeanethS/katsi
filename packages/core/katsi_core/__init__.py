@@ -25,6 +25,26 @@ from katsi_core.workspace import (
     WorkspaceEvent,
 )
 
+# Re-export key multimedia contracts for convenience
+from katsi_core.media.contracts import (
+    DerivedRepresentation,
+    EvidenceLocatorUnion,
+    ImageRegionLocator,
+    MediaDescriptor,
+    MediaProcessingConfig,
+    MediaRepresentationKind,
+    MediaRepresentationStatus,
+    MediaTypeFamily,
+    PageLocator,
+    SceneLocator,
+    TextRangeLocator,
+    TimeRangeLocator,
+    VideoFrameLocator,
+    WholeResourceLocator,
+    chunk_to_representation,
+    extraction_to_representation,
+)
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -50,4 +70,21 @@ __all__ = [
     "Workspace",
     "WorkspaceError",
     "WorkspaceEvent",
+    # Multimedia contracts
+    "DerivedRepresentation",
+    "EvidenceLocatorUnion",
+    "ImageRegionLocator",
+    "MediaDescriptor",
+    "MediaProcessingConfig",
+    "MediaRepresentationKind",
+    "MediaRepresentationStatus",
+    "MediaTypeFamily",
+    "PageLocator",
+    "SceneLocator",
+    "TextRangeLocator",
+    "TimeRangeLocator",
+    "VideoFrameLocator",
+    "WholeResourceLocator",
+    "chunk_to_representation",
+    "extraction_to_representation",
 ]

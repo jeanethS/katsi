@@ -254,7 +254,8 @@ CREATE TABLE IF NOT EXISTS workspace_intents (
     workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
     goal TEXT NOT NULL,
     version INTEGER NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    invariants_json TEXT
 );
 """
 

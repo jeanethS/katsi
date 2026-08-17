@@ -63,6 +63,9 @@
 - [ ] 7.5 Implement optional anonymous speaker segmentation without real-world voice identity inference.
 - [ ] 7.6 Represent silence, music, unsupported language, and unrecognized speech without fabricating transcript text.
 - [ ] 7.7 Add short deterministic fixtures and tests for mono/stereo audio, multiple speakers, silence, partial duration, decoder failure, and cache reuse.
+- [ ] 7.8 Implement MediaSamplingSettings with configurable ChunkingThresholds (target_tokens, overlap, separator_hierarchy) as part of the pipeline fingerprint.
+- [ ] 7.9 Bind chunking policy changes to representation versioning so that different target_tokens or overlap values produce new representation versions instead of silently reusing cached chunks.
+- [ ] 7.10 Update existing chunk implementation to use MediaSamplingSettings instead of hardcoded parameters and ensure chunking thresholds are included in PipelineFingerprint computation.
 
 ## 8. Video Understanding
 

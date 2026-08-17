@@ -1,6 +1,7 @@
 """Tests for katsi_core.ingest.chunk."""
 
 from katsi_core.ingest.chunk import chunk, estimate_tokens
+from katsi_core.config import ChunkingThresholds
 
 
 def test_chunk_empty_returns_empty_list() -> None:
@@ -31,7 +32,7 @@ def test_chunk_long_text_multiple_chunks() -> None:
     # Pad to exactly 6000
     text = text[:6000]
 
-    result = chunk("f", text, target_tokens=512, overlap=64)
+    result = chunk("f", text, settings=ChunkingThresholds(target_tokens=512, overlap=64))
     assert len(result) >= 4
 
     # Ordinals are 0,1,2,...
@@ -54,15 +55,16 @@ def test_chunk_long_text_multiple_chunks() -> None:
 def test_chunk_ids_and_ordinals_are_deterministic() -> None:
     """Two calls with same args produce identical chunk lists."""
     text = "A " * 2000  # 4000 chars
-    a = chunk("f", text, target_tokens=512, overlap=64)
-    b = chunk("f", text, target_tokens=512, overlap=64)
+    settings = ChunkingThresholds(target_tokens=512, overlap=64)
+    a = chunk("f", text, settings=settings)
+    b = chunk("f", text, settings=settings)
     assert a == b
 
 
 def test_chunk_token_count_positive() -> None:
     """Every emitted chunk has token_count >= 1."""
     text = "A " * 2000
-    result = chunk("f", text, target_tokens=512, overlap=64)
+    result = chunk("f", text, settings=ChunkingThresholds(target_tokens=512, overlap=64))
     assert len(result) > 0
     for c in result:
         assert c.token_count >= 1
@@ -93,7 +95,7 @@ def test_no_content_loss_with_whitespace_run() -> None:
     after = "This is content after the whitespace run. " * 50  # ~2000 chars
     text = before + whitespace_run + after
 
-    result = chunk("test", text, target_tokens=512, overlap=64)
+    result = chunk("test", text, settings=ChunkingThresholds(target_tokens=512, overlap=64))
 
     # Check that we have chunks (not empty list, which would indicate total loss)
     assert len(result) > 0, "No chunks generated"
@@ -121,7 +123,7 @@ def test_prefers_paragraph_boundaries() -> None:
 
     text = "".join(paragraphs)
 
-    result = chunk("test", text, target_tokens=512, overlap=64)
+    result = chunk("test", text, settings=ChunkingThresholds(target_tokens=512, overlap=64))
 
     # Verify we got multiple chunks
     assert len(result) >= 2
@@ -145,7 +147,7 @@ def test_size_bound_respected() -> None:
     # Create text with normal content
     normal_text = "This is a test sentence. " * 500  # ~8000 chars
 
-    result = chunk("test", normal_text, target_tokens=512, overlap=64)
+    result = chunk("test", normal_text, settings=ChunkingThresholds(target_tokens=512, overlap=64))
 
     # All chunks should respect size bound
     for c in result:
@@ -154,7 +156,7 @@ def test_size_bound_respected() -> None:
 
     # Test with unbreakable atom (very long single word)
     long_word = "a" * 10000  # Single word longer than target
-    result = chunk("test", long_word, target_tokens=512, overlap=64)
+    result = chunk("test", long_word, settings=ChunkingThresholds(target_tokens=512, overlap=64))
 
     # Should produce chunks, but some may exceed target due to unbreakable atom
     # At least one chunk should be the unbreakable atom itself
@@ -166,7 +168,7 @@ def test_termination_on_pathological_input() -> None:
     # Create pathological input: no whitespace at all
     no_whitespace = "a" * 10000
 
-    result = chunk("test", no_whitespace, target_tokens=512, overlap=64)
+    result = chunk("test", no_whitespace, settings=ChunkingThresholds(target_tokens=512, overlap=64))
 
     # Should terminate and produce chunks
     assert len(result) >= 1

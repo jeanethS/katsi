@@ -269,6 +269,17 @@ Core defines protocols and strict Pydantic contracts without importing heavy med
 
 Optional end-to-end local tests are explicitly marked and excluded from CI by default.
 
+### 16. Chunking policy changes produce new representation versions
+
+Text chunking, OCR segment assembly, transcript chunking, and other sampling policies are explicit components of the pipeline fingerprint. All configurable sampling thresholds—target token counts, overlap sizes, separator hierarchies, keyframe budgets, segment limits—live in `MediaSamplingSettings` and are included in cache key computation.
+
+When any sampling threshold changes, the system creates a new representation version rather than reusing cached chunks. This binding prevents silent cache invalidation where increased token targets would reinterpret old evidence as if it had been chunked under the new policy.
+
+**Alternatives considered:**
+- **Version sampling policies independently:** Allows fine-grained reuse but explodes the fingerprint namespace and creates ambiguous policy interactions.
+- **Treat sampling as implementation detail:** Simple but prevents owner-driven chunking strategy changes and creates the exact silent-reuse bug this decision avoids.
+- **Re-chunk on every representation access:** Guarantees current policy but defeats the performance and reproducibility goals of content-addressed caching.
+
 ## Risks / Trade-offs
 
 - **[Media dependencies make installation large or fragile]** → Use optional modality extras, lazy adapter loading, availability probes, and text-only fallback.

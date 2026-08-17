@@ -310,9 +310,10 @@ def workspace_cmd(
 
     # Try to find existing workspace
     database = svc["workspace_database"]
-    existing = database.connection().execute(
-        "SELECT * FROM workspaces WHERE root_path = ?", (str(root_resolved),)
-    ).fetchone()
+    with database.connection() as connection:
+        existing = connection.execute(
+            "SELECT * FROM workspaces WHERE root_path = ?", (str(root_resolved),)
+        ).fetchone()
 
     if existing:
         table = Table(title="existing workspace")

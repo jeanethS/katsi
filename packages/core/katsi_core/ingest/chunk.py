@@ -1,12 +1,16 @@
-"""Text chunking with approximate token counting.
+"""Text chunking with configurable sampling thresholds.
 
-Token estimation uses non-whitespace density: count non-whitespace chars // 3.
-This excludes indentation and blank lines from the estimate, giving better
-results for code and padded text.
+Chunking policies are part of the pipeline fingerprint - changing any threshold
+invalidates cached representations and forces re-processing with the new policy.
+
+This ensures that different chunking strategies (e.g., token targets, overlap)
+produce distinct representation versions rather than silently reinterpreting cached
+chunks with incompatible parameters.
 """
 
 from __future__ import annotations
 
+from katsi_core.config import ChunkingThresholds
 from katsi_core.models import Chunk
 
 
@@ -144,10 +148,9 @@ def chunk(
     file_id: str,
     text: str,
     *,
-    target_tokens: int = 512,
-    overlap: int = 64,
+    settings: ChunkingThresholds | None = None,
 ) -> list[Chunk]:
-    """Split *text* into ~*target_tokens*-sized chunks with ~*overlap*-token overlap.
+    """Split *text* into chunks configured by ChunkingThresholds.
 
     Parameters
     ----------
@@ -155,10 +158,8 @@ def chunk(
         Stable identifier for the source file. Used as chunk id prefix.
     text:
         Source text to split.
-    target_tokens:
-        Approximate target size per chunk in tokens (non-whitespace density).
-    overlap:
-        Approximate overlap between consecutive chunks in tokens.
+    settings:
+        Configurable chunking thresholds. If None, uses default values.
 
     Notes
     -----
@@ -174,8 +175,16 @@ def chunk(
     - If the entire text is shorter than *target_tokens*, returns ONE chunk
       containing the whole text.
     """
+    # Use default settings if none provided
+    if settings is None:
+        settings = ChunkingThresholds()
+
     if not text or not text.strip():
         return []
+
+    target_tokens = settings.target_tokens
+    overlap = settings.overlap
+    separators = settings.separator_hierarchy
 
     # Check if entire text fits in one chunk
     if estimate_tokens(text) <= target_tokens:
@@ -189,8 +198,7 @@ def chunk(
             )
         ]
 
-    # Split recursively using separator hierarchy
-    separators = ["\n\n", "\n", ". ", " ", ""]
+    # Split recursively using configured separator hierarchy
     pieces = _split_recursively(text, target_tokens, separators)
 
     # Apply overlap as post-pass
