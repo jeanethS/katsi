@@ -23,40 +23,34 @@ from katsi_core.media.blob_store import (
 from katsi_core.media.contracts import (
     # Core models
     DerivedRepresentation,
+    EmbeddingSpaceFingerprint,
     EvidenceLocatorUnion,
-
-    # Evidence locators
-    WholeResourceLocator,
-    TextRangeLocator,
-    PageLocator,
     ImageRegionLocator,
-    TimeRangeLocator,
-    VideoFrameLocator,
-    SceneLocator,
-
+    MediaCoverage,
     # Descriptors and metadata
     MediaDescriptor,
-    MediaCoverage,
-    RepresentationError,
-
-    # Producer and pipeline
-    ProducerProvenance,
-    PipelineFingerprint,
-
+    MediaMimePattern,
+    MediaPipelineDefinition,
+    MediaPrivacyClass,
     # Configuration
     MediaProcessingConfig,
-    MediaPipelineDefinition,
-    MediaMimePattern,
-
+    MediaProducerType,
     # Enums
     MediaRepresentationKind,
     MediaRepresentationStatus,
     MediaTypeFamily,
-    MediaPrivacyClass,
-    MediaProducerType,
+    PageLocator,
+    PipelineFingerprint,
     PipelineStage,
-    EmbeddingSpaceFingerprint,
-
+    # Producer and pipeline
+    ProducerProvenance,
+    RepresentationError,
+    SceneLocator,
+    TextRangeLocator,
+    TimeRangeLocator,
+    VideoFrameLocator,
+    # Evidence locators
+    WholeResourceLocator,
     # Legacy compatibility
     chunk_to_representation,
     extraction_to_representation,
@@ -70,7 +64,6 @@ __all__ = [
     # Core models
     "DerivedRepresentation",
     "EvidenceLocatorUnion",
-
     # Evidence locators
     "WholeResourceLocator",
     "TextRangeLocator",
@@ -79,21 +72,17 @@ __all__ = [
     "TimeRangeLocator",
     "VideoFrameLocator",
     "SceneLocator",
-
     # Descriptors and metadata
     "MediaDescriptor",
     "MediaCoverage",
     "RepresentationError",
-
     # Producer and pipeline
     "ProducerProvenance",
     "PipelineFingerprint",
-
     # Configuration
     "MediaProcessingConfig",
     "MediaPipelineDefinition",
     "MediaMimePattern",
-
     # Enums
     "MediaRepresentationKind",
     "MediaRepresentationStatus",
@@ -102,7 +91,6 @@ __all__ = [
     "MediaProducerType",
     "PipelineStage",
     "EmbeddingSpaceFingerprint",
-
     # Registry and storage
     "RepresentationRegistry",
     "RepresentationLifecycleManager",
@@ -110,7 +98,6 @@ __all__ = [
     "BlobReference",
     "BlobReferenceFactory",
     "BlobMetadata",
-
     # Legacy compatibility
     "chunk_to_representation",
     "extraction_to_representation",

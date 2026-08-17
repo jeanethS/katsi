@@ -22,7 +22,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from katsi_core.workspace.contracts import (
     ContentHash,
@@ -30,7 +30,6 @@ from katsi_core.workspace.contracts import (
     ResourceVersionId,
     StrictModel,
 )
-
 
 # =============================================================================
 # Strict Enums for Media Types and Statuses
@@ -156,7 +155,9 @@ class EvidenceLocator(ImmutableModel):
     """
 
     resource_version_id: ResourceVersionId
-    representation_id: UUID = Field(description="UUID of the representation containing this evidence")
+    representation_id: UUID = Field(
+        description="UUID of the representation containing this evidence"
+    )
 
 
 class WholeResourceLocator(EvidenceLocator):
@@ -191,7 +192,9 @@ class PageLocator(EvidenceLocator):
 
     locator_type: Literal["page"] = "page"
     page_number: int = Field(ge=1, description="One-based page number")
-    bounding_box: tuple[float, float, float, float] | None = None  # [x, y, width, height] normalized 0-1
+    bounding_box: tuple[float, float, float, float] | None = (
+        None  # [x, y, width, height] normalized 0-1
+    )
 
     @model_validator(mode="after")
     def validate_bounding_box(self) -> PageLocator:
@@ -209,18 +212,24 @@ class ImageRegionLocator(EvidenceLocator):
     """
 
     locator_type: Literal["image_region"] = "image_region"
-    bounding_box: tuple[float, float, float, float] = Field(description="[x, y, width, height] normalized 0-1")
+    bounding_box: tuple[float, float, float, float] = Field(
+        description="[x, y, width, height] normalized 0-1"
+    )
 
     @model_validator(mode="after")
     def validate_bounding_box(self) -> ImageRegionLocator:
         x, y, w, h = self.bounding_box
         if not (0 <= x <= 1 and 0 <= y <= 1 and w > 0 and h > 0 and x + w <= 1 and y + h <= 1):
-            raise ValueError("Bounding box must be normalized, positive width/height, and within bounds")
+            raise ValueError(
+                "Bounding box must be normalized, positive width/height, and within bounds"
+            )
         return self
 
     def __hash__(self) -> int:
         """Make ImageRegionLocator hashable."""
-        return hash((self.resource_version_id, self.representation_id, self.locator_type, self.bounding_box))
+        return hash(
+            (self.resource_version_id, self.representation_id, self.locator_type, self.bounding_box)
+        )
 
 
 class TimeRangeLocator(EvidenceLocator):
@@ -248,7 +257,9 @@ class VideoFrameLocator(EvidenceLocator):
 
     locator_type: Literal["video_frame"] = "video_frame"
     timestamp_ms: int = Field(ge=0, description="Frame timestamp in milliseconds")
-    frame_index: int | None = Field(default=None, ge=0, description="Decoded frame index if available")
+    frame_index: int | None = Field(
+        default=None, ge=0, description="Decoded frame index if available"
+    )
 
 
 class SceneLocator(EvidenceLocator):
@@ -260,7 +271,9 @@ class SceneLocator(EvidenceLocator):
     locator_type: Literal["scene"] = "scene"
     start_ms: int = Field(ge=0, description="Scene start in milliseconds")
     end_ms: int = Field(ge=0, description="Scene end in milliseconds")
-    keyframe_ids: tuple[UUID, ...] = Field(default_factory=tuple, description="Selected keyframe IDs in this scene")
+    keyframe_ids: tuple[UUID, ...] = Field(
+        default_factory=tuple, description="Selected keyframe IDs in this scene"
+    )
 
     @model_validator(mode="after")
     def validate_range(self) -> SceneLocator:
@@ -314,7 +327,9 @@ class MediaDescriptor(StrictModel):
     container: str | None = Field(default=None, description="Container format")
 
     # Warnings
-    extension_mismatch: bool = Field(default=False, description="True if extension doesn't match content")
+    extension_mismatch: bool = Field(
+        default=False, description="True if extension doesn't match content"
+    )
     encrypted: bool = Field(default=False, description="True if content appears encrypted")
     password_protected: bool = Field(default=False, description="True if requires password")
     malformed: bool = Field(default=False, description="True if content appears malformed")
@@ -348,7 +363,9 @@ class ProducerProvenance(StrictModel):
     producer_type: MediaProducerType = Field(description="Category of producer")
     adapter_name: str = Field(min_length=1, description="Adapter or tool name")
     adapter_version: str = Field(min_length=1, description="Version string")
-    model_identity: str | None = Field(default=None, description="Model name/tool identifier if applicable")
+    model_identity: str | None = Field(
+        default=None, description="Model name/tool identifier if applicable"
+    )
     model_version: str | None = Field(default=None, description="Model version if applicable")
 
     def get_fingerprint_components(self) -> dict[str, str | None]:
@@ -370,8 +387,12 @@ class PipelineFingerprint(ImmutableModel):
     """
 
     source_content_hash: ContentHash = Field(description="Hash of original source bytes")
-    input_representation_id: UUID | None = Field(default=None, description="Input representation for downstream stages")
-    representation_kind: MediaRepresentationKind = Field(description="Kind of representation produced")
+    input_representation_id: UUID | None = Field(
+        default=None, description="Input representation for downstream stages"
+    )
+    representation_kind: MediaRepresentationKind = Field(
+        description="Kind of representation produced"
+    )
     stage: PipelineStage = Field(description="Pipeline stage that produced this")
 
     # Producer identity
@@ -381,10 +402,14 @@ class PipelineFingerprint(ImmutableModel):
     model_version: str | None = Field(default=None)
 
     # Policy and configuration
-    sampling_fingerprint: str = Field(min_length=1, description="Hash of sampling/chunking configuration")
+    sampling_fingerprint: str = Field(
+        min_length=1, description="Hash of sampling/chunking configuration"
+    )
     language_policy: str = Field(default="*", description="Language code or wildcard")
     ocr_language: str | None = Field(default=None, description="OCR language if applicable")
-    prompt_version: str | None = Field(default=None, description="Semantic prompt version if applicable")
+    prompt_version: str | None = Field(
+        default=None, description="Semantic prompt version if applicable"
+    )
     normalization_version: str = Field(default="v1", description="Output normalization version")
 
     def get_cache_key_components(self) -> dict[str, str | int]:
@@ -396,7 +421,9 @@ class PipelineFingerprint(ImmutableModel):
 
         return {
             "source_hash": self.source_content_hash,
-            "input_rep": str(self.input_representation_id) if self.input_representation_id else "none",
+            "input_rep": str(self.input_representation_id)
+            if self.input_representation_id
+            else "none",
             "kind": self.representation_kind.value,
             "stage": self.stage.value,
             "adapter": f"{self.adapter_name}@{self.adapter_version}",
@@ -415,7 +442,9 @@ class RepresentationError(StrictModel):
     error_category: str = Field(min_length=1, description="Category of error")
     error_message: str = Field(min_length=1, description="Human-readable error message")
     is_retriable: bool = Field(default=False, description="True if error might be transient")
-    diagnostic_info: dict[str, str] = Field(default_factory=dict, description="Additional diagnostic context")
+    diagnostic_info: dict[str, str] = Field(
+        default_factory=dict, description="Additional diagnostic context"
+    )
 
 
 # =============================================================================
@@ -444,22 +473,36 @@ class DerivedRepresentation(ImmutableModel):
     updated_at: datetime = Field(description="When this representation was last updated")
 
     # Content
-    textual_payload: str | None = Field(default=None, description="Text content for text-based representations")
-    blob_reference: str | None = Field(default=None, description="Reference to private blob for binary content")
-    blob_hash: ContentHash | None = Field(default=None, description="Hash of blob content if applicable")
+    textual_payload: str | None = Field(
+        default=None, description="Text content for text-based representations"
+    )
+    blob_reference: str | None = Field(
+        default=None, description="Reference to private blob for binary content"
+    )
+    blob_hash: ContentHash | None = Field(
+        default=None, description="Hash of blob content if applicable"
+    )
     blob_byte_count: int | None = Field(default=None, ge=0, description="Size of blob in bytes")
 
     # Evidence and quality
-    locators: tuple[EvidenceLocatorUnion, ...] = Field(default_factory=tuple, description="Evidence locators")
-    coverage: MediaCoverage = Field(default_factory=lambda: MediaCoverage(is_complete=True, coverage_fraction=1.0))
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0, description="Confidence score where applicable")
+    locators: tuple[EvidenceLocatorUnion, ...] = Field(
+        default_factory=tuple, description="Evidence locators"
+    )
+    coverage: MediaCoverage = Field(
+        default_factory=lambda: MediaCoverage(is_complete=True, coverage_fraction=1.0)
+    )
+    confidence: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Confidence score where applicable"
+    )
 
     # Provenance
     producer: ProducerProvenance = Field(description="Information about the producer")
     pipeline_fingerprint: PipelineFingerprint = Field(description="Complete pipeline fingerprint")
 
     # Error information for failed/unavailable representations
-    error: RepresentationError | None = Field(default=None, description="Error details if status is FAILED or UNAVAILABLE")
+    error: RepresentationError | None = Field(
+        default=None, description="Error details if status is FAILED or UNAVAILABLE"
+    )
 
     @model_validator(mode="after")
     def validate_content(self) -> DerivedRepresentation:
@@ -477,18 +520,23 @@ class DerivedRepresentation(ImmutableModel):
         if self.kind in text_kinds and self.blob_reference is not None:
             raise ValueError(f"{self.kind} representations should not have blob_reference")
 
-        if self.kind in {MediaRepresentationKind.THUMBNAIL, MediaRepresentationKind.KEYFRAME, MediaRepresentationKind.PROXY_MEDIA}:
-            if self.blob_reference is None or self.blob_hash is None:
-                raise ValueError(f"{self.kind} representations require blob_reference and blob_hash")
+        if self.kind in {
+            MediaRepresentationKind.THUMBNAIL,
+            MediaRepresentationKind.KEYFRAME,
+            MediaRepresentationKind.PROXY_MEDIA,
+        } and (self.blob_reference is None or self.blob_hash is None):
+            raise ValueError(f"{self.kind} representations require blob_reference and blob_hash")
 
         return self
 
     @model_validator(mode="after")
     def validate_error_status(self) -> DerivedRepresentation:
         """Ensure failed/unavailable representations have error information."""
-        if self.status in {MediaRepresentationStatus.FAILED, MediaRepresentationStatus.UNAVAILABLE}:
-            if self.error is None:
-                raise ValueError(f"{self.status} representations must include error information")
+        if (
+            self.status in {MediaRepresentationStatus.FAILED, MediaRepresentationStatus.UNAVAILABLE}
+            and self.error is None
+        ):
+            raise ValueError(f"{self.status} representations must include error information")
         return self
 
 
@@ -502,7 +550,9 @@ class MediaMimePattern(BaseModel):
 
     pattern: str = Field(min_length=1, description="Glob pattern for MIME types")
     enabled: bool = Field(default=True, description="Whether this pattern is enabled")
-    required_pipeline: str | None = Field(default=None, description="Required pipeline ID for this pattern")
+    required_pipeline: str | None = Field(
+        default=None, description="Required pipeline ID for this pattern"
+    )
 
 
 class MediaPipelineDefinition(BaseModel):
@@ -514,41 +564,65 @@ class MediaPipelineDefinition(BaseModel):
 
     id: str = Field(min_length=1, description="Pipeline identifier")
     name: str = Field(min_length=1, max_length=256, description="Human-readable name")
-    description: str = Field(default="", max_length=2000, description="Purpose and behavior description")
+    description: str = Field(
+        default="", max_length=2000, description="Purpose and behavior description"
+    )
 
     # Input/output contract
-    accepted_mime_patterns: list[str] = Field(default_factory=list, description="Accepted MIME type globs")
+    accepted_mime_patterns: list[str] = Field(
+        default_factory=list, description="Accepted MIME type globs"
+    )
     representation_kinds_produced: list[MediaRepresentationKind] = Field(
-        default_factory=list, min_length=1, description="Kinds of representations this pipeline produces"
+        default_factory=list,
+        min_length=1,
+        description="Kinds of representations this pipeline produces",
     )
 
     # Producer identity
     producer_type: MediaProducerType = Field(description="Category of producer")
-    executable_path: str | None = Field(default=None, description="Path to executable for deterministic pipelines")
-    model_identity: str | None = Field(default=None, description="Model identifier for model-backed pipelines")
+    executable_path: str | None = Field(
+        default=None, description="Path to executable for deterministic pipelines"
+    )
+    model_identity: str | None = Field(
+        default=None, description="Model identifier for model-backed pipelines"
+    )
 
     # Execution policy
     fixed_args: list[str] = Field(default_factory=list, description="Fixed argument template")
-    allowed_env_vars: list[str] = Field(default_factory=list, description="Allowed environment variables")
+    allowed_env_vars: list[str] = Field(
+        default_factory=list, description="Allowed environment variables"
+    )
     working_directory: str = Field(default=".", description="Working directory for execution")
-    shell_enabled: bool = Field(default=False, description="Whether shell is enabled (should be False)")
+    shell_enabled: bool = Field(
+        default=False, description="Whether shell is enabled (should be False)"
+    )
     network_disabled: bool = Field(default=True, description="Whether network access is disabled")
 
     # Resource budgets
     timeout_seconds: float = Field(default=60.0, gt=0, description="Execution timeout")
     max_memory_mb: int | None = Field(default=None, ge=0, description="Maximum memory in MB")
-    max_output_bytes: int = Field(default=10_000_000, gt=0, description="Maximum output size in bytes")
-    max_duration_ms: int | None = Field(default=None, ge=0, description="Maximum media duration to process")
+    max_output_bytes: int = Field(
+        default=10_000_000, gt=0, description="Maximum output size in bytes"
+    )
+    max_duration_ms: int | None = Field(
+        default=None, ge=0, description="Maximum media duration to process"
+    )
     max_pages: int | None = Field(default=None, ge=0, description="Maximum pages for documents")
     max_keyframes: int | None = Field(default=None, ge=0, description="Maximum keyframes for video")
 
     # Validation
-    strict_output_contract: bool = Field(default=True, description="Whether output is strictly validated")
+    strict_output_contract: bool = Field(
+        default=True, description="Whether output is strictly validated"
+    )
     retry_on_failure: bool = Field(default=True, description="Whether to retry once on failure")
 
     # Availability
-    availability_probe: str | None = Field(default=None, description="Command to check availability")
-    required_hardware: list[str] = Field(default_factory=list, description="Required hardware features")
+    availability_probe: str | None = Field(
+        default=None, description="Command to check availability"
+    )
+    required_hardware: list[str] = Field(
+        default_factory=list, description="Required hardware features"
+    )
 
 
 class MediaProcessingConfig(BaseModel):
@@ -570,13 +644,21 @@ class MediaProcessingConfig(BaseModel):
 
     # Model and tool identities
     default_ocr_pipeline: str | None = Field(default=None, description="Default OCR pipeline ID")
-    default_caption_pipeline: str | None = Field(default=None, description="Default caption pipeline ID")
-    default_transcription_pipeline: str | None = Field(default=None, description="Default transcription pipeline ID")
-    default_embedding_pipeline: str | None = Field(default=None, description="Default embedding pipeline ID")
+    default_caption_pipeline: str | None = Field(
+        default=None, description="Default caption pipeline ID"
+    )
+    default_transcription_pipeline: str | None = Field(
+        default=None, description="Default transcription pipeline ID"
+    )
+    default_embedding_pipeline: str | None = Field(
+        default=None, description="Default embedding pipeline ID"
+    )
 
     # Language and sampling policy
     default_language: str = Field(default="*", description="Default language code or wildcard")
-    supported_languages: list[str] = Field(default_factory=list, description="Supported language codes")
+    supported_languages: list[str] = Field(
+        default_factory=list, description="Supported language codes"
+    )
 
     # Privacy and capability controls
     privacy_classes_enabled: list[MediaPrivacyClass] = Field(
@@ -587,16 +669,30 @@ class MediaProcessingConfig(BaseModel):
     )
 
     # Resource limits
-    global_max_concurrent_jobs: int = Field(default=4, ge=1, description="Global concurrent job limit")
-    workspace_max_concurrent_jobs: int = Field(default=2, ge=1, description="Per-workspace concurrent job limit")
+    global_max_concurrent_jobs: int = Field(
+        default=4, ge=1, description="Global concurrent job limit"
+    )
+    workspace_max_concurrent_jobs: int = Field(
+        default=2, ge=1, description="Per-workspace concurrent job limit"
+    )
 
     # Feature flags
-    enable_image_processing: bool = Field(default=False, description="Enable image processing pipelines")
-    enable_audio_processing: bool = Field(default=False, description="Enable audio processing pipelines")
-    enable_video_processing: bool = Field(default=False, description="Enable video processing pipelines")
+    enable_image_processing: bool = Field(
+        default=False, description="Enable image processing pipelines"
+    )
+    enable_audio_processing: bool = Field(
+        default=False, description="Enable audio processing pipelines"
+    )
+    enable_video_processing: bool = Field(
+        default=False, description="Enable video processing pipelines"
+    )
     enable_document_ocr: bool = Field(default=False, description="Enable document OCR pipeline")
-    enable_visual_embeddings: bool = Field(default=False, description="Enable visual embedding generation")
-    enable_cross_modal_retrieval: bool = Field(default=False, description="Enable cross-modal text-to-visual retrieval")
+    enable_visual_embeddings: bool = Field(
+        default=False, description="Enable visual embedding generation"
+    )
+    enable_cross_modal_retrieval: bool = Field(
+        default=False, description="Enable cross-modal text-to-visual retrieval"
+    )
 
 
 # =============================================================================
@@ -612,7 +708,9 @@ class LegacyTextRepresentation(ImmutableModel):
     """
 
     chunk_id: str | None = Field(default=None, description="Legacy chunk ID if applicable")
-    extraction_id: str | None = Field(default=None, description="Legacy extraction ID if applicable")
+    extraction_id: str | None = Field(
+        default=None, description="Legacy extraction ID if applicable"
+    )
     representation: DerivedRepresentation = Field(description="New representation model")
     migration_provenance: str = Field(
         default="legacy_migration", description="Marker for migrated content"
@@ -652,10 +750,12 @@ def chunk_to_representation(
         created_at=created_at,
         updated_at=created_at,
         textual_payload=text_content,
-        locators=(WholeResourceLocator(
-            resource_version_id=resource_version_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=resource_version_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=ProducerProvenance(
             producer_type=MediaProducerType.DETERMINISTIC,
@@ -706,10 +806,12 @@ def extraction_to_representation(
         created_at=created_at,
         updated_at=created_at,
         textual_payload=extracted_text,
-        locators=(WholeResourceLocator(
-            resource_version_id=resource_version_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=resource_version_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=ProducerProvenance(
             producer_type=MediaProducerType.DETERMINISTIC,

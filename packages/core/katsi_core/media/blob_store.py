@@ -17,14 +17,10 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import override
-from uuid import UUID
-
-from katsi_core.media.contracts import ContentHash
 
 
 def _compute_hash(content: bytes) -> str:
-    """Compute BLAKE3 hash of content.
+    """Compute BLAKE2b hash of content.
 
     Args:
         content: Bytes to hash
@@ -32,7 +28,7 @@ def _compute_hash(content: bytes) -> str:
     Returns:
         Hexadecimal hash string
     """
-    return hashlib.blake3b(content).hexdigest()
+    return hashlib.blake2b(content, digest_size=32).hexdigest()
 
 
 def _verify_hash(content: bytes, expected_hash: str) -> bool:
@@ -87,21 +83,27 @@ class BlobMetadata:
             "byte_count": self.byte_count,
             "created_at": self.created_at.isoformat(),
             "access_count": self.access_count,
-            "last_accessed_at": self.last_accessed_at.isoformat() if self.last_accessed_at else None,
+            "last_accessed_at": self.last_accessed_at.isoformat()
+            if self.last_accessed_at
+            else None,
             "retention_until": self.retention_until.isoformat() if self.retention_until else None,
             "reference_count": self.reference_count,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "BlobMetadata":
+    def from_dict(cls, data: dict) -> BlobMetadata:
         """Create from dictionary."""
         return cls(
             blob_hash=data["blob_hash"],
             byte_count=data["byte_count"],
             created_at=datetime.fromisoformat(data["created_at"]),
             access_count=data["access_count"],
-            last_accessed_at=datetime.fromisoformat(data["last_accessed_at"]) if data.get("last_accessed_at") else None,
-            retention_until=datetime.fromisoformat(data["retention_until"]) if data.get("retention_until") else None,
+            last_accessed_at=datetime.fromisoformat(data["last_accessed_at"])
+            if data.get("last_accessed_at")
+            else None,
+            retention_until=datetime.fromisoformat(data["retention_until"])
+            if data.get("retention_until")
+            else None,
             reference_count=data.get("reference_count", 1),
         )
 
@@ -217,6 +219,7 @@ class BlobStore:
         retention_until = None
         if retention_days is not None:
             from datetime import timedelta
+
             retention_until = timestamp + timedelta(days=retention_days)
 
         metadata = BlobMetadata(
@@ -364,12 +367,12 @@ class BlobStore:
             return True
 
         # Check retention deadline
-        if metadata.retention_until is not None:
-            if datetime.now(UTC) < metadata.retention_until:
-                return False
+        if metadata.retention_until is not None and datetime.now(UTC) < metadata.retention_until:
+            return False
 
         # Check age
         from datetime import timedelta
+
         max_age = timedelta(days=max_age_days)
         age = datetime.now(UTC) - metadata.created_at
 
@@ -598,9 +601,7 @@ class BlobReferenceFactory:
         if not content:
             raise ValueError("Cannot create reference for empty content")
 
-        blob_hash, byte_count = self._blob_store.store_blob(
-            content, retention_days=retention_days
-        )
+        blob_hash, byte_count = self._blob_store.store_blob(content, retention_days=retention_days)
 
         return BlobReference(
             blob_hash=blob_hash,

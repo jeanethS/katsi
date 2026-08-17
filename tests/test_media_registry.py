@@ -12,14 +12,17 @@ from uuid import uuid4
 
 import pytest
 
+from katsi_core.config import SQLiteSettings
 from katsi_core.media.contracts import (
     ContentHash,
     DerivedRepresentation,
     EvidenceLocatorUnion,
     MediaCoverage,
+    MediaProducerType,
     MediaRepresentationKind,
     MediaRepresentationStatus,
     PipelineFingerprint,
+    PipelineStage,
     ProducerProvenance,
     RepresentationError,
     ResourceVersionId,
@@ -37,7 +40,8 @@ def temp_db():
     """Create a temporary database for testing."""
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = Path(f.name)
-    db = WorkspaceSQLite(db_path)
+    settings = SQLiteSettings()
+    db = WorkspaceSQLite(db_path, settings)
     yield db
     # Cleanup
     if db_path.exists():
@@ -60,7 +64,7 @@ def sample_resource_id():
 def sample_producer():
     """Create a sample producer provenance."""
     return ProducerProvenance(
-        producer_type="deterministic",
+        producer_type=MediaProducerType.DETERMINISTIC,
         adapter_name="test_adapter",
         adapter_version="1.0.0",
     )
@@ -70,9 +74,9 @@ def sample_producer():
 def sample_fingerprint(sample_resource_id):
     """Create a sample pipeline fingerprint."""
     return PipelineFingerprint(
-        source_content_hash=ContentHash("test_hash"),
+        source_content_hash=ContentHash("a" * 64),  # 64 character hex string
         representation_kind=MediaRepresentationKind.EXTRACTED_TEXT,
-        stage="extract_text",
+        stage=PipelineStage.EXTRACT_TEXT,
         adapter_name="test_adapter",
         adapter_version="1.0.0",
         sampling_fingerprint="test_sampling",
@@ -101,6 +105,7 @@ def test_register_pending_representation(registry, sample_resource_id, sample_pr
         status=MediaRepresentationStatus.PENDING,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
+        textual_payload="Sample OCR text",  # Required for text representations
         locators=(WholeResourceLocator(
             resource_version_id=sample_resource_id,
             representation_id=uuid4(),
@@ -220,6 +225,7 @@ def test_get_representations_by_resource(registry, sample_resource_id, sample_pr
             status=status,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
+            textual_payload="Sample OCR text",  # Required for text representations
             locators=(WholeResourceLocator(
                 resource_version_id=sample_resource_id,
                 representation_id=uuid4(),
@@ -292,6 +298,7 @@ def test_update_representation_status(registry, sample_resource_id, sample_produ
         status=MediaRepresentationStatus.PENDING,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
+        textual_payload="Sample OCR text",  # Required for text representations
         locators=(WholeResourceLocator(
             resource_version_id=sample_resource_id,
             representation_id=uuid4(),

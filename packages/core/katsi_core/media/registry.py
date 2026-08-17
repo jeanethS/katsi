@@ -14,18 +14,22 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
+
+if TYPE_CHECKING:
+    from katsi_core.media.blob_store import BlobStore
 
 from katsi_core.media.contracts import (
     ContentHash,
     DerivedRepresentation,
     EvidenceLocatorUnion,
     MediaCoverage,
+    MediaProducerType,
     MediaRepresentationKind,
     MediaRepresentationStatus,
     PipelineFingerprint,
+    PipelineStage,
     ProducerProvenance,
     RepresentationError,
     ResourceVersionId,
@@ -88,11 +92,24 @@ class RepresentationRegistry:
                     error_is_retriable INTEGER,
                     error_diagnostic TEXT,
                     pipeline_fingerprint TEXT NOT NULL,
-                    is_current INTEGER DEFAULT 1,
-                    INDEX (resource_version_id, kind, status),
-                    INDEX (blob_hash),
-                    INDEX (pipeline_fingerprint)
+                    is_current INTEGER DEFAULT 1
                 )
+            """)
+
+            # Create indexes for better query performance
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_representations_resource_kind_status
+                ON representations (resource_version_id, kind, status)
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_representations_blob_hash
+                ON representations (blob_hash)
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_representations_pipeline_fingerprint
+                ON representations (pipeline_fingerprint)
             """)
 
     def register_representation(
@@ -117,20 +134,32 @@ class RepresentationRegistry:
         with self._database.connection() as conn:
             # If making current, mark existing current representations as non-current
             if make_current and representation.status == MediaRepresentationStatus.CURRENT:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE representations
                     SET is_current = 0, updated_at = ?
                     WHERE resource_version_id = ?
                       AND kind = ?
                       AND is_current = 1
-                """, (timestamp.isoformat(), str(representation.resource_version_id), representation.kind.value))
+                """,
+                    (
+                        timestamp.isoformat(),
+                        str(representation.resource_version_id),
+                        representation.kind.value,
+                    ),
+                )
 
             # Serialize complex fields
-            locators_json = json.dumps([loc.model_dump() for loc in representation.locators])
-            pipeline_fingerprint_json = json.dumps(representation.pipeline_fingerprint.model_dump())
+            locators_json = json.dumps(
+                [loc.model_dump(mode="json") for loc in representation.locators]
+            )
+            pipeline_fingerprint_json = json.dumps(
+                representation.pipeline_fingerprint.model_dump(mode="json")
+            )
 
             # Insert the new representation
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO representations (
                     id, resource_version_id, kind, media_type, status,
                     created_at, updated_at, textual_payload, blob_reference,
@@ -141,35 +170,39 @@ class RepresentationRegistry:
                     error_is_retriable, error_diagnostic, pipeline_fingerprint,
                     is_current
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                str(representation.id),
-                str(representation.resource_version_id),
-                representation.kind.value,
-                representation.media_type,
-                representation.status.value,
-                representation.created_at.isoformat(),
-                representation.updated_at.isoformat(),
-                representation.textual_payload,
-                representation.blob_reference,
-                str(representation.blob_hash) if representation.blob_hash else None,
-                representation.blob_byte_count,
-                locators_json,
-                representation.coverage.coverage_fraction,
-                1 if representation.coverage.is_complete else 0,
-                representation.coverage.detail,
-                representation.confidence,
-                representation.producer.producer_type.value,
-                representation.producer.adapter_name,
-                representation.producer.adapter_version,
-                representation.producer.model_identity,
-                representation.producer.model_version,
-                representation.error.error_category if representation.error else None,
-                representation.error.error_message if representation.error else None,
-                1 if representation.error and representation.error.is_retriable else 0,
-                json.dumps(representation.error.diagnostic_info) if representation.error else None,
-                pipeline_fingerprint_json,
-                1 if make_current else 0,
-            ))
+            """,
+                (
+                    str(representation.id),
+                    str(representation.resource_version_id),
+                    representation.kind.value,
+                    representation.media_type,
+                    representation.status.value,
+                    representation.created_at.isoformat(),
+                    representation.updated_at.isoformat(),
+                    representation.textual_payload,
+                    representation.blob_reference,
+                    str(representation.blob_hash) if representation.blob_hash else None,
+                    representation.blob_byte_count,
+                    locators_json,
+                    representation.coverage.coverage_fraction,
+                    1 if representation.coverage.is_complete else 0,
+                    representation.coverage.detail,
+                    representation.confidence,
+                    representation.producer.producer_type.value,
+                    representation.producer.adapter_name,
+                    representation.producer.adapter_version,
+                    representation.producer.model_identity,
+                    representation.producer.model_version,
+                    representation.error.error_category if representation.error else None,
+                    representation.error.error_message if representation.error else None,
+                    1 if representation.error and representation.error.is_retriable else 0,
+                    json.dumps(representation.error.diagnostic_info)
+                    if representation.error
+                    else None,
+                    pipeline_fingerprint_json,
+                    1 if make_current else 0,
+                ),
+            )
 
     def get_representation(self, representation_id: UUID) -> DerivedRepresentation | None:
         """Get a representation by its ID.
@@ -182,8 +215,7 @@ class RepresentationRegistry:
         """
         with self._database.connection() as conn:
             row = conn.execute(
-                "SELECT * FROM representations WHERE id = ?",
-                (str(representation_id),)
+                "SELECT * FROM representations WHERE id = ?", (str(representation_id),)
             ).fetchone()
 
             if row is None:
@@ -206,7 +238,8 @@ class RepresentationRegistry:
             The current representation if found, None otherwise
         """
         with self._database.connection() as conn:
-            row = conn.execute("""
+            row = conn.execute(
+                """
                 SELECT * FROM representations
                 WHERE resource_version_id = ?
                   AND kind = ?
@@ -214,7 +247,9 @@ class RepresentationRegistry:
                   AND is_current = 1
                 ORDER BY created_at DESC
                 LIMIT 1
-            """, (str(resource_version_id), kind.value, MediaRepresentationStatus.CURRENT.value)).fetchone()
+            """,
+                (str(resource_version_id), kind.value, MediaRepresentationStatus.CURRENT.value),
+            ).fetchone()
 
             if row is None:
                 return None
@@ -237,17 +272,23 @@ class RepresentationRegistry:
         """
         with self._database.connection() as conn:
             if status is None:
-                rows = conn.execute("""
+                rows = conn.execute(
+                    """
                     SELECT * FROM representations
                     WHERE resource_version_id = ?
                     ORDER BY created_at DESC
-                """, (str(resource_version_id),)).fetchall()
+                """,
+                    (str(resource_version_id),),
+                ).fetchall()
             else:
-                rows = conn.execute("""
+                rows = conn.execute(
+                    """
                     SELECT * FROM representations
                     WHERE resource_version_id = ? AND status = ?
                     ORDER BY created_at DESC
-                """, (str(resource_version_id), status.value)).fetchall()
+                """,
+                    (str(resource_version_id), status.value),
+                ).fetchall()
 
             return [self._row_to_representation(row) for row in rows]
 
@@ -265,11 +306,14 @@ class RepresentationRegistry:
         """
         with self._database.connection() as conn:
             fingerprint_json = json.dumps(pipeline_fingerprint.model_dump())
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT * FROM representations
                 WHERE pipeline_fingerprint = ?
                 ORDER BY created_at DESC
-            """, (fingerprint_json,)).fetchall()
+            """,
+                (fingerprint_json,),
+            ).fetchall()
 
             return [self._row_to_representation(row) for row in rows]
 
@@ -291,7 +335,8 @@ class RepresentationRegistry:
         """
         with self._database.connection() as conn:
             fingerprint_json = json.dumps(pipeline_fingerprint.model_dump())
-            row = conn.execute("""
+            row = conn.execute(
+                """
                 SELECT * FROM representations
                 WHERE resource_version_id = ?
                   AND kind = ?
@@ -299,13 +344,15 @@ class RepresentationRegistry:
                   AND status IN (?, ?)
                 ORDER BY created_at DESC
                 LIMIT 1
-            """, (
-                str(resource_version_id),
-                kind.value,
-                fingerprint_json,
-                MediaRepresentationStatus.CURRENT.value,
-                MediaRepresentationStatus.PARTIAL.value,
-            )).fetchone()
+            """,
+                (
+                    str(resource_version_id),
+                    kind.value,
+                    fingerprint_json,
+                    MediaRepresentationStatus.CURRENT.value,
+                    MediaRepresentationStatus.PARTIAL.value,
+                ),
+            ).fetchone()
 
             if row is None:
                 return None
@@ -333,8 +380,7 @@ class RepresentationRegistry:
         with self._database.connection() as conn:
             # Check representation exists
             existing = conn.execute(
-                "SELECT status FROM representations WHERE id = ?",
-                (str(representation_id),)
+                "SELECT status FROM representations WHERE id = ?", (str(representation_id),)
             ).fetchone()
 
             if existing is None:
@@ -346,21 +392,24 @@ class RepresentationRegistry:
             error_is_retriable = 1 if error and error.is_retriable else 0
             error_diagnostic = json.dumps(error.diagnostic_info) if error else None
 
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE representations
                 SET status = ?, updated_at = ?,
                     error_category = ?, error_message = ?,
                     error_is_retriable = ?, error_diagnostic = ?
                 WHERE id = ?
-            """, (
-                new_status.value,
-                timestamp.isoformat(),
-                error_category,
-                error_message,
-                error_is_retriable,
-                error_diagnostic,
-                str(representation_id),
-            ))
+            """,
+                (
+                    new_status.value,
+                    timestamp.isoformat(),
+                    error_category,
+                    error_message,
+                    error_is_retriable,
+                    error_diagnostic,
+                    str(representation_id),
+                ),
+            )
 
     def handle_resource_deletion(
         self,
@@ -380,17 +429,23 @@ class RepresentationRegistry:
         with self._database.connection() as conn:
             if preserve_historical:
                 # Mark all as non-current but preserve historical records
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE representations
                     SET is_current = 0, updated_at = ?
                     WHERE resource_version_id = ?
-                """, (_utc_now().isoformat(), str(resource_version_id)))
+                """,
+                    (_utc_now().isoformat(), str(resource_version_id)),
+                )
             else:
                 # Delete all representations for this resource
-                conn.execute("""
+                conn.execute(
+                    """
                     DELETE FROM representations
                     WHERE resource_version_id = ?
-                """, (str(resource_version_id),))
+                """,
+                    (str(resource_version_id),),
+                )
 
     def _row_to_representation(self, row: tuple) -> DerivedRepresentation:
         """Convert a database row to a DerivedRepresentation.
@@ -403,19 +458,79 @@ class RepresentationRegistry:
         """
         # Unpack row (this order matches the CREATE TABLE statement)
         (
-            rep_id, resource_version_id, kind, media_type, status,
-            created_at_str, updated_at_str, textual_payload, blob_reference,
-            blob_hash_str, blob_byte_count, locators_json,
-            coverage_fraction, coverage_is_complete, coverage_detail,
-            confidence, producer_type, adapter_name, adapter_version,
-            model_identity, model_version, error_category, error_message,
-            error_is_retriable, error_diagnostic_json, pipeline_fingerprint_json,
+            rep_id,
+            resource_version_id,
+            kind,
+            media_type,
+            status,
+            created_at_str,
+            updated_at_str,
+            textual_payload,
+            blob_reference,
+            blob_hash_str,
+            blob_byte_count,
+            locators_json,
+            coverage_fraction,
+            coverage_is_complete,
+            coverage_detail,
+            confidence,
+            producer_type,
+            adapter_name,
+            adapter_version,
+            model_identity,
+            model_version,
+            error_category,
+            error_message,
+            error_is_retriable,
+            error_diagnostic_json,
+            pipeline_fingerprint_json,
             is_current,
         ) = row
 
         # Parse complex fields
         locators_data = json.loads(locators_json)
-        locators = tuple[EvidenceLocatorUnion, ...](locators_data)  # type: ignore
+        # Convert locator dicts back to proper locator types using the discriminator
+        parsed_locators = []
+        for loc_data in locators_data:
+            # Convert UUIDs back to proper types
+            loc_data["resource_version_id"] = ResourceVersionId(loc_data["resource_version_id"])
+            loc_data["representation_id"] = UUID(loc_data["representation_id"])
+
+            # Use the discriminator field to create the correct locator type
+            locator_type = loc_data.get("locator_type")
+            if locator_type == "whole_resource":
+                from katsi_core.media.contracts import WholeResourceLocator
+
+                parsed_locators.append(WholeResourceLocator(**loc_data))
+            elif locator_type == "text_range":
+                from katsi_core.media.contracts import TextRangeLocator
+
+                parsed_locators.append(TextRangeLocator(**loc_data))
+            elif locator_type == "page":
+                from katsi_core.media.contracts import PageLocator
+
+                parsed_locators.append(PageLocator(**loc_data))
+            elif locator_type == "image_region":
+                from katsi_core.media.contracts import ImageRegionLocator
+
+                parsed_locators.append(ImageRegionLocator(**loc_data))
+            elif locator_type == "time_range":
+                from katsi_core.media.contracts import TimeRangeLocator
+
+                parsed_locators.append(TimeRangeLocator(**loc_data))
+            elif locator_type == "video_frame":
+                from katsi_core.media.contracts import VideoFrameLocator
+
+                parsed_locators.append(VideoFrameLocator(**loc_data))
+            elif locator_type == "scene":
+                from katsi_core.media.contracts import SceneLocator
+
+                parsed_locators.append(SceneLocator(**loc_data))
+            else:
+                # Fallback for unknown types
+                parsed_locators.append(loc_data)
+
+        locators = tuple[EvidenceLocatorUnion, ...](parsed_locators)  # type: ignore
 
         coverage = MediaCoverage(
             is_complete=bool(coverage_is_complete),
@@ -424,7 +539,7 @@ class RepresentationRegistry:
         )
 
         producer = ProducerProvenance(
-            producer_type=producer_type,
+            producer_type=MediaProducerType(producer_type),
             adapter_name=adapter_name,
             adapter_version=adapter_version,
             model_identity=model_identity,
@@ -432,6 +547,11 @@ class RepresentationRegistry:
         )
 
         pipeline_fingerprint_data = json.loads(pipeline_fingerprint_json)
+        # Convert enum strings back to proper enum types
+        pipeline_fingerprint_data["representation_kind"] = MediaRepresentationKind(
+            pipeline_fingerprint_data["representation_kind"]
+        )
+        pipeline_fingerprint_data["stage"] = PipelineStage(pipeline_fingerprint_data["stage"])
         pipeline_fingerprint = PipelineFingerprint(**pipeline_fingerprint_data)
 
         error = None
@@ -463,7 +583,7 @@ class RepresentationRegistry:
             error=error,
         )
 
-    def cleanup_stale_blobs(self, blob_store: "BlobStore", max_age_days: int = 30) -> int:
+    def cleanup_stale_blobs(self, blob_store: BlobStore, max_age_days: int = 30) -> int:
         """Clean up unreferenced blobs from the blob store.
 
         Args:
@@ -475,12 +595,14 @@ class RepresentationRegistry:
         """
         # Get all blob hashes referenced by current representations
         with self._database.connection() as conn:
-            referenced_hashes = set(conn.execute("""
+            referenced_hashes = set(
+                conn.execute("""
                 SELECT DISTINCT blob_hash
                 FROM representations
                 WHERE blob_hash IS NOT NULL
                   AND is_current = 1
-            """).fetchall())
+            """).fetchall()
+            )
 
         # Convert from tuples to strings
         referenced_hashes = {row[0] for row in referenced_hashes}
@@ -522,6 +644,7 @@ class RepresentationLifecycleManager:
         producer: ProducerProvenance,
         pipeline_fingerprint: PipelineFingerprint,
         locators: tuple[EvidenceLocatorUnion, ...] = (),
+        textual_payload: str | None = None,
     ) -> DerivedRepresentation:
         """Create a new pending representation.
 
@@ -532,11 +655,23 @@ class RepresentationLifecycleManager:
             producer: Producer information
             pipeline_fingerprint: Pipeline fingerprint
             locators: Evidence locators
+            textual_payload: Optional text content for text-based representations
 
         Returns:
             Created pending representation
         """
         timestamp = _utc_now()
+
+        # For text-based kinds, we need a placeholder textual_payload even if pending
+        text_kinds = {
+            MediaRepresentationKind.EXTRACTED_TEXT,
+            MediaRepresentationKind.OCR_TEXT,
+            MediaRepresentationKind.IMAGE_CAPTION,
+            MediaRepresentationKind.TRANSCRIPT_SEGMENT,
+        }
+
+        if kind in text_kinds and textual_payload is None:
+            textual_payload = ""  # Empty placeholder for pending text representations
 
         representation = DerivedRepresentation(
             id=uuid4(),
@@ -546,6 +681,7 @@ class RepresentationLifecycleManager:
             status=MediaRepresentationStatus.PENDING,
             created_at=timestamp,
             updated_at=timestamp,
+            textual_payload=textual_payload,
             locators=locators,
             coverage=MediaCoverage(is_complete=False, coverage_fraction=0.0),
             producer=producer,
@@ -590,31 +726,84 @@ class RepresentationLifecycleManager:
         if representation.status != MediaRepresentationStatus.PENDING:
             raise ValueError(f"Representation {representation_id} is not pending")
 
-        # Create new immutable version with current status
+        # Update the representation in place
         timestamp = _utc_now()
 
-        updated = DerivedRepresentation(
-            id=representation.id,  # Keep same ID for immutability within version
+        # Update fields that changed
+        updated_textual_payload = (
+            textual_payload if textual_payload is not None else representation.textual_payload
+        )
+        updated_blob_reference = (
+            blob_reference if blob_reference is not None else representation.blob_reference
+        )
+        updated_blob_hash = blob_hash if blob_hash is not None else representation.blob_hash
+        updated_blob_byte_count = (
+            blob_byte_count if blob_byte_count is not None else representation.blob_byte_count
+        )
+        updated_coverage = coverage or MediaCoverage(is_complete=True, coverage_fraction=1.0)
+
+        # Directly update the database
+        with self._registry._database.connection() as conn:
+            # If making current, mark existing current representations as non-current
+            conn.execute(
+                """
+                UPDATE representations
+                SET is_current = 0, updated_at = ?
+                WHERE resource_version_id = ?
+                  AND kind = ?
+                  AND is_current = 1
+            """,
+                (
+                    timestamp.isoformat(),
+                    str(representation.resource_version_id),
+                    representation.kind.value,
+                ),
+            )
+
+            # Update this representation to current
+            conn.execute(
+                """
+                UPDATE representations
+                SET status = ?, updated_at = ?, textual_payload = ?,
+                    blob_reference = ?, blob_hash = ?, blob_byte_count = ?,
+                    coverage_fraction = ?, coverage_is_complete = ?, coverage_detail = ?,
+                    confidence = ?, is_current = 1
+                WHERE id = ?
+            """,
+                (
+                    MediaRepresentationStatus.CURRENT.value,
+                    timestamp.isoformat(),
+                    updated_textual_payload,
+                    updated_blob_reference,
+                    str(updated_blob_hash) if updated_blob_hash else None,
+                    updated_blob_byte_count,
+                    updated_coverage.coverage_fraction,
+                    1 if updated_coverage.is_complete else 0,
+                    updated_coverage.detail,
+                    confidence,
+                    str(representation_id),
+                ),
+            )
+
+        # Return the updated representation
+        return DerivedRepresentation(
+            id=representation.id,
             resource_version_id=representation.resource_version_id,
             kind=representation.kind,
             media_type=representation.media_type,
             status=MediaRepresentationStatus.CURRENT,
             created_at=representation.created_at,
             updated_at=timestamp,
-            textual_payload=textual_payload or representation.textual_payload,
-            blob_reference=blob_reference or representation.blob_reference,
-            blob_hash=blob_hash or representation.blob_hash,
-            blob_byte_count=blob_byte_count or representation.blob_byte_count,
+            textual_payload=updated_textual_payload,
+            blob_reference=updated_blob_reference,
+            blob_hash=updated_blob_hash,
+            blob_byte_count=updated_blob_byte_count,
             locators=representation.locators,
-            coverage=coverage or MediaCoverage(is_complete=True, coverage_fraction=1.0),
+            coverage=updated_coverage,
             confidence=confidence,
             producer=representation.producer,
             pipeline_fingerprint=representation.pipeline_fingerprint,
         )
-
-        # Update in registry (this will mark as current)
-        self._registry.register_representation(updated, make_current=True)
-        return updated
 
     def transition_to_partial(
         self,
@@ -650,7 +839,44 @@ class RepresentationLifecycleManager:
 
         timestamp = _utc_now()
 
-        updated = DerivedRepresentation(
+        # Update fields that changed
+        updated_textual_payload = (
+            textual_payload if textual_payload is not None else representation.textual_payload
+        )
+        updated_blob_reference = (
+            blob_reference if blob_reference is not None else representation.blob_reference
+        )
+        updated_blob_hash = blob_hash if blob_hash is not None else representation.blob_hash
+        updated_blob_byte_count = (
+            blob_byte_count if blob_byte_count is not None else representation.blob_byte_count
+        )
+
+        # Directly update the database
+        with self._registry._database.connection() as conn:
+            conn.execute(
+                """
+                UPDATE representations
+                SET status = ?, updated_at = ?, textual_payload = ?,
+                    blob_reference = ?, blob_hash = ?, blob_byte_count = ?,
+                    coverage_fraction = ?, coverage_is_complete = ?, coverage_detail = ?
+                WHERE id = ?
+            """,
+                (
+                    MediaRepresentationStatus.PARTIAL.value,
+                    timestamp.isoformat(),
+                    updated_textual_payload,
+                    updated_blob_reference,
+                    str(updated_blob_hash) if updated_blob_hash else None,
+                    updated_blob_byte_count,
+                    coverage.coverage_fraction,
+                    1 if coverage.is_complete else 0,
+                    coverage.detail,
+                    str(representation_id),
+                ),
+            )
+
+        # Return the updated representation
+        return DerivedRepresentation(
             id=representation.id,
             resource_version_id=representation.resource_version_id,
             kind=representation.kind,
@@ -658,19 +884,16 @@ class RepresentationLifecycleManager:
             status=MediaRepresentationStatus.PARTIAL,
             created_at=representation.created_at,
             updated_at=timestamp,
-            textual_payload=textual_payload or representation.textual_payload,
-            blob_reference=blob_reference or representation.blob_reference,
-            blob_hash=blob_hash or representation.blob_hash,
-            blob_byte_count=blob_byte_count or representation.blob_byte_count,
+            textual_payload=updated_textual_payload,
+            blob_reference=updated_blob_reference,
+            blob_hash=updated_blob_hash,
+            blob_byte_count=updated_blob_byte_count,
             locators=representation.locators,
             coverage=coverage,
             confidence=representation.confidence,
             producer=representation.producer,
             pipeline_fingerprint=representation.pipeline_fingerprint,
         )
-
-        self._registry.register_representation(updated, make_current=False)
-        return updated
 
     def transition_to_unavailable(
         self,
@@ -695,7 +918,32 @@ class RepresentationLifecycleManager:
 
         timestamp = _utc_now()
 
-        updated = DerivedRepresentation(
+        # Directly update the database
+        with self._registry._database.connection() as conn:
+            conn.execute(
+                """
+                UPDATE representations
+                SET status = ?, updated_at = ?,
+                    coverage_fraction = ?, coverage_is_complete = ?, coverage_detail = ?,
+                    error_category = ?, error_message = ?, error_is_retriable = ?, error_diagnostic = ?
+                WHERE id = ?
+            """,
+                (
+                    MediaRepresentationStatus.UNAVAILABLE.value,
+                    timestamp.isoformat(),
+                    0.0,  # coverage_fraction
+                    0,  # coverage_is_complete
+                    "unavailable",  # coverage_detail
+                    error.error_category,
+                    error.error_message,
+                    1 if error.is_retriable else 0,
+                    json.dumps(error.diagnostic_info),
+                    str(representation_id),
+                ),
+            )
+
+        # Return the updated representation
+        return DerivedRepresentation(
             id=representation.id,
             resource_version_id=representation.resource_version_id,
             kind=representation.kind,
@@ -703,20 +951,18 @@ class RepresentationLifecycleManager:
             status=MediaRepresentationStatus.UNAVAILABLE,
             created_at=representation.created_at,
             updated_at=timestamp,
-            textual_payload=representation.textual_payload,
+            textual_payload=representation.textual_payload
+            or "",  # Ensure textual_payload for text kinds
             blob_reference=representation.blob_reference,
             blob_hash=representation.blob_hash,
             blob_byte_count=representation.blob_byte_count,
             locators=representation.locators,
-            coverage=MediaCoverage(is_complete=False, coverage_fraction=0.0),
+            coverage=MediaCoverage(is_complete=False, coverage_fraction=0.0, detail="unavailable"),
             confidence=representation.confidence,
             producer=representation.producer,
             pipeline_fingerprint=representation.pipeline_fingerprint,
             error=error,
         )
-
-        self._registry.register_representation(updated, make_current=False)
-        return updated
 
     def transition_to_failed(
         self,
@@ -741,7 +987,32 @@ class RepresentationLifecycleManager:
 
         timestamp = _utc_now()
 
-        updated = DerivedRepresentation(
+        # Directly update the database
+        with self._registry._database.connection() as conn:
+            conn.execute(
+                """
+                UPDATE representations
+                SET status = ?, updated_at = ?,
+                    coverage_fraction = ?, coverage_is_complete = ?, coverage_detail = ?,
+                    error_category = ?, error_message = ?, error_is_retriable = ?, error_diagnostic = ?
+                WHERE id = ?
+            """,
+                (
+                    MediaRepresentationStatus.FAILED.value,
+                    timestamp.isoformat(),
+                    0.0,  # coverage_fraction
+                    0,  # coverage_is_complete
+                    "failed",  # coverage_detail
+                    error.error_category,
+                    error.error_message,
+                    1 if error.is_retriable else 0,
+                    json.dumps(error.diagnostic_info),
+                    str(representation_id),
+                ),
+            )
+
+        # Return the updated representation
+        return DerivedRepresentation(
             id=representation.id,
             resource_version_id=representation.resource_version_id,
             kind=representation.kind,
@@ -749,17 +1020,15 @@ class RepresentationLifecycleManager:
             status=MediaRepresentationStatus.FAILED,
             created_at=representation.created_at,
             updated_at=timestamp,
-            textual_payload=representation.textual_payload,
+            textual_payload=representation.textual_payload
+            or "",  # Ensure textual_payload for text kinds
             blob_reference=representation.blob_reference,
             blob_hash=representation.blob_hash,
             blob_byte_count=representation.blob_byte_count,
             locators=representation.locators,
-            coverage=MediaCoverage(is_complete=False, coverage_fraction=0.0),
+            coverage=MediaCoverage(is_complete=False, coverage_fraction=0.0, detail="failed"),
             confidence=representation.confidence,
             producer=representation.producer,
             pipeline_fingerprint=representation.pipeline_fingerprint,
             error=error,
         )
-
-        self._registry.register_representation(updated, make_current=False)
-        return updated
