@@ -13,22 +13,25 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from katsi_core.config import MediaSamplingSettings
+from katsi_core.config import ChunkingThresholds, MediaSamplingSettings
 from katsi_core.media.contracts import (
-    chunk_to_representation,
-    extraction_to_representation,
+    DerivedRepresentation,
+    EmbeddingSpaceFingerprint,
     EvidenceLocatorUnion,
     ImageRegionLocator,
     MediaCoverage,
     MediaDescriptor,
+    MediaMimePattern,
     MediaPipelineDefinition,
     MediaPrivacyClass,
     MediaProcessingConfig,
+    MediaProducerType,
     MediaRepresentationKind,
     MediaRepresentationStatus,
     MediaTypeFamily,
     PageLocator,
     PipelineFingerprint,
+    PipelineStage,
     ProducerProvenance,
     RepresentationError,
     SceneLocator,
@@ -36,13 +39,11 @@ from katsi_core.media.contracts import (
     TimeRangeLocator,
     VideoFrameLocator,
     WholeResourceLocator,
-    DerivedRepresentation,
-    MediaMimePattern,
-    MediaProducerType,
-    PipelineStage,
-    EmbeddingSpaceFingerprint,
+    chunk_to_representation,
+    compute_sampling_fingerprint,
+    extraction_to_representation,
 )
-from katsi_core.workspace.contracts import ContentHash, ResourceVersionId
+from katsi_core.workspace.contracts import ResourceVersionId
 
 NOW = datetime(2026, 8, 17, tzinfo=UTC)
 HASH = "a" * 64
@@ -419,7 +420,9 @@ def test_media_coverage_validates_completeness() -> None:
         MediaCoverage(is_complete=True, coverage_fraction=0.8)
 
     # Partial coverage (valid)
-    partial_coverage = MediaCoverage(is_complete=False, coverage_fraction=0.6, detail="First half only")
+    partial_coverage = MediaCoverage(
+        is_complete=False, coverage_fraction=0.6, detail="First half only"
+    )
 
     assert partial_coverage.is_complete is False
     assert partial_coverage.coverage_fraction == 0.6
@@ -541,7 +544,9 @@ def test_derived_representation_requires_textual_payload_for_text_kinds() -> Non
 
 def test_derived_representation_requires_blob_for_visual_kinds() -> None:
     """DerivedRepresentation should require blob_reference for visual kinds."""
-    with pytest.raises(ValidationError, match="representations require blob_reference and blob_hash"):
+    with pytest.raises(
+        ValidationError, match="representations require blob_reference and blob_hash"
+    ):
         DerivedRepresentation(
             id=uuid4(),
             resource_version_id=RESOURCE_VERSION_ID,
@@ -616,7 +621,9 @@ def test_derived_representation_round_trips_as_json() -> None:
                 bounding_box=(0.1, 0.2, 0.3, 0.4),
             ),
         ),
-        coverage=MediaCoverage(is_complete=False, coverage_fraction=0.8, detail="Page 5 of 6 processed"),
+        coverage=MediaCoverage(
+            is_complete=False, coverage_fraction=0.8, detail="Page 5 of 6 processed"
+        ),
         confidence=0.95,
         producer=ProducerProvenance(
             producer_type=MediaProducerType.MODEL_BACKED,
@@ -681,6 +688,7 @@ def test_media_pipeline_definition_validates_constraints() -> None:
         id="ocr_default",
         name="Default OCR Pipeline",
         description="Tesseract-based OCR for documents",
+        stage=PipelineStage.OCR,
         accepted_mime_patterns=["application/pdf", "image/*"],
         representation_kinds_produced=[MediaRepresentationKind.OCR_TEXT],
         producer_type=MediaProducerType.MODEL_BACKED,
@@ -703,6 +711,7 @@ def test_media_pipeline_definition_rejects_invalid_timeouts() -> None:
         MediaPipelineDefinition(
             id="test",
             name="Test",
+            stage=PipelineStage.CAPTION,
             accepted_mime_patterns=["image/*"],
             representation_kinds_produced=[MediaRepresentationKind.IMAGE_CAPTION],
             producer_type=MediaProducerType.MODEL_BACKED,
@@ -721,6 +730,7 @@ def test_media_processing_config_aggregates_settings() -> None:
             MediaPipelineDefinition(
                 id="image_caption",
                 name="Image Captioning",
+                stage=PipelineStage.CAPTION,
                 accepted_mime_patterns=["image/*"],
                 representation_kinds_produced=[MediaRepresentationKind.IMAGE_CAPTION],
                 producer_type=MediaProducerType.MODEL_BACKED,
@@ -758,6 +768,7 @@ def test_media_processing_config_round_trips_as_json() -> None:
             MediaPipelineDefinition(
                 id="test",
                 name="Test Pipeline",
+                stage=PipelineStage.CAPTION,
                 accepted_mime_patterns=["image/*"],
                 representation_kinds_produced=[MediaRepresentationKind.IMAGE_CAPTION],
                 producer_type=MediaProducerType.MODEL_BACKED,
@@ -772,6 +783,48 @@ def test_media_processing_config_round_trips_as_json() -> None:
     restored = MediaProcessingConfig.model_validate_json(config.model_dump_json())
 
     assert restored == config
+
+
+def test_media_processing_config_defaults_media_sampling() -> None:
+    """MediaProcessingConfig should default to a valid MediaSamplingSettings."""
+    config = MediaProcessingConfig()
+
+    assert isinstance(config.media_sampling, MediaSamplingSettings)
+    assert config.media_sampling.chunking.target_tokens == 512
+
+
+def test_media_processing_config_accepts_custom_media_sampling() -> None:
+    """MediaProcessingConfig should accept an overridden chunking policy."""
+    config = MediaProcessingConfig(
+        media_sampling=MediaSamplingSettings(
+            chunking=ChunkingThresholds(target_tokens=1024, overlap=128)
+        )
+    )
+
+    assert config.media_sampling.chunking.target_tokens == 1024
+
+    restored = MediaProcessingConfig.model_validate_json(config.model_dump_json())
+    assert restored == config
+
+
+def test_compute_sampling_fingerprint_is_deterministic() -> None:
+    """compute_sampling_fingerprint should be stable for identical settings."""
+    settings_a = MediaSamplingSettings(chunking=ChunkingThresholds(target_tokens=512, overlap=64))
+    settings_b = MediaSamplingSettings(chunking=ChunkingThresholds(target_tokens=512, overlap=64))
+
+    assert compute_sampling_fingerprint(settings_a) == compute_sampling_fingerprint(settings_b)
+
+
+def test_compute_sampling_fingerprint_changes_with_policy() -> None:
+    """Different chunking policies must yield different fingerprints (Decision 16)."""
+    default_settings = MediaSamplingSettings()
+    changed_settings = MediaSamplingSettings(
+        chunking=ChunkingThresholds(target_tokens=1024, overlap=64)
+    )
+
+    assert compute_sampling_fingerprint(default_settings) != compute_sampling_fingerprint(
+        changed_settings
+    )
 
 
 # =============================================================================
@@ -1011,13 +1064,12 @@ def test_representation_integration_with_resource_version() -> None:
 def test_all_enums_have_distinct_values() -> None:
     """All enum values should be distinct to avoid collisions."""
     from katsi_core.media.contracts import (
+        MediaPrivacyClass,
+        MediaProducerType,
         MediaRepresentationKind,
         MediaRepresentationStatus,
         MediaTypeFamily,
-        MediaPrivacyClass,
-        MediaProducerType,
         PipelineStage,
-        EmbeddingSpaceFingerprint,
     )
 
     # Collect all enum values across all enums
@@ -1047,11 +1099,14 @@ def test_all_enums_have_distinct_values() -> None:
 
     # Only flag duplicates that aren't expected cross-enum duplicates
     unexpected_duplicates = [
-        value for value, count in value_counts.items()
+        value
+        for value, count in value_counts.items()
         if count > 1 and value not in allowed_cross_enum_duplicates
     ]
 
-    assert not unexpected_duplicates, f"Unexpected duplicate enum values found: {unexpected_duplicates}"
+    assert not unexpected_duplicates, (
+        f"Unexpected duplicate enum values found: {unexpected_duplicates}"
+    )
 
     # Check for duplicates
     duplicates = [value for value in set(all_values) if all_values.count(value) > 1]
@@ -1085,9 +1140,10 @@ def test_discriminated_union_resolves_all_locator_types() -> None:
         json_data = locator.model_dump_json()
         # Parse back through the union type
         from pydantic import TypeAdapter
+
         adapter = TypeAdapter(EvidenceLocatorUnion)
         restored = adapter.validate_json(json_data)
-        assert type(restored) == type(locator)
+        assert type(restored) is type(locator)
 
 
 if __name__ == "__main__":

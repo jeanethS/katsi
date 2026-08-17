@@ -305,7 +305,7 @@ class RepresentationRegistry:
             List of representations with matching pipeline fingerprint
         """
         with self._database.connection() as conn:
-            fingerprint_json = json.dumps(pipeline_fingerprint.model_dump())
+            fingerprint_json = json.dumps(pipeline_fingerprint.model_dump(mode="json"))
             rows = conn.execute(
                 """
                 SELECT * FROM representations
@@ -334,7 +334,7 @@ class RepresentationRegistry:
             Cached representation if found, None otherwise
         """
         with self._database.connection() as conn:
-            fingerprint_json = json.dumps(pipeline_fingerprint.model_dump())
+            fingerprint_json = json.dumps(pipeline_fingerprint.model_dump(mode="json"))
             row = conn.execute(
                 """
                 SELECT * FROM representations
@@ -552,6 +552,11 @@ class RepresentationRegistry:
             pipeline_fingerprint_data["representation_kind"]
         )
         pipeline_fingerprint_data["stage"] = PipelineStage(pipeline_fingerprint_data["stage"])
+        # Convert UUID string back to UUID (StrictModel does not coerce str -> UUID)
+        if pipeline_fingerprint_data.get("input_representation_id") is not None:
+            pipeline_fingerprint_data["input_representation_id"] = UUID(
+                pipeline_fingerprint_data["input_representation_id"]
+            )
         pipeline_fingerprint = PipelineFingerprint(**pipeline_fingerprint_data)
 
         error = None

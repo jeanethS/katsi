@@ -53,6 +53,7 @@ from katsi_core.media.contracts import (
     WholeResourceLocator,
     # Legacy compatibility
     chunk_to_representation,
+    compute_sampling_fingerprint,
     extraction_to_representation,
 )
 from katsi_core.media.registry import (
@@ -101,6 +102,7 @@ __all__ = [
     # Legacy compatibility
     "chunk_to_representation",
     "extraction_to_representation",
+    "compute_sampling_fingerprint",
 ]
 
 __version__ = "0.1.0"

@@ -13,14 +13,15 @@ Key features:
 
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import blake3
+
 
 def _compute_hash(content: bytes) -> str:
-    """Compute BLAKE2b hash of content.
+    """Compute BLAKE3 hash of content.
 
     Args:
         content: Bytes to hash
@@ -28,7 +29,7 @@ def _compute_hash(content: bytes) -> str:
     Returns:
         Hexadecimal hash string
     """
-    return hashlib.blake2b(content, digest_size=32).hexdigest()
+    return blake3.blake3(content).hexdigest()
 
 
 def _verify_hash(content: bytes, expected_hash: str) -> bool:

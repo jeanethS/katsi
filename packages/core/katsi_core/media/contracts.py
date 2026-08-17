@@ -24,6 +24,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from katsi_core.config import MediaSamplingSettings
 from katsi_core.workspace.contracts import (
     ContentHash,
     ImmutableModel,
@@ -436,6 +437,24 @@ class PipelineFingerprint(ImmutableModel):
         }
 
 
+def compute_sampling_fingerprint(settings: MediaSamplingSettings) -> str:
+    """Derive `PipelineFingerprint.sampling_fingerprint` from a chunking policy.
+
+    Deterministically hashes the sampling/chunking configuration so that any
+    change to `target_tokens`, `overlap`, or `separator_hierarchy` (Decision 16:
+    chunking policy versioning) produces a distinct fingerprint value. Stages
+    that use `MediaSamplingSettings` should call this instead of hardcoding a
+    literal string, so cache lookups correctly treat differently-chunked
+    representations as incompatible.
+    """
+    import hashlib
+    import json
+
+    components = settings.get_fingerprint_components()
+    canonical = json.dumps(components, sort_keys=True, default=list)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 class RepresentationError(StrictModel):
     """Structured error information for failed representations."""
 
@@ -569,8 +588,17 @@ class MediaPipelineDefinition(BaseModel):
     )
 
     # Input/output contract
+    stage: PipelineStage = Field(description="Pipeline stage this definition implements")
     accepted_mime_patterns: list[str] = Field(
         default_factory=list, description="Accepted MIME type globs"
+    )
+    input_kinds: list[MediaRepresentationKind] = Field(
+        default_factory=list,
+        description=(
+            "Representation kinds this pipeline consumes as input. Empty means "
+            "this is a root stage that consumes the raw source (e.g. detection, "
+            "metadata extraction) rather than an upstream representation."
+        ),
     )
     representation_kinds_produced: list[MediaRepresentationKind] = Field(
         default_factory=list,
@@ -588,7 +616,16 @@ class MediaPipelineDefinition(BaseModel):
     )
 
     # Execution policy
-    fixed_args: list[str] = Field(default_factory=list, description="Fixed argument template")
+    fixed_args: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Fixed argument template. Elements may reference exactly the "
+            "placeholders in katsi_core.media.execution.ALLOWED_ARG_PLACEHOLDERS "
+            "(input_path, output_path, working_directory) as {placeholder} "
+            "tokens; any other placeholder is rejected at execution time. "
+            "This set is fixed and not owner-extensible."
+        ),
+    )
     allowed_env_vars: list[str] = Field(
         default_factory=list, description="Allowed environment variables"
     )
@@ -658,6 +695,16 @@ class MediaProcessingConfig(BaseModel):
     default_language: str = Field(default="*", description="Default language code or wildcard")
     supported_languages: list[str] = Field(
         default_factory=list, description="Supported language codes"
+    )
+    media_sampling: MediaSamplingSettings = Field(
+        default_factory=MediaSamplingSettings,
+        description=(
+            "Chunking/sampling policy for text, OCR, caption, and transcript "
+            "representations. Part of the pipeline fingerprint (see "
+            "PipelineFingerprint.sampling_fingerprint) so that changing target_tokens, "
+            "overlap, or separator_hierarchy invalidates cached representations "
+            "rather than silently reusing chunks produced under a different policy."
+        ),
     )
 
     # Privacy and capability controls

@@ -1,0 +1,761 @@
+"""Image and screenshot understanding: OCR, captioning, embedding, thumbnails.
+
+Implements openspec change `multimedia-understanding` section 5 (Image and
+Screenshot Understanding, design.md Decision 6):
+
+1. Deterministic metadata (dimensions, orientation, color/alpha, classified
+   fields, privacy-gated EXIF location) lives in `image_metadata.py`.
+2. Orientation-normalized thumbnails, whole-image/region-aware OCR, optional
+   local captioning, and optional visual embedding are each a
+   `MediaPipelineDefinition` + `MediaPipelineProtocol` adapter, executed
+   exclusively through `BoundedSubprocessExecutor`/`PipelineExecutionOrchestrator`
+   (task 5.2-5.5). This module never imports or calls an OCR/vision/embedding
+   library directly -- it only defines the fixed subprocess contract (an
+   owner-configured executable that writes a small JSON or PNG file the
+   adapter here strictly validates) and wraps the result into a
+   `DerivedRepresentation`.
+3. Each representation kind (THUMBNAIL, OCR_TEXT, IMAGE_CAPTION,
+   VISUAL_EMBEDDING) is produced by its own independent pipeline with its
+   own `input_kinds=[]` (all consume the raw source image directly, not each
+   other's output), so any valid subset remains usable if a sibling fails or
+   is unavailable (task 5.6) -- mirroring the "detect -> independent
+   branches" DAG shape in design.md Decision 5.
+
+Reconciliation note for section 6: `ImageOcrPipeline` is the adapter
+`DocumentOcrCoordinator` (in `document_pipeline.py`) expects to find via
+`MediaPipelineRegistry.resolve("image/png", MediaRepresentationKind.OCR_TEXT)`.
+It supports zero-argument construction (`ImageOcrPipeline()`) so it works
+with that coordinator's `registered.adapter_class()` call pattern; its
+`get_pipeline_definition()` classmethod is the single source of truth for
+its own executable/contract, consistent with what should be passed to
+`MediaPipelineRegistry.register(...)`.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from katsi_core.media.blob_store import BlobStore
+from katsi_core.media.contracts import (
+    ContentHash,
+    DerivedRepresentation,
+    ImageRegionLocator,
+    MediaCoverage,
+    MediaPipelineDefinition,
+    MediaProducerType,
+    MediaRepresentationKind,
+    MediaRepresentationStatus,
+    PipelineFingerprint,
+    PipelineStage,
+    ProducerProvenance,
+    ResourceVersionId,
+    WholeResourceLocator,
+)
+from katsi_core.media.detection import _png_dimensions
+from katsi_core.media.execution import BoundedSubprocessExecutor, validate_json_output
+from katsi_core.media.protocols import (
+    HardwareRequirement,
+    MediaPipelineProtocol,
+    SoftwareDependency,
+)
+
+_ADAPTER_VERSION = "1.0.0"
+
+_CAPTION_MAX_CHARS = 2000
+_MAX_EMBEDDING_DIMENSION = 8192
+
+
+# =============================================================================
+# Task 5.2: orientation-normalized thumbnails
+# =============================================================================
+
+
+def build_thumbnail_pipeline_definition(
+    executable_path: str | None = None,
+    *,
+    id: str = "image_thumbnail_v1",  # noqa: A002 -- matches MediaPipelineDefinition.id
+    fixed_args: list[str] | None = None,
+    max_dimension: int = 512,
+    timeout_seconds: float = 30.0,
+    max_output_bytes: int = 20_000_000,
+) -> MediaPipelineDefinition:
+    """Owner-configured definition for the bounded thumbnail pipeline.
+
+    `executable_path` is owner-supplied (a tool that reads `input_path`,
+    applies EXIF orientation normalization, downsizes to at most
+    `max_dimension` on the long edge, and writes a PNG to `output_path`).
+    Unset by default so `check_availability` reports unavailable rather
+    than guessing at a system tool.
+    """
+    return MediaPipelineDefinition(
+        id=id,
+        name="Orientation-Normalized Thumbnail",
+        description=(
+            "Renders a private, orientation-normalized PNG thumbnail without "
+            "altering the original image bytes."
+        ),
+        stage=PipelineStage.GENERATE_THUMBNAIL,
+        accepted_mime_patterns=["image/*"],
+        input_kinds=[],
+        representation_kinds_produced=[MediaRepresentationKind.THUMBNAIL],
+        producer_type=MediaProducerType.DETERMINISTIC,
+        executable_path=executable_path,
+        fixed_args=fixed_args or ["{input_path}", str(max_dimension), "{output_path}"],
+        allowed_env_vars=[],
+        shell_enabled=False,
+        network_disabled=True,
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=max_output_bytes,
+        strict_output_contract=True,
+        retry_on_failure=True,
+    )
+
+
+class ImageThumbnailPipeline(MediaPipelineProtocol):
+    """Bounded subprocess adapter producing a private PNG thumbnail.
+
+    Original bytes are never written to; the thumbnail is a fresh derived
+    blob in the blob store, never a replacement for the source file. Only
+    `BoundedSubprocessExecutor` invokes the resize/rotate tool.
+    """
+
+    def __init__(
+        self,
+        definition: MediaPipelineDefinition | None = None,
+        blob_store: BlobStore | None = None,
+    ) -> None:
+        self._definition = definition or self.get_pipeline_definition()
+        self._blob_store = blob_store
+        self._executor = BoundedSubprocessExecutor()
+
+    @classmethod
+    def get_adapter_name(cls) -> str:
+        return "image_thumbnail_pipeline"
+
+    @classmethod
+    def get_adapter_version(cls) -> str:
+        return _ADAPTER_VERSION
+
+    def get_pipeline_definition(self) -> MediaPipelineDefinition:  # type: ignore[override]
+        return build_thumbnail_pipeline_definition()
+
+    @classmethod
+    def get_hardware_requirements(cls) -> list[HardwareRequirement]:
+        return [HardwareRequirement.NONE]
+
+    @classmethod
+    def get_software_dependencies(cls) -> list[SoftwareDependency]:
+        return [SoftwareDependency.NONE]
+
+    def check_availability(self) -> tuple[bool, str | None]:  # type: ignore[override]
+        if not self._definition.executable_path:
+            return False, "No thumbnail renderer executable configured"
+        return True, None
+
+    def process(
+        self,
+        file_path: Path,
+        resource_version_id: ResourceVersionId,
+        source_content_hash: ContentHash,
+        pipeline_fingerprint: PipelineFingerprint,
+        working_directory: Path,
+    ) -> DerivedRepresentation:
+        if self._blob_store is None:
+            raise RuntimeError("ImageThumbnailPipeline requires a blob_store to persist output")
+
+        output_path = working_directory / "thumbnail.png"
+        result = self._executor.execute(
+            self._definition, file_path, working_directory, output_path=output_path
+        )
+        if result.timed_out or result.exit_code != 0:
+            raise RuntimeError(
+                f"Thumbnail generation failed (exit={result.exit_code}, "
+                f"timed_out={result.timed_out}): {result.stderr_sample}"
+            )
+        if not output_path.exists():
+            raise RuntimeError("Thumbnail tool produced no output file")
+
+        thumbnail_bytes = output_path.read_bytes()
+        if not thumbnail_bytes:
+            raise RuntimeError("Thumbnail tool produced an empty output file")
+
+        dims = _png_dimensions(thumbnail_bytes[:64])
+        if dims is None:
+            raise RuntimeError("Thumbnail output is not a valid PNG")
+        width, height = dims
+
+        blob_hash, byte_count = self._blob_store.store_blob(thumbnail_bytes)
+        now = datetime.now(UTC)
+        rep_id = uuid4()
+        return DerivedRepresentation(
+            id=rep_id,
+            resource_version_id=resource_version_id,
+            kind=MediaRepresentationKind.THUMBNAIL,
+            media_type="image/png",
+            status=MediaRepresentationStatus.CURRENT,
+            created_at=now,
+            updated_at=now,
+            blob_reference=f"blob:{blob_hash}",
+            blob_hash=blob_hash,
+            blob_byte_count=byte_count,
+            locators=(
+                WholeResourceLocator(
+                    resource_version_id=resource_version_id, representation_id=rep_id
+                ),
+            ),
+            coverage=MediaCoverage(
+                is_complete=True,
+                coverage_fraction=1.0,
+                detail=f"{width}x{height} orientation-normalized thumbnail",
+            ),
+            producer=ProducerProvenance(
+                producer_type=MediaProducerType.DETERMINISTIC,
+                adapter_name=self._definition.id,
+                adapter_version=_ADAPTER_VERSION,
+            ),
+            pipeline_fingerprint=pipeline_fingerprint,
+        )
+
+    def validate_output(
+        self, output: object, representation_kind: MediaRepresentationKind
+    ) -> tuple[bool, str | None]:
+        if not isinstance(output, DerivedRepresentation):
+            return False, "Output is not a DerivedRepresentation"
+        if output.kind != MediaRepresentationKind.THUMBNAIL:
+            return False, f"Expected THUMBNAIL, got {output.kind}"
+        if output.status == MediaRepresentationStatus.CURRENT and (
+            not output.blob_reference or not output.blob_hash or not output.blob_byte_count
+        ):
+            return False, "CURRENT thumbnail representation missing blob data"
+        return True, None
+
+
+# =============================================================================
+# Task 5.3: whole-image and region-aware local OCR
+# =============================================================================
+
+
+def build_ocr_pipeline_definition(
+    executable_path: str | None = None,
+    *,
+    id: str = "image_ocr_v1",  # noqa: A002
+    fixed_args: list[str] | None = None,
+    timeout_seconds: float = 60.0,
+    max_output_bytes: int = 10_000_000,
+) -> MediaPipelineDefinition:
+    """Owner-configured definition for the bounded local OCR pipeline.
+
+    The configured executable reads `input_path` and writes a JSON document
+    to `output_path` with a required `text` key (whole-image OCR text) and
+    an optional `regions` key (list of `{"text", "bbox", "confidence"}`,
+    `bbox` normalized `[x, y, w, h]`) for region-aware evidence.
+    """
+    return MediaPipelineDefinition(
+        id=id,
+        name="Local Image OCR",
+        description="Whole-image and region-aware local OCR with bounding-box locators.",
+        stage=PipelineStage.OCR,
+        accepted_mime_patterns=["image/*"],
+        input_kinds=[],
+        representation_kinds_produced=[MediaRepresentationKind.OCR_TEXT],
+        producer_type=MediaProducerType.DETERMINISTIC,
+        executable_path=executable_path,
+        fixed_args=fixed_args or ["{input_path}", "{output_path}"],
+        allowed_env_vars=[],
+        shell_enabled=False,
+        network_disabled=True,
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=max_output_bytes,
+        strict_output_contract=True,
+        retry_on_failure=True,
+    )
+
+
+@dataclass(frozen=True)
+class _OcrRegion:
+    text: str
+    bbox: tuple[float, float, float, float]
+    confidence: float | None
+
+
+def _parse_ocr_regions(raw_regions: list[Any]) -> list[_OcrRegion]:
+    """Parse and validate a `regions` array from OCR JSON output.
+
+    Silently skips malformed individual region entries (a single bad region
+    should not discard an otherwise valid whole-image OCR result) but never
+    raises for well-formed-but-empty input.
+    """
+    regions: list[_OcrRegion] = []
+    for entry in raw_regions:
+        if not isinstance(entry, dict):
+            continue
+        text = entry.get("text")
+        bbox = entry.get("bbox")
+        confidence = entry.get("confidence")
+        if not isinstance(text, str) or not isinstance(bbox, list) or len(bbox) != 4:
+            continue
+        try:
+            bbox_tuple = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+        except (TypeError, ValueError):
+            continue
+        conf_value = float(confidence) if isinstance(confidence, (int, float)) else None
+        regions.append(_OcrRegion(text=text, bbox=bbox_tuple, confidence=conf_value))
+    return regions
+
+
+class ImageOcrPipeline(MediaPipelineProtocol):
+    """Bounded subprocess adapter producing whole-image and region OCR text.
+
+    Supports zero-argument construction so it can be resolved and
+    instantiated generically via `MediaPipelineRegistry` (see module
+    docstring); `get_pipeline_definition()` is the single source of truth
+    for its executable/contract rather than per-instance state.
+    """
+
+    def __init__(self) -> None:
+        self._executor = BoundedSubprocessExecutor()
+
+    @classmethod
+    def get_adapter_name(cls) -> str:
+        return "image_ocr_pipeline"
+
+    @classmethod
+    def get_adapter_version(cls) -> str:
+        return _ADAPTER_VERSION
+
+    @classmethod
+    def get_pipeline_definition(cls) -> MediaPipelineDefinition:
+        return build_ocr_pipeline_definition()
+
+    @classmethod
+    def get_hardware_requirements(cls) -> list[HardwareRequirement]:
+        return [HardwareRequirement.NONE]
+
+    @classmethod
+    def get_software_dependencies(cls) -> list[SoftwareDependency]:
+        return [SoftwareDependency.TESSERACT]
+
+    def process(
+        self,
+        file_path: Path,
+        resource_version_id: ResourceVersionId,
+        source_content_hash: ContentHash,
+        pipeline_fingerprint: PipelineFingerprint,
+        working_directory: Path,
+    ) -> DerivedRepresentation:
+        definition = type(self).get_pipeline_definition()
+        output_path = working_directory / "ocr.json"
+        result = self._executor.execute(
+            definition, file_path, working_directory, output_path=output_path
+        )
+        if result.timed_out or result.exit_code != 0:
+            raise RuntimeError(
+                f"OCR failed (exit={result.exit_code}, timed_out={result.timed_out}): "
+                f"{result.stderr_sample}"
+            )
+        if not output_path.exists():
+            raise RuntimeError("OCR tool produced no output file")
+
+        try:
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise RuntimeError(f"OCR output is not valid JSON: {e}") from e
+
+        is_valid, error = validate_json_output(payload, {"text"}, {"text": str})
+        if not is_valid:
+            raise RuntimeError(f"OCR output failed contract validation: {error}")
+
+        text = payload["text"]
+        raw_regions = payload.get("regions", [])
+        regions = _parse_ocr_regions(raw_regions if isinstance(raw_regions, list) else [])
+
+        now = datetime.now(UTC)
+        rep_id = uuid4()
+        locators: list[Any] = [
+            WholeResourceLocator(resource_version_id=resource_version_id, representation_id=rep_id)
+        ]
+        region_confidences: list[float] = []
+        for region in regions:
+            locators.append(
+                ImageRegionLocator(
+                    resource_version_id=resource_version_id,
+                    representation_id=rep_id,
+                    bounding_box=region.bbox,
+                )
+            )
+            if region.confidence is not None:
+                region_confidences.append(region.confidence)
+
+        overall_confidence = payload.get("confidence")
+        if isinstance(overall_confidence, (int, float)):
+            confidence = float(overall_confidence)
+        elif region_confidences:
+            confidence = sum(region_confidences) / len(region_confidences)
+        else:
+            confidence = None
+
+        return DerivedRepresentation(
+            id=rep_id,
+            resource_version_id=resource_version_id,
+            kind=MediaRepresentationKind.OCR_TEXT,
+            media_type="text/plain",
+            status=MediaRepresentationStatus.CURRENT,
+            created_at=now,
+            updated_at=now,
+            textual_payload=text,
+            locators=tuple(locators),
+            coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
+            confidence=confidence,
+            producer=ProducerProvenance(
+                producer_type=MediaProducerType.DETERMINISTIC,
+                adapter_name=definition.id,
+                adapter_version=_ADAPTER_VERSION,
+            ),
+            pipeline_fingerprint=pipeline_fingerprint,
+        )
+
+    def validate_output(
+        self, output: object, representation_kind: MediaRepresentationKind
+    ) -> tuple[bool, str | None]:
+        if not isinstance(output, DerivedRepresentation):
+            return False, "Output is not a DerivedRepresentation"
+        if output.kind != MediaRepresentationKind.OCR_TEXT:
+            return False, f"Expected OCR_TEXT, got {output.kind}"
+        if output.status == MediaRepresentationStatus.CURRENT and output.textual_payload is None:
+            return False, "CURRENT OCR representation missing textual_payload"
+        if output.confidence is not None and not (0.0 <= output.confidence <= 1.0):
+            return False, "OCR confidence out of [0, 1] range"
+        return True, None
+
+
+# =============================================================================
+# Task 5.4: optional local image captioning
+# =============================================================================
+
+
+def build_caption_pipeline_definition(
+    executable_path: str | None = None,
+    *,
+    id: str = "image_caption_v1",  # noqa: A002
+    model_identity: str | None = None,
+    model_version: str | None = None,
+    fixed_args: list[str] | None = None,
+    timeout_seconds: float = 60.0,
+    max_output_bytes: int = 1_000_000,
+) -> MediaPipelineDefinition:
+    """Owner-configured definition for the optional local captioning pipeline.
+
+    The configured executable wraps a local vision model and writes a JSON
+    document to `output_path` with a required `caption` key (a single plain
+    string, the strict caption contract) and optional `confidence`.
+    """
+    return MediaPipelineDefinition(
+        id=id,
+        name="Local Image Caption",
+        description="Optional local image captioning through a configured vision adapter.",
+        stage=PipelineStage.CAPTION,
+        accepted_mime_patterns=["image/*"],
+        input_kinds=[],
+        representation_kinds_produced=[MediaRepresentationKind.IMAGE_CAPTION],
+        producer_type=MediaProducerType.MODEL_BACKED,
+        executable_path=executable_path,
+        model_identity=model_identity,
+        fixed_args=fixed_args or ["{input_path}", "{output_path}"],
+        allowed_env_vars=[],
+        shell_enabled=False,
+        network_disabled=True,
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=max_output_bytes,
+        strict_output_contract=True,
+        retry_on_failure=True,
+    )
+
+
+def _is_strict_caption(caption: str) -> tuple[bool, str | None]:
+    """Enforce the strict caption contract (Decision 6): a caption is model
+    output describing visual content, never treated as OCR or verified fact.
+
+    Rejects empty/whitespace-only captions, captions over the length bound,
+    and captions containing control characters (a sign of a malformed or
+    injected payload rather than natural-language description).
+    """
+    stripped = caption.strip()
+    if not stripped:
+        return False, "Caption must not be empty"
+    if len(stripped) > _CAPTION_MAX_CHARS:
+        return False, f"Caption exceeds {_CAPTION_MAX_CHARS} characters"
+    if any(ord(ch) < 0x20 and ch not in "\n\t" for ch in stripped):
+        return False, "Caption contains control characters"
+    return True, None
+
+
+class ImageCaptionPipeline(MediaPipelineProtocol):
+    """Bounded subprocess adapter producing a strict-contract image caption."""
+
+    def __init__(self) -> None:
+        self._executor = BoundedSubprocessExecutor()
+
+    @classmethod
+    def get_adapter_name(cls) -> str:
+        return "image_caption_pipeline"
+
+    @classmethod
+    def get_adapter_version(cls) -> str:
+        return _ADAPTER_VERSION
+
+    @classmethod
+    def get_pipeline_definition(cls) -> MediaPipelineDefinition:
+        return build_caption_pipeline_definition()
+
+    @classmethod
+    def get_hardware_requirements(cls) -> list[HardwareRequirement]:
+        return [HardwareRequirement.CPU_ONLY]
+
+    @classmethod
+    def get_software_dependencies(cls) -> list[SoftwareDependency]:
+        return [SoftwareDependency.PYTHON_TORCH]
+
+    def process(
+        self,
+        file_path: Path,
+        resource_version_id: ResourceVersionId,
+        source_content_hash: ContentHash,
+        pipeline_fingerprint: PipelineFingerprint,
+        working_directory: Path,
+    ) -> DerivedRepresentation:
+        definition = type(self).get_pipeline_definition()
+        output_path = working_directory / "caption.json"
+        result = self._executor.execute(
+            definition, file_path, working_directory, output_path=output_path
+        )
+        if result.timed_out or result.exit_code != 0:
+            raise RuntimeError(
+                f"Captioning failed (exit={result.exit_code}, timed_out={result.timed_out}): "
+                f"{result.stderr_sample}"
+            )
+        if not output_path.exists():
+            raise RuntimeError("Caption tool produced no output file")
+
+        try:
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise RuntimeError(f"Caption output is not valid JSON: {e}") from e
+
+        is_valid, error = validate_json_output(payload, {"caption"}, {"caption": str})
+        if not is_valid:
+            raise RuntimeError(f"Caption output failed contract validation: {error}")
+
+        caption = payload["caption"]
+        caption_ok, caption_error = _is_strict_caption(caption)
+        if not caption_ok:
+            raise RuntimeError(f"Caption failed strict contract: {caption_error}")
+
+        confidence_raw = payload.get("confidence")
+        confidence = float(confidence_raw) if isinstance(confidence_raw, (int, float)) else None
+
+        now = datetime.now(UTC)
+        rep_id = uuid4()
+        return DerivedRepresentation(
+            id=rep_id,
+            resource_version_id=resource_version_id,
+            kind=MediaRepresentationKind.IMAGE_CAPTION,
+            media_type="text/plain",
+            status=MediaRepresentationStatus.CURRENT,
+            created_at=now,
+            updated_at=now,
+            textual_payload=caption.strip(),
+            locators=(
+                WholeResourceLocator(
+                    resource_version_id=resource_version_id, representation_id=rep_id
+                ),
+            ),
+            coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
+            confidence=confidence,
+            producer=ProducerProvenance(
+                producer_type=MediaProducerType.MODEL_BACKED,
+                adapter_name=definition.id,
+                adapter_version=_ADAPTER_VERSION,
+                model_identity=definition.model_identity,
+                model_version=pipeline_fingerprint.model_version,
+            ),
+            pipeline_fingerprint=pipeline_fingerprint,
+        )
+
+    def validate_output(
+        self, output: object, representation_kind: MediaRepresentationKind
+    ) -> tuple[bool, str | None]:
+        if not isinstance(output, DerivedRepresentation):
+            return False, "Output is not a DerivedRepresentation"
+        if output.kind != MediaRepresentationKind.IMAGE_CAPTION:
+            return False, f"Expected IMAGE_CAPTION, got {output.kind}"
+        if output.status != MediaRepresentationStatus.CURRENT:
+            return True, None
+        if not output.textual_payload:
+            return False, "CURRENT caption representation missing textual_payload"
+        return _is_strict_caption(output.textual_payload)
+
+
+# =============================================================================
+# Task 5.5: optional visual embedding generation
+# =============================================================================
+
+
+def build_embedding_pipeline_definition(
+    executable_path: str | None = None,
+    *,
+    id: str = "image_visual_embedding_v1",  # noqa: A002
+    model_identity: str | None = None,
+    model_version: str | None = None,
+    fixed_args: list[str] | None = None,
+    timeout_seconds: float = 60.0,
+    max_output_bytes: int = 1_000_000,
+) -> MediaPipelineDefinition:
+    """Owner-configured definition for the optional visual embedding pipeline.
+
+    The configured executable wraps a local compatible encoder and writes a
+    JSON document to `output_path` with required `embedding` (list of
+    floats) and `space` (embedding space identifier) keys.
+    """
+    return MediaPipelineDefinition(
+        id=id,
+        name="Local Visual Embedding",
+        description="Optional visual embedding generation through a configured local encoder.",
+        stage=PipelineStage.EMBED_VISUAL,
+        accepted_mime_patterns=["image/*"],
+        input_kinds=[],
+        representation_kinds_produced=[MediaRepresentationKind.VISUAL_EMBEDDING],
+        producer_type=MediaProducerType.MODEL_BACKED,
+        executable_path=executable_path,
+        model_identity=model_identity,
+        fixed_args=fixed_args or ["{input_path}", "{output_path}"],
+        allowed_env_vars=[],
+        shell_enabled=False,
+        network_disabled=True,
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=max_output_bytes,
+        strict_output_contract=True,
+        retry_on_failure=True,
+    )
+
+
+class ImageVisualEmbeddingPipeline(MediaPipelineProtocol):
+    """Bounded subprocess adapter producing a compatible visual embedding."""
+
+    def __init__(self) -> None:
+        self._executor = BoundedSubprocessExecutor()
+
+    @classmethod
+    def get_adapter_name(cls) -> str:
+        return "image_visual_embedding_pipeline"
+
+    @classmethod
+    def get_adapter_version(cls) -> str:
+        return _ADAPTER_VERSION
+
+    @classmethod
+    def get_pipeline_definition(cls) -> MediaPipelineDefinition:
+        return build_embedding_pipeline_definition()
+
+    @classmethod
+    def get_hardware_requirements(cls) -> list[HardwareRequirement]:
+        return [HardwareRequirement.CPU_ONLY]
+
+    @classmethod
+    def get_software_dependencies(cls) -> list[SoftwareDependency]:
+        return [SoftwareDependency.PYTHON_TORCH]
+
+    def process(
+        self,
+        file_path: Path,
+        resource_version_id: ResourceVersionId,
+        source_content_hash: ContentHash,
+        pipeline_fingerprint: PipelineFingerprint,
+        working_directory: Path,
+    ) -> DerivedRepresentation:
+        definition = type(self).get_pipeline_definition()
+        output_path = working_directory / "embedding.json"
+        result = self._executor.execute(
+            definition, file_path, working_directory, output_path=output_path
+        )
+        if result.timed_out or result.exit_code != 0:
+            raise RuntimeError(
+                f"Embedding failed (exit={result.exit_code}, timed_out={result.timed_out}): "
+                f"{result.stderr_sample}"
+            )
+        if not output_path.exists():
+            raise RuntimeError("Embedding tool produced no output file")
+
+        try:
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise RuntimeError(f"Embedding output is not valid JSON: {e}") from e
+
+        is_valid, error = validate_json_output(
+            payload, {"embedding", "space"}, {"embedding": list, "space": str}
+        )
+        if not is_valid:
+            raise RuntimeError(f"Embedding output failed contract validation: {error}")
+
+        embedding = payload["embedding"]
+        if not embedding or len(embedding) > _MAX_EMBEDDING_DIMENSION:
+            raise RuntimeError(
+                f"Embedding dimension {len(embedding)} out of bounds "
+                f"[1, {_MAX_EMBEDDING_DIMENSION}]"
+            )
+        if not all(isinstance(v, (int, float)) for v in embedding):
+            raise RuntimeError("Embedding vector contains non-numeric values")
+
+        space = payload["space"]
+        now = datetime.now(UTC)
+        rep_id = uuid4()
+        return DerivedRepresentation(
+            id=rep_id,
+            resource_version_id=resource_version_id,
+            kind=MediaRepresentationKind.VISUAL_EMBEDDING,
+            media_type="application/json",
+            status=MediaRepresentationStatus.CURRENT,
+            created_at=now,
+            updated_at=now,
+            textual_payload=json.dumps(
+                {"embedding": [float(v) for v in embedding], "space": space}
+            ),
+            locators=(
+                WholeResourceLocator(
+                    resource_version_id=resource_version_id, representation_id=rep_id
+                ),
+            ),
+            coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
+            producer=ProducerProvenance(
+                producer_type=MediaProducerType.MODEL_BACKED,
+                adapter_name=definition.id,
+                adapter_version=_ADAPTER_VERSION,
+                model_identity=definition.model_identity,
+            ),
+            pipeline_fingerprint=pipeline_fingerprint,
+        )
+
+    def validate_output(
+        self, output: object, representation_kind: MediaRepresentationKind
+    ) -> tuple[bool, str | None]:
+        if not isinstance(output, DerivedRepresentation):
+            return False, "Output is not a DerivedRepresentation"
+        if output.kind != MediaRepresentationKind.VISUAL_EMBEDDING:
+            return False, f"Expected VISUAL_EMBEDDING, got {output.kind}"
+        if output.status != MediaRepresentationStatus.CURRENT:
+            return True, None
+        if not output.textual_payload:
+            return False, "CURRENT embedding representation missing textual_payload"
+        try:
+            parsed = json.loads(output.textual_payload)
+        except json.JSONDecodeError:
+            return False, "Embedding textual_payload is not valid JSON"
+        if not isinstance(parsed, dict) or "embedding" not in parsed or "space" not in parsed:
+            return False, "Embedding payload missing required keys"
+        if not isinstance(parsed["embedding"], list) or not parsed["embedding"]:
+            return False, "Embedding vector must be a non-empty list"
+        return True, None

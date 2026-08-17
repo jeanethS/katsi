@@ -1,82 +1,82 @@
 ## 1. Integration Contracts and Configuration
 
-- [ ] 1.1 Reconcile and lock the Resource Version, Claim evidence, projection, and governed-operation integration contracts with `agentic-workspace-coordination` before implementation.
-- [ ] 1.2 Add strict enums and Pydantic models for media descriptors, representation kinds/statuses, coverage, producer provenance, pipeline fingerprints, and representation errors.
-- [ ] 1.3 Add a discriminated Evidence Locator union for whole resource, text range, document page/region, image region, audio time range, video frame, and scene.
-- [ ] 1.4 Add configuration models for supported MIME patterns, pipeline catalog, model/tool identities, language policy, sampling, privacy classes, timeouts, memory/output limits, and modality feature flags.
-- [ ] 1.5 Add validation and JSON round-trip tests for every representation and locator variant, including invalid coordinates, timestamps, coverage, and provenance.
-- [ ] 1.6 Preserve existing `Chunk`, `Extraction`, and text-only configuration compatibility while exposing conversion into the representation model.
+- [x] 1.1 Reconcile and lock the Resource Version, Claim evidence, projection, and governed-operation integration contracts with `agentic-workspace-coordination` before implementation.
+- [x] 1.2 Add strict enums and Pydantic models for media descriptors, representation kinds/statuses, coverage, producer provenance, pipeline fingerprints, and representation errors.
+- [x] 1.3 Add a discriminated Evidence Locator union for whole resource, text range, document page/region, image region, audio time range, video frame, and scene.
+- [x] 1.4 Add configuration models for supported MIME patterns, pipeline catalog, model/tool identities, language policy, sampling, privacy classes, timeouts, memory/output limits, and modality feature flags.
+- [x] 1.5 Add validation and JSON round-trip tests for every representation and locator variant, including invalid coordinates, timestamps, coverage, and provenance.
+- [x] 1.6 Preserve existing `Chunk`, `Extraction`, and text-only configuration compatibility while exposing conversion into the representation model.
 
 ## 2. Representation Registry and Blob Storage
 
-- [ ] 2.1 Implement the authoritative Derived Representation registry behind a core adapter with immutable versions and current-status selection.
-- [ ] 2.2 Implement independent pending, current, partial, unavailable, and failed lifecycle transitions with bounded structured errors.
-- [ ] 2.3 Implement a private content-addressed derived-blob store with hash verification, deduplication, atomic writes, and configured retention metadata.
-- [ ] 2.4 Store large binaries by private blob reference and reject unbounded inline binary payloads in representation contracts.
-- [ ] 2.5 Implement source-resource deletion/change handling that preserves historical representations while removing non-current projection visibility.
-- [ ] 2.6 Add tests for immutable replacement, blob deduplication, corrupted blobs, partial coverage, and source-version provenance.
+- [x] 2.1 Implement the authoritative Derived Representation registry behind a core adapter with immutable versions and current-status selection.
+- [x] 2.2 Implement independent pending, current, partial, unavailable, and failed lifecycle transitions with bounded structured errors.
+- [x] 2.3 Implement a private content-addressed derived-blob store with hash verification, deduplication, atomic writes, and configured retention metadata.
+- [x] 2.4 Store large binaries by private blob reference and reject unbounded inline binary payloads in representation contracts.
+- [x] 2.5 Implement source-resource deletion/change handling that preserves historical representations while removing non-current projection visibility.
+- [x] 2.6 Add tests for immutable replacement, blob deduplication, corrupted blobs, partial coverage, and source-version provenance.
 
 ## 3. Media Detection and Pipeline Registry
 
 - [ ] 3.1 Benchmark candidate local detectors, OCR, transcription, caption, scene-detection, and visual-embedding adapters on supported platforms and record selected defaults in the design/configuration.
-- [ ] 3.2 Define detector and media-pipeline protocols in core with lazy optional-adapter loading and availability probes.
-- [ ] 3.3 Implement content-signature/container detection with extension mismatch reporting, deterministic metadata, and unsupported/encrypted/malformed states.
-- [ ] 3.4 Implement the owner-configured pipeline registry with accepted inputs, produced representations, fixed executable/model identity, environment policy, and resource budgets.
-- [ ] 3.5 Implement bounded subprocess execution with `shell=False`, sanitized environment, private temporary directories, timeout/output enforcement, and network-disabled policy where supported.
-- [ ] 3.6 Implement strict model-output validation with one retry and failed status after the second invalid result.
-- [ ] 3.7 Add fake detector/pipeline adapters and tests proving agent-supplied commands never execute.
+- [x] 3.2 Define detector and media-pipeline protocols in core with lazy optional-adapter loading and availability probes.
+- [x] 3.3 Implement content-signature/container detection with extension mismatch reporting, deterministic metadata, and unsupported/encrypted/malformed states.
+- [x] 3.4 Implement the owner-configured pipeline registry with accepted inputs, produced representations, fixed executable/model identity, environment policy, and resource budgets.
+- [x] 3.5 Implement bounded subprocess execution with `shell=False`, sanitized environment, private temporary directories, timeout/output enforcement, and network-disabled policy where supported.
+- [x] 3.6 Implement strict model-output validation with one retry and failed status after the second invalid result.
+- [x] 3.7 Add fake detector/pipeline adapters and tests proving agent-supplied commands never execute.
 
 ## 4. Pipeline DAG and Content-Hash Cache
 
-- [ ] 4.1 Implement a representation DAG planner using declared input/output kinds and independent branch status.
-- [ ] 4.2 Implement a complete pipeline fingerprint covering source hash, input representation, adapter/contract version, model/tool identity, prompt, language, sampling, and normalization policy.
-- [ ] 4.3 Implement compatible cache lookup so copied media and A→B→A histories reuse successful representations without repeating expensive work.
-- [ ] 4.4 Implement stage-level idempotency, retry, cancellation, and coverage aggregation without marking partial resources fully understood.
-- [ ] 4.5 Implement configured global and per-workspace concurrency limits for CPU/GPU/media jobs.
-- [ ] 4.6 Add tests proving sibling stages survive independent failures and incompatible fingerprint changes produce new representation versions.
+- [x] 4.1 Implement a representation DAG planner using declared input/output kinds and independent branch status.
+- [x] 4.2 Implement a complete pipeline fingerprint covering source hash, input representation, adapter/contract version, model/tool identity, prompt, language, sampling, and normalization policy.
+- [x] 4.3 Implement compatible cache lookup so copied media and A→B→A histories reuse successful representations without repeating expensive work.
+- [x] 4.4 Implement stage-level idempotency, retry, cancellation, and coverage aggregation without marking partial resources fully understood.
+- [x] 4.5 Implement configured global and per-workspace concurrency limits for CPU/GPU/media jobs.
+- [x] 4.6 Add tests proving sibling stages survive independent failures and incompatible fingerprint changes produce new representation versions.
 
 ## 5. Image and Screenshot Understanding
 
-- [ ] 5.1 Implement deterministic image metadata extraction for dimensions, orientation, color/alpha properties, and classified metadata fields.
-- [ ] 5.2 Implement private orientation-normalized thumbnails/previews without altering original bytes.
-- [ ] 5.3 Implement whole-image and region-aware local OCR with normalized bounding-box locators and confidence metadata.
-- [ ] 5.4 Implement optional local image captioning through a configured vision adapter and strict caption contract.
-- [ ] 5.5 Implement optional visual embedding generation through a configured compatible encoder.
-- [ ] 5.6 Keep OCR, captions, metadata, thumbnails, and embeddings independent so any valid subset remains usable.
-- [ ] 5.7 Add tiny fixtures and tests for screenshots, photographs without text, rotated images, transparent images, malformed input, and EXIF location privacy.
+- [x] 5.1 Implement deterministic image metadata extraction for dimensions, orientation, color/alpha properties, and classified metadata fields.
+- [x] 5.2 Implement private orientation-normalized thumbnails/previews without altering original bytes.
+- [x] 5.3 Implement whole-image and region-aware local OCR with normalized bounding-box locators and confidence metadata.
+- [x] 5.4 Implement optional local image captioning through a configured vision adapter and strict caption contract.
+- [x] 5.5 Implement optional visual embedding generation through a configured compatible encoder.
+- [x] 5.6 Keep OCR, captions, metadata, thumbnails, and embeddings independent so any valid subset remains usable.
+- [x] 5.7 Add tiny fixtures and tests for screenshots, photographs without text, rotated images, transparent images, malformed input, and EXIF location privacy.
 
 ## 6. Scanned-Document Understanding
 
-- [ ] 6.1 Implement configured document text-sufficiency evaluation using page count, extracted coverage, and image-only page evidence.
-- [ ] 6.2 Implement bounded local page rendering for pages requiring OCR without replacing the source document.
-- [ ] 6.3 Reuse the image OCR pipeline and attach one-based page plus normalized-region locators to recognized text.
-- [ ] 6.4 Keep native extracted text and OCR distinguishable and add deduplication evidence for overlapping passages.
-- [ ] 6.5 Record unavailable states for encrypted, password-protected, oversized, or unrenderable documents.
-- [ ] 6.6 Add fixtures and tests for text-native, image-only, hybrid, rotated-page, encrypted, and partial-failure documents.
+- [x] 6.1 Implement configured document text-sufficiency evaluation using page count, extracted coverage, and image-only page evidence.
+- [x] 6.2 Implement bounded local page rendering for pages requiring OCR without replacing the source document.
+- [x] 6.3 Reuse the image OCR pipeline and attach one-based page plus normalized-region locators to recognized text.
+- [x] 6.4 Keep native extracted text and OCR distinguishable and add deduplication evidence for overlapping passages.
+- [x] 6.5 Record unavailable states for encrypted, password-protected, oversized, or unrenderable documents.
+- [x] 6.6 Add fixtures and tests for text-native, image-only, hybrid, rotated-page, encrypted, and partial-failure documents.
 
 ## 7. Audio Understanding
 
-- [ ] 7.1 Implement deterministic audio metadata extraction for container, codec, duration, channels, and sample rate.
-- [ ] 7.2 Implement bounded local decoding to a private normalized working representation.
-- [ ] 7.3 Implement configured local speech transcription returning strict timestamped segments and coverage.
-- [ ] 7.4 Implement transcript chunk assembly that preserves source segment locators and prevents duplicate overlapping Claim evidence.
-- [ ] 7.5 Implement optional anonymous speaker segmentation without real-world voice identity inference.
-- [ ] 7.6 Represent silence, music, unsupported language, and unrecognized speech without fabricating transcript text.
-- [ ] 7.7 Add short deterministic fixtures and tests for mono/stereo audio, multiple speakers, silence, partial duration, decoder failure, and cache reuse.
-- [ ] 7.8 Implement MediaSamplingSettings with configurable ChunkingThresholds (target_tokens, overlap, separator_hierarchy) as part of the pipeline fingerprint.
-- [ ] 7.9 Bind chunking policy changes to representation versioning so that different target_tokens or overlap values produce new representation versions instead of silently reusing cached chunks.
-- [ ] 7.10 Update existing chunk implementation to use MediaSamplingSettings instead of hardcoded parameters and ensure chunking thresholds are included in PipelineFingerprint computation.
+- [x] 7.1 Implement deterministic audio metadata extraction for container, codec, duration, channels, and sample rate.
+- [x] 7.2 Implement bounded local decoding to a private normalized working representation.
+- [x] 7.3 Implement configured local speech transcription returning strict timestamped segments and coverage.
+- [x] 7.4 Implement transcript chunk assembly that preserves source segment locators and prevents duplicate overlapping Claim evidence.
+- [x] 7.5 Implement optional anonymous speaker segmentation without real-world voice identity inference.
+- [x] 7.6 Represent silence, music, unsupported language, and unrecognized speech without fabricating transcript text.
+- [x] 7.7 Add short deterministic fixtures and tests for mono/stereo audio, multiple speakers, silence, partial duration, decoder failure, and cache reuse.
+- [x] 7.8 Implement MediaSamplingSettings with configurable ChunkingThresholds (target_tokens, overlap, separator_hierarchy) as part of the pipeline fingerprint.
+- [x] 7.9 Bind chunking policy changes to representation versioning so that different target_tokens or overlap values produce new representation versions instead of silently reusing cached chunks.
+- [x] 7.10 Update existing chunk implementation to use MediaSamplingSettings instead of hardcoded parameters and ensure chunking thresholds are included in PipelineFingerprint computation.
 
 ## 8. Video Understanding
 
-- [ ] 8.1 Implement deterministic video metadata extraction for streams, codecs, dimensions, duration, frame rate, and audio availability.
-- [ ] 8.2 Implement a pre-decode coverage planner enforcing duration, keyframe, pixel, output-byte, wall-time, and compute budgets.
-- [ ] 8.3 Implement local audio-track extraction and reuse the audio transcription pipeline with original video time locators.
-- [ ] 8.4 Implement configured scene-boundary detection with maximum-interval fallback sampling.
-- [ ] 8.5 Implement private keyframe extraction with frame/time locators and source-scene relationships.
-- [ ] 8.6 Implement optional keyframe captions and visual embeddings through the image pipeline adapters.
-- [ ] 8.7 Implement scene representations combining scene range, selected keyframes, and overlapping transcript evidence.
-- [ ] 8.8 Add fixtures and tests for silent video, speech plus slides, variable frame rate, oversized video, partial coverage, scene failure, and interrupted processing.
+- [x] 8.1 Implement deterministic video metadata extraction for streams, codecs, dimensions, duration, frame rate, and audio availability.
+- [x] 8.2 Implement a pre-decode coverage planner enforcing duration, keyframe, pixel, output-byte, wall-time, and compute budgets.
+- [x] 8.3 Implement local audio-track extraction and reuse the audio transcription pipeline with original video time locators.
+- [x] 8.4 Implement configured scene-boundary detection with maximum-interval fallback sampling.
+- [x] 8.5 Implement private keyframe extraction with frame/time locators and source-scene relationships.
+- [x] 8.6 Implement optional keyframe captions and visual embeddings through the image pipeline adapters.
+- [x] 8.7 Implement scene representations combining scene range, selected keyframes, and overlapping transcript evidence.
+- [x] 8.8 Add fixtures and tests for silent video, speech plus slides, variable frame rate, oversized video, partial coverage, scene failure, and interrupted processing.
 
 ## 9. Modality-Aware Vector and Graph Projections
 

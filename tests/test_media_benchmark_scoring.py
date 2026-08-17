@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import pytest
-
 from benchmarks.media.contracts import AccuracyMetric
 from benchmarks.media.scoring import (
     character_accuracy,
-    character_error_rate,
-    character_error_rate as cer,
     seq2seq_f1,
     text_iou,
     word_accuracy,
     word_error_rate,
+)
+from benchmarks.media.scoring import (
+    character_error_rate as cer,
 )
 
 
