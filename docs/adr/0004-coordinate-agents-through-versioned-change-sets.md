@@ -1,0 +1,3 @@
+# Coordinate agents through versioned Change Sets
+
+Personal Agents operate under durable identities and Capability Grants, coordinate active work through scoped Work Leases, and submit typed Change Sets against the workspace state they observed. Leases are advisory during exploration and exclusive over affected resources only while a Change Set is validated and applied. Katsi rejects a proposal only when a declared dependency, expected content hash, invariant, or intended output has changed, allowing unrelated work to proceed in parallel. This preserves a governed point at which unsafe or contradictory changes can be stopped without centralizing every agent's reasoning.

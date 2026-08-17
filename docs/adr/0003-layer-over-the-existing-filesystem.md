@@ -1,0 +1,3 @@
+# Layer over the existing filesystem
+
+Katsi owns the persistent Living Model and governed action history while the existing filesystem remains authoritative for file bytes. It is an agentic filesystem in the sense of providing semantic memory, coordination, intent, policy, and verified Change Sets—not by implementing a kernel filesystem or proprietary file store. Ordinary writes remain possible and are observed as External Changes; Katsi guarantees only actions executed through its Governed Path. This preserves compatibility with existing tools and user ownership at the cost of continuously reconciling Katsi's model with changes made outside it.

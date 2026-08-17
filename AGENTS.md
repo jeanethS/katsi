@@ -38,3 +38,17 @@ katsi/
 - Type hints throughout; passes ruff.
 - Unit tests for the unit built; external services mocked/fixtured, not hit in CI.
 - No TODOs left in the happy path.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the default Matt Pocock label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain documentation uses a multi-context layout. See `docs/agents/domain.md`.
