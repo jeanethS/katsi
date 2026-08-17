@@ -279,6 +279,40 @@ class GraphStore:
 
         return results
 
+    def get_direct_relationships(self, file_id: str) -> dict:
+        """Get direct relationships (entities and topics) for a file.
+
+        Returns a dict with 'entities' and 'topics' lists.
+        """
+        entities: list[dict] = []
+        topics: list[str] = []
+
+        # Get entities this file mentions
+        r = self._conn.execute(
+            "MATCH (f:File {id: $id})-[m:MENTIONS]->(e:Entity) "
+            "RETURN e.name AS name, e.kind AS kind, m.weight AS weight",
+            {"id": file_id},
+        )
+        while r.has_next():
+            row = r.get_next()
+            entities.append({
+                "name": _unwrap(row[0]),
+                "kind": _unwrap(row[1]),
+                "weight": _unwrap(row[2]),
+            })
+
+        # Get topics this file is about
+        r = self._conn.execute(
+            "MATCH (f:File {id: $id})-[a:ABOUT]->(t:Topic) "
+            "RETURN t.name AS name, a.weight AS weight",
+            {"id": file_id},
+        )
+        while r.has_next():
+            row = r.get_next()
+            topics.append(_unwrap(row[0]))
+
+        return {"entities": entities, "topics": topics}
+
     def get_file(self, file_id: str) -> FileRecord | None:
         """MATCH (f:File {id:$id}) RETURN f; return a FileRecord or None."""
         r = self._conn.execute(
@@ -342,6 +376,76 @@ class GraphStore:
             result = self._conn.execute(f"MATCH (n:{label}) RETURN count(n)")
             counts[key] = int(_unwrap(result.get_next()[0]))
         return counts
+
+    def rebuild_from_authoritative(
+        self,
+        resources: list[tuple[str, str, str, str | None]],  # (file_id, path, name, summary)
+        entities: list[tuple[str, str, str]],  # (file_id, entity_name, entity_kind)
+        topics: list[tuple[str, str]],  # (file_id, topic_name)
+        references: list[tuple[str, str]],  # (source_id, target_id)
+        duplicate_of: list[tuple[str, str, float]],  # (source_id, target_id, similarity)
+    ) -> None:
+        """Rebuild the entire graph from authoritative resources and cached enrichment.
+
+        This is an idempotent operation that:
+        1. Clears all existing graph data
+        2. Rebuilds from authoritative resources (current state)
+        3. Uses cached enrichment (entities, topics) to avoid redundant LLM calls
+
+        Args:
+            resources: List of (file_id, path, name, summary) tuples from authoritative resources
+            entities: List of (file_id, entity_name, entity_kind) from cached enrichment
+            topics: List of (file_id, topic_name) from cached enrichment
+            references: List of (source_id, target_id) reference relationships
+            duplicate_of: List of (source_id, target_id, similarity) duplicate relationships
+        """
+        # Clear existing data idempotently
+        self._conn.execute("MATCH (f:File) DETACH DELETE f")
+        self._conn.execute("MATCH (e:Entity) DETACH DELETE e")
+        self._conn.execute("MATCH (t:Topic) DETACH DELETE t")
+        self._conn.execute("MATCH (intent:ReferenceIntent) DELETE intent")
+
+        # Rebuild File nodes from authoritative resources
+        for file_id, path, name, summary in resources:
+            self._conn.execute(
+                "MERGE (f:File {id: $id}) "
+                "SET f.path = $path, f.name = $name, f.ext = $ext, "
+                "f.summary = $summary, f.mtime = $mtime",
+                {
+                    "id": file_id,
+                    "path": path,
+                    "name": name,
+                    "ext": Path(name).suffix,
+                    "summary": summary if summary is not None else "",
+                    "mtime": 0.0,  # Not authoritative for rebuild
+                },
+            )
+
+        # Rebuild Entity nodes and MENTIONS edges from cached enrichment
+        for file_id, entity_name, entity_kind in entities:
+            self.upsert_entity(entity_name, entity_kind)
+            self._conn.execute(
+                "MATCH (f:File {id: $fid}), (e:Entity {name: $ename}) "
+                "MERGE (f)-[:MENTIONS {weight: 1.0}]->(e)",
+                {"fid": file_id, "ename": entity_name},
+            )
+
+        # Rebuild Topic nodes and ABOUT edges from cached enrichment
+        for file_id, topic_name in topics:
+            self.upsert_topic(topic_name)
+            self._conn.execute(
+                "MATCH (f:File {id: $fid}), (t:Topic {name: $tname}) "
+                "MERGE (f)-[:ABOUT {weight: 1.0}]->(t)",
+                {"fid": file_id, "tname": topic_name},
+            )
+
+        # Rebuild REFERENCES edges
+        for source_id, target_id in references:
+            self.add_reference(source_id, target_id)
+
+        # Rebuild DUPLICATE_OF edges
+        for source_id, target_id, similarity in duplicate_of:
+            self.add_duplicate(source_id, target_id, similarity)
 
     def close(self) -> None:
         self._conn.close()

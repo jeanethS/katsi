@@ -10,6 +10,7 @@ from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.store.workspace_transactions import write_transaction
 from katsi_core.workspace.contracts import (
     AgentIdentityId,
+    CapabilityOperationClass,
     Claim,
     ClaimEvidence,
     ClaimEvidenceKind,
@@ -17,6 +18,7 @@ from katsi_core.workspace.contracts import (
     ClaimStatus,
     ClaimTransition,
 )
+from katsi_core.workspace.authorization import AuthorizationService
 from katsi_core.workspace.errors import AuthorizationDeniedError, InvalidTransitionError
 from katsi_core.workspace.identity import IdentityService
 
@@ -60,13 +62,16 @@ _VERIFICATION_EVIDENCE = frozenset(
 class ClaimService:
     """Stores immutable assertions and their append-only provenance history."""
 
-    def __init__(self, database: WorkspaceSQLite, identities: IdentityService) -> None:
+    def __init__(
+        self, database: WorkspaceSQLite, identities: IdentityService, authorization: AuthorizationService
+    ) -> None:
         self._database = database
         self._identities = identities
+        self._authorization = authorization
 
     def publish(self, claim: Claim, evidence: tuple[ClaimEvidence, ...] = ()) -> Claim:
         """Publish a new Claim in proposed state; text and scope never change."""
-        self._require_active_identity(claim.author_id)
+        self._require_claim_capability(claim.author_id, claim.workspace_id)
         if claim.status is not ClaimStatus.PROPOSED:
             raise InvalidTransitionError("new Claims must start in proposed status")
         if any(item.claim_id != claim.id for item in evidence):
@@ -91,15 +96,20 @@ class ClaimService:
     def add_evidence(
         self, claim_id: ClaimId, actor_id: AgentIdentityId, evidence: ClaimEvidence
     ) -> None:
-        self._require_active_identity(actor_id)
         if evidence.claim_id != claim_id:
             raise ValueError("Claim evidence must reference its Claim")
         with self._database.connection() as connection, write_transaction(connection):
-            if (
-                connection.execute("SELECT 1 FROM claims WHERE id = ?", (str(claim_id),)).fetchone()
-                is None
-            ):
+            # Check if claim exists and get workspace for authorization
+            claim_row = connection.execute(
+                "SELECT workspace_id FROM claims WHERE id = ?", (str(claim_id),)
+            ).fetchone()
+            if claim_row is None:
                 raise KeyError(f"unknown Claim: {claim_id}")
+
+            # Perform authorization check with the workspace_id
+            workspace_id = UUID(claim_row["workspace_id"])
+            self._require_claim_capability(actor_id, workspace_id)
+
             self._insert_evidence(connection, (evidence,))
 
     def transition(
@@ -110,7 +120,6 @@ class ClaimService:
         evidence: ClaimEvidence | None = None,
     ) -> ClaimTransition:
         """Append a validated transition; verification needs typed non-agent evidence."""
-        self._require_active_identity(actor_id)
         if to_status is ClaimStatus.VERIFIED and (
             evidence is None or evidence.kind not in _VERIFICATION_EVIDENCE
         ):
@@ -118,11 +127,16 @@ class ClaimService:
         timestamp = _now()
         with self._database.connection() as connection, write_transaction(connection):
             row = connection.execute(
-                "SELECT status FROM claims WHERE id = ?", (str(claim_id),)
+                "SELECT workspace_id, status FROM claims WHERE id = ?", (str(claim_id),)
             ).fetchone()
             if row is None:
                 raise KeyError(f"unknown Claim: {claim_id}")
+            workspace_id = UUID(row["workspace_id"])
             from_status = ClaimStatus(row["status"])
+
+            # Check authorization after retrieving workspace_id
+            self._require_claim_capability(actor_id, workspace_id)
+
             if to_status not in _ALLOWED_TRANSITIONS[from_status]:
                 raise InvalidTransitionError(
                     f"invalid Claim transition: {from_status} -> {to_status}"
@@ -171,6 +185,10 @@ class ClaimService:
                 (str(workspace_id),),
             ).fetchall()
         return [self._claim_from_row(row) for row in rows]
+
+    def list_claims(self, workspace_id: UUID) -> list[Claim]:
+        """List all claims for a workspace (alias for list_for_workspace)."""
+        return self.list_for_workspace(workspace_id)
 
     def transitions(self, claim_id: ClaimId) -> list[ClaimTransition]:
         with self._database.connection() as connection:
@@ -252,10 +270,48 @@ class ClaimService:
                 transitions.append(transition)
         return transitions
 
-    def _require_active_identity(self, identity_id: AgentIdentityId) -> None:
-        identity = self._identities.get_identity(identity_id)
-        if identity is None or not identity.active:
-            raise AuthorizationDeniedError("identity is not active")
+    def _require_claim_capability(self, actor_id: AgentIdentityId, workspace_id: UUID) -> None:
+        """Require that the actor has CLAIM capability for the workspace.
+
+        This replaces the simple identity check with full capability authorization:
+        - Identity must exist and be active (not revoked)
+        - Must have an active capability grant for CLAIM operations
+        - Grant must not be expired or revoked
+        - Must be authorized for the specific workspace
+
+        Raises AuthorizationDeniedError with specific error messages for each failure case.
+        """
+        # Get the agent identity - this checks existence and active/revoked status
+        identity = self._identities.get_identity(actor_id)
+        if identity is None:
+            raise AuthorizationDeniedError("Agent identity not found")
+        if not identity.active:
+            raise AuthorizationDeniedError("Agent identity is not active")
+        if identity.revoked_at is not None:
+            raise AuthorizationDeniedError("Agent identity has been revoked")
+
+        # Get active capability grant for CLAIM operations in this workspace
+        grant = self._authorization._get_active_capability_grant(
+            actor_id, workspace_id, CapabilityOperationClass.CLAIM
+        )
+        if grant is None:
+            raise AuthorizationDeniedError(
+                "No active capability grant for CLAIM operations in this workspace"
+            )
+
+        # Check grant expiration
+        if grant.expires_at and grant.expires_at < datetime.now(UTC):
+            raise AuthorizationDeniedError("Capability grant for CLAIM operations has expired")
+
+        # Check grant revocation
+        if grant.revoked_at is not None:
+            raise AuthorizationDeniedError("Capability grant for CLAIM operations has been revoked")
+
+        # Verify CLAIM operation class is in the grant
+        if CapabilityOperationClass.CLAIM not in grant.operation_classes:
+            raise AuthorizationDeniedError(
+                "CLAIM operation class not included in capability grant"
+            )
 
     @staticmethod
     def _insert_evidence(connection: object, evidence: tuple[ClaimEvidence, ...]) -> None:

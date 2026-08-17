@@ -1,16 +1,29 @@
 # katsi
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
+[![MCP](https://img.shields.io/badge/MCP-compatible-6f42c1.svg)](https://modelcontextprotocol.io)
+
 > The word *katsi* means "to know" or "to understand" in Totonac.
 
 Local-first, privacy-first MCP server that gives any MCP client (Claude Desktop,
-Code, Cursor, ...) cheap, **relational** context about your files. Summarize each
-file exactly once with local Ollama models, bank into a vector store + knowledge
+Claude Code, Cursor, ...) cheap, **relational** context about your files. Summarize
+each file exactly once with local Ollama models, bank into a vector store + knowledge
 graph (Kùzu), and at query time return a small curated context bundle so your
 client's model synthesizes over a tiny window instead of exploring the filesystem.
 
 > Exploration tokens move from query-time (expensive, cloud, repeated) to
 > ingest-time (cheap, local, once). The only cloud spend is the client
 > synthesizing the answer over a small curated context.
+
+**Contents:** [Quickstart](#quickstart-60-seconds) ·
+[MCP client config](#mcp-client-config) ·
+[Local development](#local-development) ·
+[Provided MCP tools](#provided-mcp-tools) ·
+[CLI](#cli-dogfood-surface) ·
+[Config](#config) ·
+[Synthesis modes](#synthesis-modes) ·
+[Architecture](#architecture)
 
 ## What makes it different
 
@@ -44,9 +57,11 @@ uvx --from katsi-cli katsi index ~/my-folder
 uvx --from katsi-cli katsi ask "what is this project about?"
 ```
 
-## MCP client config (Claude Desktop)
+## MCP client config
 
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`
+### Claude Desktop
+
+Add to your config (`~/Library/Application Support/Claude/claude_desktop_config.json`
 on macOS; `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 
 ```json
@@ -60,10 +75,74 @@ on macOS; `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 }
 ```
 
+### Claude Code
+
+```bash
+claude mcp add katsi -s local -- uvx katsi-mcp
+```
+
+`-s local` scopes the server to your user + this project (not committed to
+git). Use `-s project` instead if you want the server shared with the team via
+a checked-in `.mcp.json`.
+
+**Running against a local checkout** (this repo, not the published package) —
+point at `uv run` and select the `katsi-mcp` workspace member explicitly. The
+`--package` flag matters: the workspace root declares no dependency on its own
+members, so a bare `uv run katsi-mcp` fails with "no such file or directory"
+even after `uv sync`.
+
+```bash
+claude mcp add katsi -s local -- uv run --project /path/to/katsi --package katsi-mcp katsi-mcp
+```
+
+Verify it connected:
+
+```bash
+claude mcp list   # katsi: ... - ✔ Connected
+```
+
 ### Other clients
 
 - **Cursor**: Settings → MCP → Add MCP → `uvx katsi-mcp`.
-- **Generic MCP**: any client that speaks MCP stdio can launch `uvx katsi-mcp`.
+- **Generic MCP**: any client that speaks MCP stdio can launch `uvx katsi-mcp`
+  (or the local-checkout `uv run` command above).
+
+## Local development
+
+katsi is a [uv](https://docs.astral.sh/uv/) workspace with four members:
+`core`, `mcp_server`, `cli`, and `app`.
+
+```bash
+git clone https://github.com/jeanethS/katsi.git
+cd katsi
+uv sync                     # installs the workspace + dev deps (ruff, pytest)
+```
+
+`uv sync` at the root does **not** install the workspace members' console
+scripts into `.venv/bin` — the root package has no dependency on its own
+members. Always target a specific member with `--package` when running or
+testing one directly:
+
+```bash
+uv run --package katsi-mcp katsi-mcp          # start the MCP server
+uv run --package katsi-cli katsi --help       # CLI
+uv run --package katsi-cli katsi index ~/some-folder
+```
+
+Requires a local [Ollama](https://ollama.com) install with the configured
+embedding + LLM models pulled:
+
+```bash
+ollama pull bge-m3
+ollama pull qwen2.5:7b
+```
+
+Tests and lint:
+
+```bash
+uv run pytest
+uv run ruff check . && uv run ruff format .
+```
 
 ## Provided MCP tools
 
@@ -168,7 +247,8 @@ katsi/
 ├── packages/
 │   ├── core/katsi_core/   models, config, store, clients, ingest, retrieve
 │   ├── mcp_server/        FastMCP tools (this package is what `katsi-mcp` runs)
-│   └── cli/               `katsi` CLI: index, status, search, ask
+│   ├── cli/               `katsi` CLI: index, status, search, ask
+│   └── app/               status/dashboard app (katsi_app backend + frontend)
 └── tests/
 ```
 

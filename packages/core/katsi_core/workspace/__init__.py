@@ -1,12 +1,22 @@
 """Authoritative workspace coordination contracts and errors."""
 
+from katsi_core.workspace.action_journal import ActionJournalService
 from katsi_core.workspace.brief import BriefService
 from katsi_core.workspace.change_sets import ChangeSetService
 from katsi_core.workspace.claims import ClaimService
+from katsi_core.workspace.exclusive_leases import ExclusiveLeaseService
+from katsi_core.workspace.governed_executor import GovernedExecutor, FaultInjector
+from katsi_core.workspace.idempotent_operations import IdempotentOperationService
+from katsi_core.workspace.quarantine import QuarantineRecord, QuarantineService
+from katsi_core.workspace.recovery_store import RecoveryBlobStore
+from katsi_core.workspace.staging import AdjacentStagingManager
 from katsi_core.workspace.contracts import (
     ActionOutcome,
+    ActionOutcomeId,
     ActionOutcomeStatus,
     AgentIdentity,
+    AgentIdentityId,
+    ApplyPatchOperation,
     BriefClaim,
     BriefLease,
     BriefOpenWork,
@@ -14,38 +24,61 @@ from katsi_core.workspace.contracts import (
     BriefRecord,
     BriefSection,
     CapabilityGrant,
+    CapabilityGrantId,
     CapabilityOperationClass,
     ChangeSet,
+    ChangeSetId,
     ChangeSetStatus,
     ChangeSetTransition,
+    ChangeSetTransitionId,
     Claim,
     ClaimEvidence,
     ClaimEvidenceKind,
     ClaimStatus,
     ClaimTransition,
+    ContentHash,
+    CopyFileOperation,
+    CreateDirectoryOperation,
+    CreateFileOperation,
+    MoveFileOperation,
     OmittedSection,
     OpenWork,
     OpenWorkStatus,
     OpenWorkTransition,
+    Operation,
     PortableProjectState,
     ProjectionFreshness,
+    QuarantineFileOperation,
+    RelativePath,
+    ReplaceDerivedArtifactOperation,
+    ReplaceFileOperation,
     Resource,
     ResourceDependency,
+    ResourceId,
     ResourceStatus,
     ResourceVersion,
+    ResourceVersionId,
+    RestoreQuarantinedFileOperation,
     RiskClass,
     WorkLease,
+    WorkLeaseId,
     WorkLeaseKind,
     WorkLeaseStatus,
     Workspace,
     WorkspaceBrief,
     WorkspaceEvent,
+    WorkspaceEventId,
     WorkspaceEventKind,
+    WorkspaceId,
     WorkspaceRecord,
     WorkspaceRecordKind,
     WorkspaceRecordStatus,
     WorkspaceRecordTransition,
     WorkspaceStatus,
+    YoloAuthorization,
+    YoloMode,
+    YoloModeStatus,
+    YoloSuspensionEvent,
 )
 from katsi_core.workspace.errors import (
     AuthorizationDeniedError,
@@ -67,13 +100,67 @@ from katsi_core.workspace.observer import (
     WatchdogObserver,
     WorkspaceScanner,
 )
+from katsi_core.workspace.operations import (
+    CopyOperation,
+    CreateOperation,
+    DerivedArtifactReplaceOperation,
+    DeterministicPatchOperation,
+    DirectoryCreateOperation,
+    ExactHashReplaceOperation,
+    ForbiddenOperationError,
+    ForbiddenOperationType,
+    FilesystemOperationExecutor,
+    InWorkspaceMoveOperation,
+    OperationKind,
+    OperationLimits,
+    OperationResult,
+    PathAttackType,
+    PathSecurityConfig,
+    PathValidationError,
+    PreflightCheckResult,
+    PreflightContext,
+    QuarantineOperation,
+    RestoreOperation,
+    apply_patch_in_memory,
+    compute_blake3_hash,
+    compute_content_hash,
+    create_operation_id,
+    perform_preflight_checks,
+    validate_operation_limits,
+    validate_path_security,
+)
 from katsi_core.workspace.portable_state import PortableStateStore
 from katsi_core.workspace.records import WorkspaceRecordService
+from katsi_core.workspace.yolo import (
+    PolicySimulationResult,
+    YoloActivationResult,
+    YoloService,
+    YoloSuspensionReason,
+)
+from katsi_core.workspace.authorization import (
+    AuthorizationResult,
+    AuthorizationService,
+    PolicyMode,
+)
+from katsi_core.workspace.validation import (
+    ValidationResult,
+    ValidationService,
+)
+from katsi_core.workspace.staleness import (
+    StaleTrigger,
+    StalenessService,
+)
+from katsi_core.workspace.owner_api import (
+    ChangeSetProposal,
+    OwnerAPI,
+    OwnerDecision,
+)
 
 __all__ = [
     "ActionOutcome",
     "ActionOutcomeStatus",
     "AgentIdentity",
+    "AgentIdentityId",
     "AuthorizationDeniedError",
     "BriefClaim",
     "BriefLease",
@@ -135,4 +222,22 @@ __all__ = [
     "WorkspaceEventKind",
     "WorkspaceStatus",
     "ProjectionFreshness",
+    "YoloAuthorization",
+    "YoloMode",
+    "YoloModeStatus",
+    "YoloSuspensionEvent",
+    "YoloService",
+    "YoloActivationResult",
+    "PolicySimulationResult",
+    "YoloSuspensionReason",
+    "AuthorizationResult",
+    "AuthorizationService",
+    "PolicyMode",
+    "ValidationResult",
+    "ValidationService",
+    "StaleTrigger",
+    "StalenessService",
+    "ChangeSetProposal",
+    "OwnerAPI",
+    "OwnerDecision",
 ]

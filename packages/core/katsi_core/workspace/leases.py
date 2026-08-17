@@ -11,12 +11,14 @@ from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.store.workspace_transactions import write_transaction
 from katsi_core.workspace.contracts import (
     AgentIdentityId,
+    CapabilityOperationClass,
     RelativePath,
     WorkLease,
     WorkLeaseKind,
     WorkLeaseStatus,
     WorkspaceId,
 )
+from katsi_core.workspace.authorization import AuthorizationService
 from katsi_core.workspace.errors import AuthorizationDeniedError, ConflictError
 from katsi_core.workspace.identity import IdentityService
 
@@ -29,11 +31,12 @@ class WorkLeaseService:
     """Creates visible, time-bounded advisory leases for active agent work."""
 
     def __init__(
-        self, database: WorkspaceSQLite, identities: IdentityService, settings: LeaseSettings
+        self, database: WorkspaceSQLite, identities: IdentityService, settings: LeaseSettings, authorization: AuthorizationService | None = None
     ) -> None:
         self._database = database
         self._identities = identities
         self._settings = settings
+        self._authorization = authorization
 
     def acquire(
         self,
@@ -43,6 +46,7 @@ class WorkLeaseService:
         resource_scope: tuple[RelativePath, ...] = (),
     ) -> WorkLease:
         self._require_active_identity(holder_id)
+        self._require_lease_capability(holder_id, workspace_id)
         acquired_at = _now()
         lease = WorkLease(
             id=uuid4(),
@@ -147,6 +151,53 @@ class WorkLeaseService:
         identity = self._identities.get_identity(identity_id)
         if identity is None or not identity.active:
             raise AuthorizationDeniedError("identity is not active")
+
+    def _require_lease_capability(self, identity_id: AgentIdentityId, workspace_id: WorkspaceId) -> None:
+        """Require that the actor has LEASE capability for the workspace.
+
+        This checks:
+        - Identity must exist and be active (not revoked)
+        - Must have an active capability grant for LEASE operations
+        - Grant must not be expired or revoked
+        - Must be authorized for the specific workspace
+
+        Raises AuthorizationDeniedError with specific error messages for each failure case.
+        """
+        # If no authorization service is provided, skip capability check (backward compatibility)
+        if self._authorization is None:
+            return
+
+        # Get the agent identity - this checks existence and active/revoked status
+        identity = self._identities.get_identity(identity_id)
+        if identity is None:
+            raise AuthorizationDeniedError("Agent identity not found")
+        if not identity.active:
+            raise AuthorizationDeniedError("Agent identity is not active")
+        if identity.revoked_at is not None:
+            raise AuthorizationDeniedError("Agent identity has been revoked")
+
+        # Get active capability grant for LEASE operations in this workspace
+        grant = self._authorization._get_active_capability_grant(
+            identity_id, workspace_id, CapabilityOperationClass.LEASE
+        )
+        if grant is None:
+            raise AuthorizationDeniedError(
+                "No active capability grant for LEASE operations in this workspace"
+            )
+
+        # Check grant expiration
+        if grant.expires_at and grant.expires_at < _now():
+            raise AuthorizationDeniedError("Capability grant for LEASE operations has expired")
+
+        # Check grant revocation
+        if grant.revoked_at is not None:
+            raise AuthorizationDeniedError("Capability grant for LEASE operations has been revoked")
+
+        # Verify LEASE operation class is in the grant
+        if CapabilityOperationClass.LEASE not in grant.operation_classes:
+            raise AuthorizationDeniedError(
+                "LEASE operation class not included in capability grant"
+            )
 
     @staticmethod
     def _from_row(row: object) -> WorkLease:

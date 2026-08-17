@@ -31,7 +31,7 @@ class SQLiteSettings(BaseModel):
 
     filename: str = "workspace.sqlite3"
     busy_timeout_ms: int = Field(default=5_000, ge=0)
-    schema_version: int = Field(default=3, ge=1)
+    schema_version: int = Field(default=4, ge=1)
 
 
 class PortableStateSettings(BaseModel):
@@ -222,6 +222,7 @@ class Settings(BaseSettings):
     mcp: MCPSettings = Field(default_factory=MCPSettings)
     synth: SynthSettings = Field(default_factory=SynthSettings)
     workspace: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
+    lease: LeaseSettings = Field(default_factory=LeaseSettings)
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> Settings:

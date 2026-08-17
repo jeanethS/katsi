@@ -21,6 +21,11 @@ Homepage = "https://github.com/jeanethS/katsi"
 Repository = "https://github.com/jeanethS/katsi"
 Issues = "https://github.com/jeanethS/katsi/issues"
 
+[project.optional-dependencies]
+pdf = [
+    "markitdown[pdf]>=0.1.6",
+]
+
 # Explicit members, not packages/* — packages/app is a container (JS frontend +
 # katsi_app backend), not itself a Python package.
 [tool.uv.workspace]

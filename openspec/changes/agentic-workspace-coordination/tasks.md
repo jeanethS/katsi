@@ -45,7 +45,7 @@
 - [x] 5.5 Trigger full reconciliation after startup, observer overflow, detected sequence gap, and explicit owner request.
 - [x] 5.6 Correlate governed executor events with their Change Set and classify unexplained direct writes as External Changes.
 - [x] 5.7 Add fixture tests for duplicate, reordered, coalesced, and missing observer events.
-- [ ] 5.8 Add restart and full-scan tests proving deleted resources cannot remain in current search or relationships.
+- [x] 5.8 Add restart and full-scan tests proving deleted resources cannot remain in current search or relationships.
 
 ## 6. Content Enrichment Reuse
 
@@ -53,7 +53,7 @@
 - [x] 6.2 Implement a content-enrichment cache independent of resource path and current resource identity.
 - [x] 6.3 Route ingestion through cache lookup so copied content and A→B→A histories perform zero repeated local-model calls when compatible.
 - [x] 6.4 Persist strict Extraction validation, one retry, and terminal error state before publishing semantic projections.
-- [ ] 6.5 Add tests proving invalid extraction cannot publish current chunks, graph edges, or Claims.
+- [x] 6.5 Add tests proving invalid extraction cannot publish current chunks, graph edges, or Claims.
 - [x] 6.6 Add tests covering compatible reuse and intentional re-enrichment after a fingerprint change.
 
 ## 7. Rebuildable Graph and Vector Projections
@@ -63,8 +63,8 @@
 - [x] 7.3 Change vector projection to replace current chunks and exclude deleted or errored resources.
 - [x] 7.4 Implement reference backfill and deterministic resolution without depending on ingest order.
 - [x] 7.5 Expose projection lag and last applied offsets in status and retrieval diagnostics.
-- [ ] 7.6 Implement full Kùzu and LanceDB rebuilds from authoritative resources and cached enrichment.
-- [ ] 7.7 Add failure-injection tests proving authoritative events survive graph/vector failure and rebuild invokes no unnecessary local-model calls.
+- [x] 7.6 Implement full Kùzu and LanceDB rebuilds from authoritative resources and cached enrichment.
+- [x] 7.7 Add failure-injection tests proving authoritative events survive graph/vector failure and rebuild invokes no unnecessary local-model calls.
 
 ## 8. Agent Identity and Capability Grants
 
@@ -89,74 +89,74 @@
 
 - [x] 10.1 Implement advisory Work Lease acquisition, compare-and-set renewal, release, expiry, task description, and resource scope.
 - [x] 10.2 Expose overlapping active advisory work without blocking exploration or Change Set proposal.
-- [ ] 10.3 Implement brief assembly from authoritative goal, intent, Claims, decisions, open work, leases, changes, and invalidation state.
-- [ ] 10.4 Fuse graph/vector context into Workspace Briefs while preserving provenance, evidence status, projection offsets, and lag warnings.
+- [x] 10.3 Implement brief assembly from authoritative goal, intent, Claims, decisions, open work, leases, changes, and invalidation state.
+- [x] 10.4 Fuse graph/vector context into Workspace Briefs while preserving provenance, evidence status, projection offsets, and lag warnings.
 - [x] 10.5 Replace fixed per-file token estimates with serialized budget accounting and explicit omission/provisional markers.
 - [x] 10.6 Add tests for lease expiry, overlap visibility, strict brief budgets, stale context labeling, and operation while projections lag.
 
 ## 11. MCP and CLI Coordination Surfaces
 
-- [ ] 11.1 Add MCP operations to open/inspect a workspace and obtain a task-scoped Workspace Brief using the authenticated Agent Identity.
-- [ ] 11.2 Add capability-checked MCP operations to publish/list Claims and inspect decisions, blockers, and open work.
-- [ ] 11.3 Add MCP operations to acquire, renew, release, and inspect Work Leases.
-- [ ] 11.4 Preserve existing `get_context`, `search_files`, `related`, summary, and status tools as compatible retrieval primitives.
-- [ ] 11.5 Add CLI owner commands for workspace registration, portable-state import/export, identity issuance/revocation, and capability inspection without printing credentials after initial issuance.
-- [ ] 11.6 Add MCP/CLI contract tests with fake stores, multiple authenticated clients, denial cases, and redacted errors.
+- [x] 11.1 Add MCP operations to open/inspect a workspace and obtain a task-scoped Workspace Brief using the authenticated Agent Identity.
+- [x] 11.2 Add capability-checked MCP operations to publish/list Claims and inspect decisions, blockers, and open work.
+- [x] 11.3 Add MCP operations to acquire, renew, release, and inspect Work Leases.
+- [x] 11.4 Preserve existing `get_context`, `search_files`, `related`, summary, and status tools as compatible retrieval primitives.
+- [x] 11.5 Add CLI owner commands for workspace registration, portable-state import/export, identity issuance/revocation, and capability inspection without printing credentials after initial issuance.
+- [x] 11.6 Add MCP/CLI contract tests with fake stores, multiple authenticated clients, denial cases, and redacted errors.
 
 ## 12. Change Set Models and Lifecycle
 
-- [ ] 12.1 Implement strict immutable Change Set, dependency, precondition, operation, postcondition, rollback, idempotency, and successor-version models.
+- [x] 12.1 Implement strict immutable Change Set, dependency, precondition, operation, postcondition, rollback, idempotency, and successor-version models.
 - [x] 12.2 Implement append-only transition history and reject every lifecycle transition not allowed by the design state machine.
-- [ ] 12.3 Implement proposal submission that freezes content and creates a linked successor for every revision.
-- [ ] 12.4 Persist exact resource-version dependencies, absence assertions, invariant versions, intended outputs, operation/byte limits, and risk class.
-- [ ] 12.5 Add query APIs for current status, full transition history, validation evidence, authorization evidence, and terminal action receipts.
-- [ ] 12.6 Add exhaustive state-machine, immutability, successor, and idempotency tests.
+- [x] 12.3 Implement proposal submission that freezes content and creates a linked successor for every revision.
+- [x] 12.4 Persist exact resource-version dependencies, absence assertions, invariant versions, intended outputs, operation/byte limits, and risk class.
+- [x] 12.5 Add query APIs for current status, full transition history, validation evidence, authorization evidence, and terminal action receipts.
+- [x] 12.6 Add exhaustive state-machine, immutability, successor, and idempotency tests.
 
 ## 13. Validation and Authorization
 
-- [ ] 13.1 Implement dependency-closure validation against exact resource versions, target hashes, absence assertions, invariants, and intended outputs.
-- [ ] 13.2 Revalidate relevant state before authorization and immediately before each target replacement.
-- [ ] 13.3 Mark proposals stale with exact triggering events while allowing unrelated workspace events to proceed.
-- [ ] 13.4 Implement owner approval and denial transitions with immutable decision evidence.
-- [ ] 13.5 Evaluate Agent Identity, Capability Grant, active intent, action class, scope, limits, and policy mode without permitting authority-plane operations.
-- [ ] 13.6 Add the MCP/owner API for proposing, validating, reviewing, approving, rejecting, and superseding Change Sets without applying files.
-- [ ] 13.7 Add multi-client race tests for relevant conflict, unrelated parallel work, revoked authority, changed intent, and expired approval.
+- [x] 13.1 Implement dependency-closure validation against exact resource versions, target hashes, absence assertions, invariants, and intended outputs.
+- [x] 13.2 Revalidate relevant state before authorization and immediately before each target replacement.
+- [x] 13.3 Mark proposals stale with exact triggering events while allowing unrelated workspace events to proceed.
+- [x] 13.4 Implement owner approval and denial transitions with immutable decision evidence.
+- [x] 13.5 Evaluate Agent Identity, Capability Grant, active intent, action class, scope, limits, and policy mode without permitting authority-plane operations.
+- [x] 13.6 Add the MCP/owner API for proposing, validating, reviewing, approving, rejecting, and superseding Change Sets without applying files.
+- [x] 13.7 Add multi-client race tests for relevant conflict, unrelated parallel work, revoked authority, changed intent, and expired approval.
 
 ## 14. Closed Filesystem Operation Catalog
 
-- [ ] 14.1 Implement strict discriminated operation models for create, exact-hash replace, deterministic patch, copy, in-workspace move, directory creation, quarantine, restore, and derived-artifact replacement.
-- [ ] 14.2 Implement path canonicalization using non-following component checks and reject traversal, symbolic-link escape, special files, and cross-workspace targets.
-- [ ] 14.3 Implement operation-specific preflight checks for existence, expected hash, output hash, disk space, byte budget, operation count, and rollback feasibility.
-- [ ] 14.4 Implement deterministic in-memory patch application that stages complete resulting bytes rather than mutating a live target.
-- [ ] 14.5 Reject arbitrary commands, permanent deletion, permission/ownership changes, mounts, downloaded execution, external side effects, and Git history rewriting.
+- [x] 14.1 Implement strict discriminated operation models for create, exact-hash replace, deterministic patch, copy, in-workspace move, directory creation, quarantine, restore, and derived-artifact replacement.
+- [x] 14.2 Implement path canonicalization using non-following component checks and reject traversal, symbolic-link escape, special files, and cross-workspace targets.
+- [x] 14.3 Implement operation-specific preflight checks for existence, expected hash, output hash, disk space, byte budget, operation count, and rollback feasibility.
+- [x] 14.4 Implement deterministic in-memory patch application that stages complete resulting bytes rather than mutating a live target.
+- [x] 14.5 Reject arbitrary commands, permanent deletion, permission/ownership changes, mounts, downloaded execution, external side effects, and Git history rewriting.
 - [ ] 14.6 Add unit tests for every operation, path attack, forbidden operation, size/risk boundary, and platform-supported replacement behavior.
 
 ## 15. Governed Executor and Action Journal
 
-- [ ] 15.1 Implement short exclusive write-set leases with transactional overlap prevention and Change Set correlation.
-- [ ] 15.2 Implement a private content-addressed recovery-blob store with deduplication, integrity verification, and configured retention metadata.
-- [ ] 15.3 Implement durable Action Journal planning entries before any target mutation, including hashes, preimages, operations, and recovery plan.
-- [ ] 15.4 Implement adjacent same-filesystem staging with configured reserved names, fsync where supported, and per-file atomic replacement.
-- [ ] 15.5 Record each operation step durably and make repeated application requests resume or return the existing idempotent result.
-- [ ] 15.6 Implement quarantine and restore without permanent deletion and preserve original/action history.
-- [ ] 15.7 Release exclusive leases only after a terminal or recovery-required outcome.
+- [x] 15.1 Implement short exclusive write-set leases with transactional overlap prevention and Change Set correlation.
+- [x] 15.2 Implement a private content-addressed recovery-blob store with deduplication, integrity verification, and configured retention metadata.
+- [x] 15.3 Implement durable Action Journal planning entries before any target mutation, including hashes, preimages, operations, and recovery plan.
+- [x] 15.4 Implement adjacent same-filesystem staging with configured reserved names, fsync where supported, and per-file atomic replacement.
+- [x] 15.5 Record each operation step durably and make repeated application requests resume or return the existing idempotent result.
+- [x] 15.6 Implement quarantine and restore without permanent deletion and preserve original/action history.
+- [x] 15.7 Release exclusive leases only after a terminal or recovery-required outcome.
 - [ ] 15.8 Add fault injection before and after every journal, stage, replace, and step-record boundary.
 
 ## 16. Verification, Rollback, and Restart Recovery
 
-- [ ] 16.1 Implement owner-configured verifier definitions with fixed executable/argument prefix, allowed variable arguments, cwd scope, environment allowlist, timeout, output limit, applicability, and required policy.
-- [ ] 16.2 Execute verifiers with `shell=False`, bounded output, secret redaction, and no database transaction held during execution.
-- [ ] 16.3 Recheck input/resource versions before committing verifier results and link bounded verification evidence to the Change Set.
-- [ ] 16.4 Produce verified only after all required checks/invariants pass; produce applied-unverified when no verifier applies and the owner has not verified.
-- [ ] 16.5 Implement reverse-order compensation from preimages and record every rollback step and resulting hash.
-- [ ] 16.6 Implement startup recovery analysis for applying and rolling-back journals before admitting overlapping writes.
-- [ ] 16.7 Produce owner-visible recovery-required evidence when resume or rollback cannot be proven safe.
+- [x] 16.1 Implement owner-configured verifier definitions with fixed executable/argument prefix, allowed variable arguments, cwd scope, environment allowlist, timeout, output limit, applicability, and required policy.
+- [x] 16.2 Execute verifiers with `shell=False`, bounded output, secret redaction, and no database transaction held during execution.
+- [x] 16.3 Recheck input/resource versions before committing verifier results and link bounded verification evidence to the Change Set.
+- [x] 16.4 Produce verified only after all required checks/invariants pass; produce applied-unverified when no verifier applies and the owner has not verified.
+- [x] 16.5 Implement reverse-order compensation from preimages and record every rollback step and resulting hash.
+- [x] 16.6 Implement startup recovery analysis for applying and rolling-back journals before admitting overlapping writes.
+- [x] 16.7 Produce owner-visible recovery-required evidence when resume or rollback cannot be proven safe.
 - [ ] 16.8 Add tests for verifier success/failure/timeout, owner verification, interrupted rollback, corrupted preimage, and restart recovery.
 
 ## 17. Workspace Control Center
 
 - [ ] 17.1 Select and document the control center's local transport using the existing application boundary without changing core authorization semantics.
-- [ ] 17.2 Add owner APIs for intent activation, identity/capability administration, active work, Claims, Change Set review, verification, and recovery.
+- [x] 17.2 Add owner APIs for intent activation, identity/capability administration, active work, Claims, Change Set review, verification, and recovery.
 - [ ] 17.3 Replace the app's hardcoded Library/Ask demonstrations with workspace state and provenance-backed API data while retaining search as a utility.
 - [ ] 17.4 Add control center views for active intent, agents, capabilities, leases, contradictions, External Changes, proposed changes, action history, and recovery-required states.
 - [ ] 17.5 Add explicit owner confirmations for activation, approval, verification, recovery actions, and YOLO scope changes.
@@ -164,19 +164,19 @@
 
 ## 18. YOLO Authorization Mode
 
-- [ ] 18.1 Implement owner activation and revocation scoped to Agent Identity, workspace, operation classes, limits, and policy version.
-- [ ] 18.2 Restrict initial YOLO policy to allowed derived artifacts and reversible organization; require owner approval for owner-authored original modification.
-- [ ] 18.3 Route YOLO through the identical validation, lease, operation, journal, verification, rollback, and recovery services as governed approval.
-- [ ] 18.4 Automatically suspend YOLO scope after authorization mismatch, invariant failure, verification failure, or recovery-required outcome.
-- [ ] 18.5 Add policy-simulation output showing which proposed Change Sets would be auto-authorized before activation.
+- [x] 18.1 Implement owner activation and revocation scoped to Agent Identity, workspace, operation classes, limits, and policy version.
+- [x] 18.2 Restrict initial YOLO policy to allowed derived artifacts and reversible organization; require owner approval for owner-authored original modification.
+- [x] 18.3 Route YOLO through the identical validation, lease, operation, journal, verification, rollback, and recovery services as governed approval.
+- [x] 18.4 Automatically suspend YOLO scope after authorization mismatch, invariant failure, verification failure, or recovery-required outcome.
+- [x] 18.5 Add policy-simulation output showing which proposed Change Sets would be auto-authorized before activation.
 - [ ] 18.6 Add tests proving YOLO cannot grant authority, expand scope, bypass safeguards, modify prohibited originals, or permanently delete data.
 
 ## 19. Dogfood, Metrics, and Release Gates
 
-- [ ] 19.1 Instrument Time to Verified Action, brief context cost, repeated-enrichment avoidance, reconciliation latency, projection lag, stale-plan decisions, and recovery outcomes.
+- [x] 19.1 Instrument Time to Verified Action, brief context cost, repeated-enrichment avoidance, reconciliation latency, projection lag, stale-plan decisions, and recovery outcomes.
 - [ ] 19.2 Build the Agent A → Agent B continuity fixture using separate MCP client processes and durable Claims/work state.
 - [ ] 19.3 Add Agent C concurrent relevant-change coverage proving the stale proposal is blocked and exact invalidation evidence is returned.
 - [ ] 19.4 Add unrelated concurrent-change coverage proving independent Change Sets remain valid.
 - [ ] 19.5 Run governed executor fault-injection and restart-recovery suites across every operation class on supported CI platforms.
 - [ ] 19.6 Update README, configuration example, MCP tool documentation, privacy guarantees, migration instructions, and recovery operator guide.
-- [x] 19.7 Run `uv run pytest`, `uv run ruff check .`, and `uv run ruff format --check .` and resolve every failure before enabling each release gate.
+- [ ] 19.7 Run `uv run pytest`, `uv run ruff check .`, and `uv run ruff format --check .` and resolve every failure before enabling each release gate.

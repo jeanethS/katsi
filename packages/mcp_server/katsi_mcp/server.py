@@ -20,7 +20,19 @@ from katsi_core.store.vectors import VectorStore
 from katsi_core.store.workspace_migrations import apply_migrations
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.synth import build_synthesizer
+from katsi_core.workspace.authorization import AuthorizationService
+from katsi_core.workspace.brief import BriefService
+from katsi_core.workspace.claims import ClaimService
 from katsi_core.workspace.identity import IdentityService
+from katsi_core.workspace.leases import WorkLeaseService
+from katsi_core.workspace.records import WorkspaceRecordService
+from katsi_core.store.workspace_repository import WorkspaceRepository
+from katsi_core.workspace.contracts import (
+    Claim,
+    ClaimStatus,
+    CapabilityOperationClass,
+    RiskClass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +59,27 @@ def _services():
     with database.connection() as connection:
         apply_migrations(connection, s.workspace.sqlite.schema_version)
     _state["workspace_database"] = database
+    _state["workspace_repository"] = WorkspaceRepository(database)
     _state["identity_service"] = IdentityService(database)
     credential = os.environ.get(s.mcp.agent_credential_env)
     if credential:
         _state["authenticated_identity"] = _state["identity_service"].authenticate(credential)
+    # Initialize workspace coordination services
+    _state["authorization_service"] = AuthorizationService(database)
+    _state["claim_service"] = ClaimService(
+        database, _state["identity_service"], _state["authorization_service"]
+    )
+    _state["lease_service"] = WorkLeaseService(database, _state["identity_service"], s.lease)
+    _state["record_service"] = WorkspaceRecordService(database, _state["identity_service"])
+    _state["brief_service"] = BriefService(
+        _state["workspace_repository"],
+        database,
+        _state["record_service"],  # IntentService placeholder
+        _state["claim_service"],
+        _state["record_service"],
+        _state["lease_service"],
+        s.brief,
+    )
     _state["pipeline"] = IngestPipeline(
         s,
         graph=_state["graph"],
@@ -239,6 +268,546 @@ def answer(query: str, mode: str | None = None) -> dict:
             "hint": "use get_context for the bundle",
         }
     return {"text": result.text, "mode": result.mode, "escalated": result.escalated}
+
+
+# --- Workspace coordination MCP tools ---
+
+
+@mcp.tool()
+def open_workspace(root_path: str) -> dict:
+    """Open or register a workspace by its root path.
+
+    Returns the workspace ID, display name, and current state version.
+    Requires authenticated agent identity if configured.
+    """
+    from pathlib import Path
+
+    svc = _services()
+    root = Path(root_path).resolve()
+
+    # Try to find existing workspace by root
+    database = svc["workspace_database"]
+    existing = database.connection().execute(
+        "SELECT * FROM workspaces WHERE root_path = ?", (str(root),)
+    ).fetchone()
+
+    if existing:
+        from katsi_core.workspace.contracts import Workspace
+        workspace = Workspace(
+            id=existing["id"],
+            root_path=existing["root_path"],
+            display_name=existing["display_name"],
+            status=existing["status"],
+            state_version=existing["state_version"],
+            created_at=existing["created_at"],
+            updated_at=existing["updated_at"],
+        )
+        return {
+            "workspace_id": str(workspace.id),
+            "display_name": workspace.display_name,
+            "status": workspace.status,
+            "state_version": workspace.state_version,
+            "root_path": workspace.root_path,
+            "created_at": workspace.created_at.isoformat(),
+            "updated_at": workspace.updated_at.isoformat(),
+        }
+
+    # Register new workspace
+    workspace = svc["workspace_repository"].register_workspace(root, f"workspace-{root.name}")
+    return {
+        "workspace_id": str(workspace.id),
+        "display_name": workspace.display_name,
+        "status": workspace.status,
+        "state_version": workspace.state_version,
+        "root_path": workspace.root_path,
+        "created_at": workspace.created_at.isoformat(),
+        "updated_at": workspace.updated_at.isoformat(),
+    }
+
+
+@mcp.tool()
+def inspect_workspace(workspace_id: str) -> dict:
+    """Inspect the current state of a workspace.
+
+    Returns workspace metadata, status, and recent activity.
+    """
+    from uuid import UUID
+
+    svc = _services()
+    workspace = svc["workspace_repository"].get_workspace(UUID(workspace_id))
+
+    if workspace is None:
+        raise ValueError(f"workspace not found: {workspace_id}")
+
+    # Get recent events
+    recent_events = list(
+        svc["workspace_repository"].recent_events(UUID(workspace_id), limit=10)
+    )
+
+    return {
+        "workspace_id": str(workspace.id),
+        "display_name": workspace.display_name,
+        "status": workspace.status,
+        "state_version": workspace.state_version,
+        "root_path": workspace.root_path,
+        "created_at": workspace.created_at.isoformat(),
+        "updated_at": workspace.updated_at.isoformat(),
+        "recent_events": [
+            {
+                "sequence": event.sequence,
+                "kind": event.kind,
+                "occurred_at": event.occurred_at.isoformat(),
+                "detail": event.detail,
+            }
+            for event in recent_events
+        ],
+    }
+
+
+@mcp.tool()
+def get_workspace_brief(workspace_id: str, byte_budget: int = 100000) -> dict:
+    """Get a task-scoped Workspace Brief for the authenticated agent identity.
+
+    The brief includes claims, decisions, blockers, open questions, active work,
+    leases, and recent events, all bounded by the byte budget to provide focused context.
+
+    Args:
+        workspace_id: The workspace UUID
+        byte_budget: Maximum bytes for the brief content (default: 100KB)
+
+    Returns a budgeted brief with the most relevant workspace state.
+    """
+    from uuid import UUID
+
+    svc = _services()
+    brief = svc["brief_service"].assemble(UUID(workspace_id), byte_budget=byte_budget)
+
+    return {
+        "workspace_id": str(brief.workspace_id),
+        "state_version": brief.state_version,
+        "last_event_sequence": brief.last_event_sequence,
+        "intent": {"goal": brief.intent[0], "version": brief.intent[1]} if brief.intent else None,
+        "claims": [
+            {
+                "id": str(c.id),
+                "text": c.text,
+                "author_id": str(c.author_id),
+                "status": c.status,
+                "confidence": c.confidence,
+                "scope_paths": c.scope_paths,
+                "created_at": c.created_at.isoformat(),
+                "invalidated": c.invalidated,
+            }
+            for c in brief.claims
+        ],
+        "decisions": [
+            {
+                "id": str(d.id),
+                "kind": d.kind,
+                "text": d.text,
+                "status": d.status,
+                "author_id": str(d.author_id),
+                "created_at": d.created_at.isoformat(),
+            }
+            for d in brief.decisions
+        ],
+        "blockers": [
+            {
+                "id": str(b.id),
+                "text": b.text,
+                "author_id": str(b.author_id),
+                "created_at": b.created_at.isoformat(),
+            }
+            for b in brief.blockers
+        ],
+        "open_questions": [
+            {
+                "id": str(q.id),
+                "text": q.text,
+                "author_id": str(q.author_id),
+                "created_at": q.created_at.isoformat(),
+            }
+            for q in brief.open_questions
+        ],
+        "open_work": [
+            {
+                "id": str(w.id),
+                "description": w.description,
+                "status": w.status,
+                "author_id": str(w.author_id),
+                "created_at": w.created_at.isoformat(),
+            }
+            for w in brief.open_work
+        ],
+        "leases": [
+            {
+                "id": str(l.id),
+                "holder_id": str(l.holder_id),
+                "task_description": l.task_description,
+                "resource_scope": l.resource_scope,
+                "expires_at": l.expires_at.isoformat(),
+            }
+            for l in brief.leases
+        ],
+        "recent_events": [
+            {
+                "event_sequence": e.event_sequence,
+                "kind": e.kind,
+                "occurred_at": e.occurred_at.isoformat(),
+                "path": e.path,
+                "detail": e.detail,
+            }
+            for e in brief.recent_events
+        ],
+        "budget_bytes": brief.budget_bytes,
+        "bytes_used": brief.bytes_used,
+        "omitted": [{"section": o.section, "count": o.count, "reason": o.reason} for o in brief.omitted],
+        "provisional": [p.value for p in brief.provisional],
+        "projection_lag": brief.projection_lag,
+    }
+
+
+@mcp.tool()
+def publish_claim(
+    workspace_id: str,
+    text: str,
+    scope_paths: list[str] | None = None,
+    confidence: float = 0.8,
+) -> dict:
+    """Publish a new Claim with capability checking.
+
+    Creates a proposed Claim attributed to the authenticated agent identity.
+    The claim text and scope paths never change after publication.
+
+    Args:
+        workspace_id: The workspace UUID
+        text: The claim text (max 20000 chars)
+        scope_paths: Optional workspace-relative paths this claim applies to
+        confidence: Confidence score 0-1 (default: 0.8)
+
+    Returns the published Claim with its ID and status.
+    """
+    from uuid import UUID, uuid4
+    from datetime import UTC, datetime
+
+    svc = _services()
+
+    # Check authorization
+    identity = svc.get("authenticated_identity")
+    if not identity:
+        raise PermissionError("Authentication required: set KATSI_AGENT_CREDENTIAL")
+
+    # Authorize the operation
+    try:
+        svc["identity_service"].authorize(
+            identity.id,
+            UUID(workspace_id),
+            CapabilityOperationClass.CLAIM,
+            None,
+            RiskClass.LOW,
+        )
+    except Exception as e:
+        # Redact specific authorization details in error
+        raise PermissionError("authorization denied for claim operation") from e
+
+    claim = Claim(
+        id=uuid4(),
+        workspace_id=UUID(workspace_id),
+        author_id=identity.id,
+        text=text,
+        scope_paths=tuple(scope_paths or []),
+        confidence=confidence,
+        status=ClaimStatus.PROPOSED,
+        created_at=datetime.now(UTC),
+    )
+
+    published = svc["claim_service"].publish(claim)
+    return {
+        "claim_id": str(published.id),
+        "workspace_id": str(published.workspace_id),
+        "author_id": str(published.author_id),
+        "text": published.text,
+        "scope_paths": published.scope_paths,
+        "confidence": published.confidence,
+        "status": published.status,
+        "created_at": published.created_at.isoformat(),
+    }
+
+
+@mcp.tool()
+def list_claims(workspace_id: str, status: str | None = None) -> list[dict]:
+    """List Claims for a workspace, optionally filtered by status.
+
+    Returns all claims with their current verification state.
+    Filter by status: proposed, corroborated, verified, invalidated, contradicted, superseded.
+    """
+    from uuid import UUID
+
+    svc = _services()
+    claims = svc["claim_service"].list_for_workspace(UUID(workspace_id))
+
+    if status:
+        claims = [c for c in claims if c.status == status]
+
+    return [
+        {
+            "claim_id": str(c.id),
+            "workspace_id": str(c.workspace_id),
+            "author_id": str(c.author_id),
+            "text": c.text,
+            "scope_paths": c.scope_paths,
+            "confidence": c.confidence,
+            "status": c.status,
+            "created_at": c.created_at.isoformat(),
+        }
+        for c in claims
+    ]
+
+
+@mcp.tool()
+def inspect_decisions(workspace_id: str, status: str | None = None) -> list[dict]:
+    """Inspect workspace decisions (decisions requiring owner verification).
+
+    Returns verified and open decisions for the workspace.
+    """
+    from uuid import UUID
+    from katsi_core.workspace.contracts import WorkspaceRecordKind, WorkspaceRecordStatus
+
+    svc = _services()
+    records = svc["record_service"].list_records(UUID(workspace_id))
+
+    decisions = [r for r in records if r.kind == WorkspaceRecordKind.DECISION]
+    if status:
+        decisions = [d for d in decisions if d.status == status]
+
+    return [
+        {
+            "id": str(d.id),
+            "workspace_id": str(d.workspace_id),
+            "kind": d.kind,
+            "text": d.text,
+            "status": d.status,
+            "author_id": str(d.author_id),
+            "created_at": d.created_at.isoformat(),
+            "updated_at": d.updated_at.isoformat(),
+        }
+        for d in decisions
+    ]
+
+
+@mcp.tool()
+def inspect_blockers(workspace_id: str) -> list[dict]:
+    """Inspect open blockers preventing work completion.
+
+    Returns all active (open) blockers for the workspace.
+    """
+    from uuid import UUID
+    from katsi_core.workspace.contracts import WorkspaceRecordKind, WorkspaceRecordStatus
+
+    svc = _services()
+    records = svc["record_service"].list_records(UUID(workspace_id))
+
+    blockers = [
+        r for r in records
+        if r.kind == WorkspaceRecordKind.BLOCKER and r.status == WorkspaceRecordStatus.OPEN
+    ]
+
+    return [
+        {
+            "id": str(b.id),
+            "workspace_id": str(b.workspace_id),
+            "text": b.text,
+            "author_id": str(b.author_id),
+            "created_at": b.created_at.isoformat(),
+            "updated_at": b.updated_at.isoformat(),
+        }
+        for b in blockers
+    ]
+
+
+@mcp.tool()
+def inspect_open_work(workspace_id: str) -> list[dict]:
+    """Inspect open work items tracked for the workspace.
+
+    Returns active open work items and their status.
+    """
+    from uuid import UUID
+    from katsi_core.workspace.contracts import OpenWorkStatus
+
+    svc = _services()
+    work_items = svc["record_service"].list_open_work(UUID(workspace_id))
+
+    # Filter for active work (open or blocked)
+    active_work = [w for w in work_items if w.status in (OpenWorkStatus.OPEN, OpenWorkStatus.BLOCKED)]
+
+    return [
+        {
+            "id": str(w.id),
+            "workspace_id": str(w.workspace_id),
+            "description": w.description,
+            "status": w.status,
+            "author_id": str(w.author_id),
+            "created_at": w.created_at.isoformat(),
+            "updated_at": w.updated_at.isoformat(),
+        }
+        for w in active_work
+    ]
+
+
+@mcp.tool()
+def acquire_work_lease(
+    workspace_id: str,
+    task_description: str,
+    resource_scope: list[str] | None = None,
+) -> dict:
+    """Acquire an advisory Work Lease for active agent work.
+
+    Creates a time-bounded visible lease showing the agent's current work focus.
+    Requires authenticated agent identity.
+
+    Args:
+        workspace_id: The workspace UUID
+        task_description: Description of the work being performed
+        resource_scope: Optional paths this work covers
+
+    Returns the acquired lease with expiration time.
+    """
+    from uuid import UUID
+
+    svc = _services()
+
+    # Check authentication
+    identity = svc.get("authenticated_identity")
+    if not identity:
+        raise PermissionError("Authentication required: set KATSI_AGENT_CREDENTIAL")
+
+    # Authorize the operation
+    try:
+        svc["identity_service"].authorize(
+            identity.id,
+            UUID(workspace_id),
+            CapabilityOperationClass.LEASE,
+            None,
+            RiskClass.LOW,
+        )
+    except Exception as e:
+        raise PermissionError("authorization denied for lease operation") from e
+
+    lease = svc["lease_service"].acquire(
+        workspace_id=UUID(workspace_id),
+        holder_id=identity.id,
+        task_description=task_description,
+        resource_scope=tuple(resource_scope or []),
+    )
+
+    return {
+        "lease_id": str(lease.id),
+        "workspace_id": str(lease.workspace_id),
+        "holder_id": str(lease.holder_id),
+        "kind": lease.kind,
+        "status": lease.status,
+        "task_description": lease.task_description,
+        "resource_scope": lease.resource_scope,
+        "acquired_at": lease.acquired_at.isoformat(),
+        "expires_at": lease.expires_at.isoformat(),
+    }
+
+
+@mcp.tool()
+def renew_work_lease(lease_id: str, expected_expires_at: str) -> dict:
+    """Renew an active Work Lease before it expires.
+
+    Extends the lease expiration time. Requires the same holder identity
+    that acquired the lease and the current expected expiration.
+
+    Args:
+        lease_id: The lease UUID to renew
+        expected_expires_at: Current expected expiration time (ISO format)
+
+    Returns the renewed lease with new expiration.
+    """
+    from datetime import datetime
+    from uuid import UUID
+
+    svc = _services()
+
+    # Check authentication
+    identity = svc.get("authenticated_identity")
+    if not identity:
+        raise PermissionError("Authentication required: set KATSI_AGENT_CREDENTIAL")
+
+    renewed = svc["lease_service"].renew(
+        lease_id=UUID(lease_id),
+        holder_id=identity.id,
+        expected_expires_at=datetime.fromisoformat(expected_expires_at),
+    )
+
+    return {
+        "lease_id": str(renewed.id),
+        "status": renewed.status,
+        "expires_at": renewed.expires_at.isoformat(),
+        "released_at": renewed.released_at.isoformat() if renewed.released_at else None,
+    }
+
+
+@mcp.tool()
+def release_work_lease(lease_id: str) -> dict:
+    """Release an active Work Lease.
+
+    Marks the lease as released. Only the lease holder may release it.
+    Requires authenticated agent identity.
+
+    Args:
+        lease_id: The lease UUID to release
+
+    Returns the released lease with release timestamp.
+    """
+    from uuid import UUID
+
+    svc = _services()
+
+    # Check authentication
+    identity = svc.get("authenticated_identity")
+    if not identity:
+        raise PermissionError("Authentication required: set KATSI_AGENT_CREDENTIAL")
+
+    released = svc["lease_service"].release(
+        lease_id=UUID(lease_id),
+        holder_id=identity.id,
+    )
+
+    return {
+        "lease_id": str(released.id),
+        "status": released.status,
+        "released_at": released.released_at.isoformat(),
+    }
+
+
+@mcp.tool()
+def inspect_active_leases(workspace_id: str) -> list[dict]:
+    """Inspect all active Work Leases for a workspace.
+
+    Returns currently active (not expired/released) leases showing
+    concurrent work activity.
+    """
+    from uuid import UUID
+
+    svc = _services()
+    leases = svc["lease_service"].active_for_workspace(UUID(workspace_id))
+
+    return [
+        {
+            "lease_id": str(l.id),
+            "holder_id": str(l.holder_id),
+            "task_description": l.task_description,
+            "resource_scope": l.resource_scope,
+            "kind": l.kind,
+            "status": l.status,
+            "acquired_at": l.acquired_at.isoformat(),
+            "expires_at": l.expires_at.isoformat(),
+        }
+        for l in leases
+    ]
 
 
 def main() -> None:

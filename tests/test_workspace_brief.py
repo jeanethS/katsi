@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -18,30 +19,64 @@ from katsi_core.store.projection_worker import ProjectionWorker
 from katsi_core.store.workspace_migrations import apply_migrations
 from katsi_core.store.workspace_repository import WorkspaceRepository
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
+from katsi_core.workspace.authorization import AuthorizationService
 from katsi_core.workspace.brief import BriefService
 from katsi_core.workspace.budget import SerializedBudgeter
 from katsi_core.workspace.claims import ClaimService
 from katsi_core.workspace.contracts import (
     BriefClaim,
     BriefSection,
+    CapabilityGrant,
+    CapabilityOperationClass,
     Claim,
     ClaimEvidence,
     ClaimEvidenceKind,
     ClaimStatus,
     OpenWork,
     OpenWorkStatus,
+    RiskClass,
     WorkspaceEventKind,
     WorkspaceRecord,
     WorkspaceRecordKind,
     WorkspaceRecordStatus,
 )
-from katsi_core.workspace.errors import WorkspaceError
+from katsi_core.workspace.errors import AuthorizationDeniedError, WorkspaceError
 from katsi_core.workspace.identity import IdentityService
 from katsi_core.workspace.intent import IntentService
 from katsi_core.workspace.leases import WorkLeaseService
 from katsi_core.workspace.records import WorkspaceRecordService
 
 _BUDGET = 1_000_000
+
+
+def _create_claim_grant(database: WorkspaceSQLite, identity_id, workspace_id) -> None:
+    """Insert an active CLAIM capability grant for the workspace brief fixture."""
+    grant = CapabilityGrant(
+        id=uuid4(),
+        identity_id=identity_id,
+        workspace_id=workspace_id,
+        operation_classes=frozenset({CapabilityOperationClass.CLAIM}),
+        resource_scope=(),
+        maximum_risk=RiskClass.LOW,
+        issued_at=datetime.now(UTC),
+        expires_at=None,
+        revoked_at=None,
+    )
+    with database.connection() as connection:
+        connection.execute(
+            """INSERT INTO capability_grants VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                str(grant.id),
+                str(grant.identity_id),
+                str(grant.workspace_id),
+                json.dumps([CapabilityOperationClass.CLAIM.value]),
+                "[]",
+                grant.maximum_risk.value,
+                grant.issued_at.isoformat(),
+                None,
+                None,
+            ),
+        )
 
 
 def _build(tmp_path: Path) -> tuple:
@@ -54,12 +89,41 @@ def _build(tmp_path: Path) -> tuple:
     workspace = repository.register_workspace(root, "Project")
     identities = IdentityService(database)
     intents = IntentService(database)
-    claims = ClaimService(database, identities)
+    authorization = AuthorizationService(database)
+    claims = ClaimService(database, identities, authorization)
     records = WorkspaceRecordService(database, identities)
     leases = WorkLeaseService(database, identities, LeaseSettings(advisory_ttl_seconds=60))
     author = identities.register("Agent", "test")
+    _create_claim_grant(database, author.id, workspace.id)
     brief = BriefService(repository, database, intents, claims, records, leases, BriefSettings())
     return workspace, author, intents, claims, records, leases, brief, repository, database
+
+
+def test_publish_claim_denied_without_grant(tmp_path: Path) -> None:
+    """Publishing a claim requires an active CLAIM capability grant."""
+    database = WorkspaceSQLite(tmp_path / "workspace.sqlite3", SQLiteSettings())
+    with database.connection() as connection:
+        apply_migrations(connection, target_version=3)
+    root = tmp_path / "project"
+    root.mkdir()
+    repository = WorkspaceRepository(database)
+    workspace = repository.register_workspace(root, "Project")
+    identities = IdentityService(database)
+    authorization = AuthorizationService(database)
+    claims = ClaimService(database, identities, authorization)
+    author = identities.register("Agent", "test")
+
+    claim = Claim(
+        id=uuid4(),
+        workspace_id=workspace.id,
+        author_id=author.id,
+        text="No grant, no publish.",
+        confidence=0.5,
+        created_at=datetime.now(UTC),
+    )
+
+    with pytest.raises(AuthorizationDeniedError):
+        claims.publish(claim)
 
 
 def _verify_claim(claims: ClaimService, claim: Claim, author) -> None:

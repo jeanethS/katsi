@@ -11,10 +11,19 @@ from pydantic import TypeAdapter
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.store.workspace_transactions import write_transaction
 from katsi_core.workspace.contracts import (
+    ActionOutcome,
+    ActionOutcomeStatus,
+    AuthorizationEvidence,
     ChangeSet,
     ChangeSetStatus,
     ChangeSetTransition,
+    ChangeSetWithMetadata,
     Operation,
+    PostconditionAssertion,
+    ResourceVersionId,
+    RiskClass,
+    RollbackInformation,
+    ValidationEvidence,
 )
 from katsi_core.workspace.errors import ConflictError, InvalidTransitionError
 
@@ -135,6 +144,18 @@ class ChangeSetService:
             )
         if predecessor.successor_id is not None:
             raise ConflictError(f"Change Set already has a successor: {predecessor_id}")
+
+        # Check if predecessor is already a successor of another ChangeSet (enforces single successor chain)
+        with self._database.connection() as connection:
+            parent = connection.execute(
+                "SELECT id FROM change_sets WHERE successor_id = ?",
+                (str(predecessor_id),),
+            ).fetchone()
+            if parent is not None:
+                raise ConflictError(
+                    f"Change Set is already a successor and cannot have its own successor: {predecessor_id}"
+                )
+
         self.submit(successor)
         with self._database.connection() as connection, write_transaction(connection):
             updated = connection.execute(
@@ -205,4 +226,116 @@ class ChangeSetService:
                 evidence=json.loads(row["evidence_json"]),
             )
             for row in rows
+        )
+
+    def get_with_metadata(self, change_set_id: UUID) -> ChangeSetWithMetadata | None:
+        """Get a Change Set with additional metadata for queries."""
+        change_set = self.get(change_set_id)
+        if change_set is None:
+            return None
+
+        # Calculate operation and byte counts
+        operation_count = len(change_set.operations)
+        total_byte_count = sum(op.byte_count for op in change_set.operations)
+        dependency_count = len(change_set.dependencies)
+
+        return ChangeSetWithMetadata(
+            change_set=change_set,
+            postconditions=(),
+            rollback_info=None,
+            operation_count=operation_count,
+            total_byte_count=total_byte_count,
+            dependency_count=dependency_count,
+        )
+
+    def get_validation_evidence(self, change_set_id: UUID) -> ValidationEvidence | None:
+        """Get validation evidence for a Change Set."""
+        transitions = self.history(change_set_id)
+        validation_transition = None
+        for transition in transitions:
+            if transition.to_status == ChangeSetStatus.VALIDATED:
+                validation_transition = transition
+                break
+
+        if validation_transition is None:
+            return None
+
+        # Extract validation-specific evidence from the transition evidence
+        checks_passed = tuple(
+            k for k, v in validation_transition.evidence.items() if v == "passed"
+        )
+        checks_failed = tuple(
+            k for k, v in validation_transition.evidence.items() if v == "failed"
+        )
+        resource_conflicts = tuple(
+            k for k, v in validation_transition.evidence.items() if k.startswith("conflict:")
+        )
+        dependency_satisfied = validation_transition.evidence.get("dependency_satisfied", "true") == "true"
+
+        return ValidationEvidence(
+            change_set_id=change_set_id,
+            validator_id=validation_transition.actor_id,
+            validated_at=validation_transition.occurred_at,
+            checks_passed=checks_passed,
+            checks_failed=checks_failed,
+            resource_conflicts=resource_conflicts,
+            dependency_satisfied=dependency_satisfied,
+            risk_assessment={
+                k: v for k, v in validation_transition.evidence.items()
+                if k not in {"checks_passed", "checks_failed", "dependency_satisfied"}
+                and not k.startswith("conflict:")
+            },
+        )
+
+    def get_authorization_evidence(self, change_set_id: UUID) -> AuthorizationEvidence | None:
+        """Get authorization evidence for a Change Set."""
+        transitions = self.history(change_set_id)
+        authorization_transition = None
+        for transition in transitions:
+            if transition.to_status == ChangeSetStatus.AUTHORIZED:
+                authorization_transition = transition
+                break
+
+        if authorization_transition is None:
+            return None
+
+        # Extract authorization-specific evidence
+        risk_approval = authorization_transition.evidence.get("risk_approval", "false") == "true"
+        constraints = tuple(
+            k for k, v in authorization_transition.evidence.items() if k.startswith("constraint:")
+        )
+
+        capability_grant_id_str = authorization_transition.evidence.get("capability_grant_id")
+        capability_grant_id = UUID(capability_grant_id_str) if capability_grant_id_str else None
+
+        return AuthorizationEvidence(
+            change_set_id=change_set_id,
+            authorizer_id=authorization_transition.actor_id,
+            authorized_at=authorization_transition.occurred_at,
+            capability_grant_id=capability_grant_id,
+            risk_approval=risk_approval,
+            constraints=constraints,
+            authorization_notes={
+                k: v for k, v in authorization_transition.evidence.items()
+                if k not in {"risk_approval", "capability_grant_id"} and not k.startswith("constraint:")
+            },
+        )
+
+    def get_terminal_action_receipt(self, change_set_id: UUID) -> ActionOutcome | None:
+        """Get the terminal action receipt for a Change Set."""
+        with self._database.connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM action_journal WHERE change_set_id = ?",
+                (str(change_set_id),),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return ActionOutcome(
+            id=UUID(row["id"]),
+            change_set_id=change_set_id,
+            status=ActionOutcomeStatus(row["status"]),
+            occurred_at=datetime.fromisoformat(row["created_at"]),
+            receipt=json.loads(row["recovery_json"]) if row.get("recovery_json") else {},
         )

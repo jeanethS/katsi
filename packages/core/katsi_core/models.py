@@ -17,6 +17,7 @@ class IndexStatus(StrEnum):
     INDEXED = "indexed"
     STALE = "stale"
     ERROR = "error"
+    DELETED = "deleted"
 
 
 class FileRecord(BaseModel):

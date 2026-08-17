@@ -311,6 +311,11 @@ class WorkLease(StrictModel):
     expires_at: datetime
     released_at: datetime | None = None
 
+    @property
+    def identity_id(self) -> AgentIdentityId:
+        """Alias for holder_id for compatibility with authorization checks."""
+        return self.holder_id
+
     @model_validator(mode="after")
     def _validate_lifecycle(self) -> WorkLease:
         if self.expires_at <= self.acquired_at:
@@ -478,6 +483,68 @@ class ActionOutcome(ImmutableModel):
     receipt: dict[str, str] = Field(default_factory=dict)
 
 
+class PostconditionAssertion(ImmutableModel):
+    """A postcondition that must hold after a Change Set is applied."""
+
+    resource_id: ResourceId
+    expected_version_id: ResourceVersionId | None = None
+    expected_content_hash: ContentHash | None = None
+    expected_absent: bool = False
+
+    @model_validator(mode="after")
+    def _validate_assertion(self) -> PostconditionAssertion:
+        if self.expected_absent == (
+            self.expected_version_id is not None or self.expected_content_hash is not None
+        ):
+            raise ValueError("postcondition requires either absence or an expected version/hash")
+        return self
+
+
+class RollbackInformation(ImmutableModel):
+    """Information needed to rollback a Change Set."""
+
+    original_versions: dict[ResourceId, ResourceVersionId] = Field(default_factory=dict)
+    quarantine_paths: tuple[RelativePath, ...] = ()
+    recovery_steps: tuple[str, ...] = ()
+    requires_manual_recovery: bool = False
+
+
+class ChangeSetWithMetadata(ImmutableModel):
+    """A Change Set with additional metadata for queries."""
+
+    change_set: ChangeSet
+    postconditions: tuple[PostconditionAssertion, ...] = ()
+    rollback_info: RollbackInformation | None = None
+    operation_count: int = Field(ge=0)
+    total_byte_count: int = Field(ge=0)
+    dependency_count: int = Field(ge=0)
+
+
+class ValidationEvidence(ImmutableModel):
+    """Evidence collected during Change Set validation."""
+
+    change_set_id: ChangeSetId
+    validator_id: AgentIdentityId | None = None
+    validated_at: datetime
+    checks_passed: tuple[str, ...] = ()
+    checks_failed: tuple[str, ...] = ()
+    resource_conflicts: tuple[str, ...] = ()
+    dependency_satisfied: bool = True
+    risk_assessment: dict[str, str] = Field(default_factory=dict)
+
+
+class AuthorizationEvidence(ImmutableModel):
+    """Evidence collected during Change Set authorization."""
+
+    change_set_id: ChangeSetId
+    authorizer_id: AgentIdentityId | None = None
+    authorized_at: datetime
+    capability_grant_id: CapabilityGrantId | None = None
+    risk_approval: bool = False
+    constraints: tuple[str, ...] = ()
+    authorization_notes: dict[str, str] = Field(default_factory=dict)
+
+
 class PortableProjectState(ImmutableModel):
     """Owner-approved project intent that may travel with a workspace."""
 
@@ -596,3 +663,55 @@ class WorkspaceBrief(StrictModel):
     omitted: tuple[OmittedSection, ...] = ()
     provisional: tuple[BriefSection, ...] = ()
     projection_lag: bool = False
+
+
+class YoloModeStatus(StrEnum):
+    """Lifecycle states for YOLO authorization modes."""
+
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    REVOKED = "revoked"
+
+
+class YoloMode(StrictModel):
+    """YOLO authorization mode granting scoped auto-approval."""
+
+    id: UUID
+    workspace_id: WorkspaceId
+    owner_identity_id: AgentIdentityId
+    agent_identity_id: AgentIdentityId
+    policy_version: str = Field(min_length=1, max_length=64)
+    operation_classes: frozenset[CapabilityOperationClass] = Field(min_length=1)
+    resource_scope: tuple[RelativePath, ...] = ()
+    maximum_risk: RiskClass = RiskClass.LOW
+    allow_derived_artifacts: bool = True
+    allow_reversible_organization: bool = True
+    require_owner_approval_for_originals: bool = True
+    status: YoloModeStatus = YoloModeStatus.ACTIVE
+    activated_at: datetime | None = None
+    suspended_at: datetime | None = None
+    revoked_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class YoloAuthorization(ImmutableModel):
+    """Record of auto-authorization under YOLO mode."""
+
+    id: UUID
+    yolo_mode_id: UUID
+    change_set_id: ChangeSetId
+    auto_authorized: bool
+    policy_matched: str = Field(min_length=1, max_length=256)
+    authorized_at: datetime
+
+
+class YoloSuspensionEvent(ImmutableModel):
+    """Record of YOLO mode suspension with reason."""
+
+    id: UUID
+    yolo_mode_id: UUID
+    suspension_reason: str = Field(min_length=1, max_length=512)
+    related_change_set_id: ChangeSetId | None = None
+    related_event_id: UUID | None = None
+    occurred_at: datetime
