@@ -124,6 +124,9 @@ class CapabilityOperationClass(StrEnum):
     LEASE = "lease"
     CHANGE_SET = "change_set"
     GOVERNED_EXECUTION = "governed_execution"
+    VIEW_SENSITIVE_LOCATION = "view_sensitive_location"
+    VIEW_SENSITIVE_BIOMETRIC = "view_sensitive_biometric"
+    VIEW_SENSITIVE_PERSONAL = "view_sensitive_personal"
 
 
 class RiskClass(StrEnum):
@@ -396,6 +399,56 @@ class ReplaceDerivedArtifactOperation(ReplaceFileOperation):
     source_resource_id: ResourceId
 
 
+class DerivedMediaOperationBase(OperationBase):
+    """Common immutable preconditions for a derived-media workspace export.
+
+    These operations deliberately describe *what* an owner-registered pipeline
+    may produce.  They have no command, argument, URL, or source-path field,
+    so an agent cannot turn a Change Set into an arbitrary processing surface.
+    """
+
+    source_resource_id: ResourceId
+    source_resource_version_id: ResourceVersionId
+    source_content_hash: ContentHash
+    pipeline_id: str = Field(min_length=1, max_length=256)
+    pipeline_fingerprint: str = Field(min_length=16, max_length=256)
+    expected_output_media_type: str = Field(min_length=3, max_length=255)
+    expected_output_hash: ContentHash
+    max_output_bytes: int = Field(gt=0)
+    source_relationship: str = Field(min_length=1, max_length=128)
+
+
+class GenerateThumbnailOperation(DerivedMediaOperationBase):
+    kind: Literal["generate_thumbnail"] = "generate_thumbnail"
+
+
+class ExportTranscriptOrOcrOperation(DerivedMediaOperationBase):
+    kind: Literal["export_transcript_or_ocr"] = "export_transcript_or_ocr"
+    representation_kind: Literal["transcript_segment", "ocr_text"]
+
+
+class ExportKeyframesOperation(DerivedMediaOperationBase):
+    kind: Literal["export_keyframes"] = "export_keyframes"
+    keyframe_ids: tuple[UUID, ...] = Field(min_length=1)
+
+
+class GenerateProxyMediaOperation(DerivedMediaOperationBase):
+    kind: Literal["generate_proxy_media"] = "generate_proxy_media"
+
+
+class ExportRepresentationOperation(DerivedMediaOperationBase):
+    kind: Literal["export_representation"] = "export_representation"
+    representation_id: UUID
+
+
+class ReplaceDerivedMediaArtifactOperation(DerivedMediaOperationBase):
+    """Replace only an existing derived output after an exact-hash check."""
+
+    kind: Literal["replace_derived_media_artifact"] = "replace_derived_media_artifact"
+    expected_current_hash: ContentHash
+    derived_artifact_source_resource_id: ResourceId
+
+
 Operation = Annotated[
     CreateFileOperation
     | ReplaceFileOperation
@@ -405,7 +458,13 @@ Operation = Annotated[
     | CreateDirectoryOperation
     | QuarantineFileOperation
     | RestoreQuarantinedFileOperation
-    | ReplaceDerivedArtifactOperation,
+    | ReplaceDerivedArtifactOperation
+    | GenerateThumbnailOperation
+    | ExportTranscriptOrOcrOperation
+    | ExportKeyframesOperation
+    | GenerateProxyMediaOperation
+    | ExportRepresentationOperation
+    | ReplaceDerivedMediaArtifactOperation,
     Field(discriminator="kind"),
 ]
 

@@ -145,7 +145,9 @@ def _read_short_entry(entry: _IfdEntry, big_endian: bool) -> int | None:
     return _read_u16(entry.raw_value, 0, big_endian)
 
 
-def _read_ascii_entry(entry: _IfdEntry, data: bytes, tiff_start: int, big_endian: bool) -> str | None:
+def _read_ascii_entry(
+    entry: _IfdEntry, data: bytes, tiff_start: int, big_endian: bool
+) -> str | None:
     if entry.type_ != _TYPE_ASCII:
         return None
     size = entry.count
@@ -178,7 +180,9 @@ def _read_rational_triplet(
     return values[0], values[1], values[2]
 
 
-def _parse_jpeg_exif(file_path: Path) -> tuple[int, dict[str, str], MediaPrivacyClass, dict[str, str]]:
+def _parse_jpeg_exif(
+    file_path: Path,
+) -> tuple[int, dict[str, str], MediaPrivacyClass, dict[str, str]]:
     """Extract EXIF orientation, safe fields, and GPS presence from a JPEG.
 
     Returns (orientation, safe_fields, privacy_class, privacy_fields).
@@ -259,8 +263,16 @@ def _parse_jpeg_exif(file_path: Path) -> tuple[int, dict[str, str], MediaPrivacy
                 lat = _read_rational_triplet(gps_ifd[_TAG_GPS_LAT], app1_payload, 0, big_endian)
             if _TAG_GPS_LON in gps_ifd:
                 lon = _read_rational_triplet(gps_ifd[_TAG_GPS_LON], app1_payload, 0, big_endian)
-            lat_ref = _read_ascii_entry(gps_ifd[_TAG_GPS_LAT_REF], app1_payload, 0, big_endian) if _TAG_GPS_LAT_REF in gps_ifd else None
-            lon_ref = _read_ascii_entry(gps_ifd[_TAG_GPS_LON_REF], app1_payload, 0, big_endian) if _TAG_GPS_LON_REF in gps_ifd else None
+            lat_ref = (
+                _read_ascii_entry(gps_ifd[_TAG_GPS_LAT_REF], app1_payload, 0, big_endian)
+                if _TAG_GPS_LAT_REF in gps_ifd
+                else None
+            )
+            lon_ref = (
+                _read_ascii_entry(gps_ifd[_TAG_GPS_LON_REF], app1_payload, 0, big_endian)
+                if _TAG_GPS_LON_REF in gps_ifd
+                else None
+            )
             if lat is not None:
                 deg, minutes, sec = lat
                 decimal = deg + minutes / 60 + sec / 3600
@@ -533,7 +545,9 @@ def build_image_metadata_representation(
     if result.privacy_fields:
         payload["privacy_fields"] = dict(result.privacy_fields)
 
-    status = MediaRepresentationStatus.PARTIAL if result.malformed else MediaRepresentationStatus.CURRENT
+    status = (
+        MediaRepresentationStatus.PARTIAL if result.malformed else MediaRepresentationStatus.CURRENT
+    )
     coverage = (
         MediaCoverage(is_complete=False, coverage_fraction=0.5, detail="Partial structural parse")
         if result.malformed
@@ -553,6 +567,11 @@ def build_image_metadata_representation(
             WholeResourceLocator(resource_version_id=resource_version_id, representation_id=rep_id),
         ),
         coverage=coverage,
+        privacy_classes=(
+            frozenset({result.privacy_class})
+            if result.privacy_class is not MediaPrivacyClass.NONE
+            else frozenset()
+        ),
         producer=ProducerProvenance(
             producer_type=MediaProducerType.DETERMINISTIC,
             adapter_name=_ADAPTER_NAME,

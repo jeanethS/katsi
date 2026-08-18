@@ -5,13 +5,12 @@ from __future__ import annotations
 import shutil
 import threading
 from collections.abc import Sequence
+from contextlib import suppress
 from datetime import UTC, datetime
-from enum import StrEnum
 from pathlib import Path
 from uuid import UUID, uuid4
 
 from katsi_core.workspace.contracts import ChangeSet, ChangeSetStatus, Operation
-from katsi_core.workspace.errors import ConflictError
 from katsi_core.workspace.rollback import (
     Preimage,
     RecoveryAnalysis,
@@ -22,7 +21,6 @@ from katsi_core.workspace.rollback import (
     RollbackStepKind,
     RollbackStepStatus,
 )
-from katsi_core.workspace.verification_service import VerificationError
 
 
 class RollbackError(Exception):
@@ -215,7 +213,9 @@ class RollbackService:
             elif compensation.compensation_type == RollbackStepKind.MOVE_BACK:
                 self._move_back(compensation, target)
             else:
-                raise RollbackError(f"Unsupported compensation type: {compensation.compensation_type}")
+                raise RollbackError(
+                    f"Unsupported compensation type: {compensation.compensation_type}"
+                )
 
             # Verify if required
             if compensation.verify_hash:
@@ -262,11 +262,8 @@ class RollbackService:
     def _delete_directory(self, target: Path) -> None:
         """Delete a directory if empty."""
         if target.exists() and target.is_dir():
-            try:
+            with suppress(OSError):
                 target.rmdir()  # Only remove if empty
-            except OSError:
-                # Directory not empty, skip
-                pass
 
     def _move_back(self, compensation: RollbackCompensation, target: Path) -> None:
         """Move a file back to its original location."""
@@ -280,6 +277,7 @@ class RollbackService:
             raise RollbackError(f"Target does not exist for hash verification: {target}")
 
         import blake3
+
         actual_hash = blake3.blake3(target.read_bytes()).hexdigest()
 
         if actual_hash != expected_hash:
@@ -345,7 +343,9 @@ class RollbackService:
         # Check for incomplete rollback
         if incomplete_journal and incomplete_journal.status == "interrupted":
             analysis.has_incomplete_rollback = True
-            analysis.detected_issues += (f"Incomplete rollback at step {incomplete_journal.completed_steps}",)
+            analysis.detected_issues += (
+                f"Incomplete rollback at step {incomplete_journal.completed_steps}",
+            )
 
         # Check preimage integrity
         missing_preimages = []
@@ -360,18 +360,22 @@ class RollbackService:
 
         if missing_preimages:
             analysis.has_corrupted_preimages = True
-            analysis.detected_issues += tuple(f"Missing preimage: {path}" for path in missing_preimages)
+            analysis.detected_issues += tuple(
+                f"Missing preimage: {path}" for path in missing_preimages
+            )
 
         # Assess safety
         analysis.can_safe_apply = not (
-            analysis.has_incomplete_apply or
-            analysis.has_incomplete_rollback or
-            analysis.has_corrupted_preimages
+            analysis.has_incomplete_apply
+            or analysis.has_incomplete_rollback
+            or analysis.has_corrupted_preimages
         )
 
         analysis.can_safe_rollback = not analysis.has_corrupted_preimages
 
-        analysis.can_safe_resume = analysis.has_incomplete_rollback and not analysis.has_corrupted_preimages
+        analysis.can_safe_resume = (
+            analysis.has_incomplete_rollback and not analysis.has_corrupted_preimages
+        )
 
         # Determine owner intervention
         if analysis.has_corrupted_preimages:
@@ -403,7 +407,7 @@ class RollbackService:
             RecoveryRequiredEvidence with owner-visible details
         """
         # Determine situation type
-        situation_type: "incomplete_apply" | "incomplete_rollback" | "corrupted_preimage" | "unknown"
+        situation_type: str
         if analysis.has_corrupted_preimages:
             situation_type = "corrupted_preimage"
         elif analysis.has_incomplete_rollback:

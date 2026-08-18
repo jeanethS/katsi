@@ -2,29 +2,25 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from uuid import uuid4
+
 import pytest
-from datetime import UTC, datetime, timedelta
-from uuid import UUID, uuid4
 
 from katsi_core.config import SQLiteSettings
-from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.store.workspace_migrations import apply_migrations
+from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.store.workspace_transactions import write_transaction
 from katsi_core.workspace import (
     AgentIdentity,
-    AgentIdentityId,
     ApplyPatchOperation,
     CapabilityOperationClass,
     ChangeSet,
-    ChangeSetStatus,
-    CopyFileOperation,
-    CreateDirectoryOperation,
     CreateFileOperation,
     MoveFileOperation,
     QuarantineFileOperation,
     ReplaceDerivedArtifactOperation,
     ReplaceFileOperation,
-    ResourceDependency,
     RiskClass,
     WorkspaceId,
     YoloModeStatus,
@@ -61,21 +57,47 @@ def populated_database(tmp_path):
         conn.execute(
             """INSERT INTO workspaces (id, root_path, display_name, status, state_version, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (str(workspace_id), str(tmp_path / "workspace"), "TestWorkspace", "active", 0, datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat())
+            (
+                str(workspace_id),
+                str(tmp_path / "workspace"),
+                "TestWorkspace",
+                "active",
+                0,
+                datetime.now(UTC).isoformat(),
+                datetime.now(UTC).isoformat(),
+            ),
         )
 
         # Insert owner identity
         conn.execute(
             """INSERT INTO agent_identities (id, display_name, client_name, model_name, process_description, active, created_at, revoked_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (str(owner_id), "Owner", "test-client", "test-model", None, 1, datetime.now(UTC).isoformat(), None)
+            (
+                str(owner_id),
+                "Owner",
+                "test-client",
+                "test-model",
+                None,
+                1,
+                datetime.now(UTC).isoformat(),
+                None,
+            ),
         )
 
         # Insert agent identity
         conn.execute(
             """INSERT INTO agent_identities (id, display_name, client_name, model_name, process_description, active, created_at, revoked_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (str(agent_id), "Test Agent", "test-client", "test-model", None, 1, datetime.now(UTC).isoformat(), None)
+            (
+                str(agent_id),
+                "Test Agent",
+                "test-client",
+                "test-model",
+                None,
+                1,
+                datetime.now(UTC).isoformat(),
+                None,
+            ),
         )
 
     return db, workspace_id, owner_id, agent_id
@@ -135,8 +157,7 @@ def test_yolo_activation_creates_constrained_scope(populated_database):
     assert result.yolo_mode.maximum_risk == RiskClass.LOW
 
 
-def test_yolo_cannot_expand_authority_beyond_grants(
-    populated_database):
+def test_yolo_cannot_expand_authority_beyond_grants(populated_database):
     """YOLO mode cannot grant authority beyond existing capability grants."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -156,8 +177,7 @@ def test_yolo_cannot_expand_authority_beyond_grants(
     assert result.yolo_mode.operation_classes == frozenset([CapabilityOperationClass.CHANGE_SET])
 
 
-def test_yolo_cannot_expand_scope_beyond_activation(
-    populated_database):
+def test_yolo_cannot_expand_scope_beyond_activation(populated_database):
     """YOLO mode cannot expand scope beyond activation configuration."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -201,8 +221,7 @@ def test_yolo_cannot_expand_scope_beyond_activation(
     assert "outside YOLO resource scope" in result.block_reason
 
 
-def test_yolo_enforces_prohibited_operation_restrictions(
-    populated_database):
+def test_yolo_enforces_prohibited_operation_restrictions(populated_database):
     """YOLO mode should block prohibited operations according to policy."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -248,8 +267,7 @@ def test_yolo_enforces_prohibited_operation_restrictions(
     assert "not allowed under YOLO policy" in result.block_reason
 
 
-def test_yolo_allows_derived_artifacts_when_configured(
-    populated_database):
+def test_yolo_allows_derived_artifacts_when_configured(populated_database):
     """YOLO mode should allow derived artifacts when policy permits."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -296,8 +314,7 @@ def test_yolo_allows_derived_artifacts_when_configured(
     assert "allow_derived_artifacts" in result.matched_policy_rules
 
 
-def test_yolo_allows_reversible_organization_when_configured(
-    populated_database):
+def test_yolo_allows_reversible_organization_when_configured(populated_database):
     """YOLO mode should allow reversible organization when policy permits."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -343,8 +360,7 @@ def test_yolo_allows_reversible_organization_when_configured(
     assert "allow_reversible_organization" in result.matched_policy_rules
 
 
-def test_yolo_auto_suspends_on_authorization_mismatch(
-    populated_database):
+def test_yolo_auto_suspends_on_authorization_mismatch(populated_database):
     """YOLO mode should auto-suspend on authorization mismatch."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -369,8 +385,7 @@ def test_yolo_auto_suspends_on_authorization_mismatch(
     assert suspended.suspended_at is not None
 
 
-def test_yolo_auto_suspends_on_invariant_failure(
-    populated_database):
+def test_yolo_auto_suspends_on_invariant_failure(populated_database):
     """YOLO mode should auto-suspend on invariant failure."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -395,8 +410,7 @@ def test_yolo_auto_suspends_on_invariant_failure(
     assert suspended.suspended_at is not None
 
 
-def test_yolo_prevents_permanent_data_deletion(
-    populated_database):
+def test_yolo_prevents_permanent_data_deletion(populated_database):
     """YOLO mode should prevent permanent data deletion operations."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -439,8 +453,7 @@ def test_yolo_prevents_permanent_data_deletion(
     assert result.would_auto_authorize
 
 
-def test_yolo_preserves_audit_trail(
-    populated_database):
+def test_yolo_preserves_audit_trail(populated_database):
     """YOLO mode should preserve complete audit trail of authorizations."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -460,7 +473,16 @@ def test_yolo_preserves_audit_trail(
         conn.execute(
             """INSERT INTO change_sets (id, workspace_id, author_id, title, idempotency_key, risk, status, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (str(change_set_id), str(workspace_id), str(agent_id), "Test change", "test-key", "low", "pending", datetime.now(UTC).isoformat())
+            (
+                str(change_set_id),
+                str(workspace_id),
+                str(agent_id),
+                "Test change",
+                "test-key",
+                "low",
+                "pending",
+                datetime.now(UTC).isoformat(),
+            ),
         )
 
     # Record authorization
@@ -478,8 +500,7 @@ def test_yolo_preserves_audit_trail(
     assert history[0].policy_matched == "allow_derived_artifacts"
 
 
-def test_yolo_suspension_creates_audit_record(
-    populated_database):
+def test_yolo_suspension_creates_audit_record(populated_database):
     """YOLO suspension events should create audit records."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -511,8 +532,7 @@ def test_yolo_suspension_creates_audit_record(
     assert rows[0]["suspension_reason"] == YoloSuspensionReason.VERIFICATION_FAILURE.value
 
 
-def test_yolo_revocation_by_owner_only(
-    populated_database):
+def test_yolo_revocation_by_owner_only(populated_database):
     """Only owner should be able to revoke YOLO mode."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -554,8 +574,7 @@ def test_yolo_revocation_by_owner_only(
     assert revoked.revoked_at is not None
 
 
-def test_yolo_risk_limit_enforcement(
-    populated_database):
+def test_yolo_risk_limit_enforcement(populated_database):
     """YOLO mode should enforce risk limits."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -611,12 +630,30 @@ def test_yolo_multiple_agents_independent_scopes(populated_database):
         conn.execute(
             """INSERT INTO agent_identities (id, display_name, client_name, model_name, process_description, active, created_at, revoked_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (str(agent1_id), "Agent 1", "test-client", "test-model", None, 1, datetime.now(UTC).isoformat(), None)
+            (
+                str(agent1_id),
+                "Agent 1",
+                "test-client",
+                "test-model",
+                None,
+                1,
+                datetime.now(UTC).isoformat(),
+                None,
+            ),
         )
         conn.execute(
             """INSERT INTO agent_identities (id, display_name, client_name, model_name, process_description, active, created_at, revoked_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (str(agent2_id), "Agent 2", "test-client", "test-model", None, 1, datetime.now(UTC).isoformat(), None)
+            (
+                str(agent2_id),
+                "Agent 2",
+                "test-client",
+                "test-model",
+                None,
+                1,
+                datetime.now(UTC).isoformat(),
+                None,
+            ),
         )
 
     # Activate YOLO for both agents with different scopes
@@ -650,8 +687,7 @@ def test_yolo_multiple_agents_independent_scopes(populated_database):
     assert agent2_mode.resource_scope == ("tests/",)
 
 
-def test_yolo_cannot_duplicate_active_mode_for_same_agent(
-    populated_database):
+def test_yolo_cannot_duplicate_active_mode_for_same_agent(populated_database):
     """Cannot activate duplicate YOLO mode for same agent."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -677,8 +713,7 @@ def test_yolo_cannot_duplicate_active_mode_for_same_agent(
         )
 
 
-def test_yolo_requires_active_agent_identity(
-    populated_database):
+def test_yolo_requires_active_agent_identity(populated_database):
     """YOLO mode requires active agent identity."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -698,8 +733,7 @@ def test_yolo_requires_active_agent_identity(
     # This is verified during the authorization check
 
 
-def test_yolo_policy_simulation_at_activation(
-    populated_database):
+def test_yolo_policy_simulation_at_activation(populated_database):
     """Activation should provide policy simulation preview."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -718,8 +752,7 @@ def test_yolo_policy_simulation_at_activation(
     assert isinstance(result.policy_simulation, tuple)
 
 
-def test_yolo_prevents_bypass_of_safeguards(
-    populated_database):
+def test_yolo_prevents_bypass_of_safeguards(populated_database):
     """YOLO mode should not bypass existing safeguards."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -764,8 +797,7 @@ def test_yolo_prevents_bypass_of_safeguards(
     assert not result.would_auto_authorize
 
 
-def test_yolo_version_tracking(
-    populated_database):
+def test_yolo_version_tracking(populated_database):
     """YOLO mode should track policy version."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)
@@ -795,7 +827,15 @@ def test_yolo_workspace_scoping(populated_database):
         conn.execute(
             """INSERT INTO workspaces (id, root_path, display_name, status, state_version, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (str(workspace1), "/tmp/workspace1", "Workspace1", "active", 0, datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat())
+            (
+                str(workspace1),
+                "/tmp/workspace1",
+                "Workspace1",
+                "active",
+                0,
+                datetime.now(UTC).isoformat(),
+                datetime.now(UTC).isoformat(),
+            ),
         )
 
     # Activate YOLO for workspace1 only
@@ -817,8 +857,7 @@ def test_yolo_workspace_scoping(populated_database):
     assert len(modes_w2) == 0
 
 
-def test_yolo_operation_class_scoping(
-    populated_database):
+def test_yolo_operation_class_scoping(populated_database):
     """YOLO mode should be scoped to specific operation classes."""
     database, workspace_id, owner_id, agent_id = populated_database
     yolo_service = YoloService(database)

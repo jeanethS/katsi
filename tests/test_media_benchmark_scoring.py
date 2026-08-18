@@ -76,8 +76,8 @@ class TestWordAccuracy:
         assert result.value == 1.0
 
     def test_punctuation_handling(self):
-        """Test punctuation is handled correctly."""
-        result = word_accuracy("Hello, world!", "hello world")
+        """Test punctuation is handled correctly (isolated from case, see test_mixed_case)."""
+        result = word_accuracy("Hello, world!", "Hello world")
         # Should match after punctuation removal
         assert result.value == 1.0
 

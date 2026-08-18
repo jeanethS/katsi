@@ -11,34 +11,31 @@ escalation, no external side effects.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
-import pathlib
 import shutil
 import stat
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO, Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from katsi_core.workspace.errors import (
-    AuthorizationDeniedError,
-    InvalidTransitionError,
-    UnsupportedOperationError,
     WorkspaceError,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    pass
 
 
 # =============================================================================
 # Operation Discriminators
 # =============================================================================
+
 
 class OperationKind(StrEnum):
     """Closed operation catalog - only these operations are permitted."""
@@ -66,6 +63,7 @@ class RiskClass(StrEnum):
 # =============================================================================
 # Path Security
 # =============================================================================
+
 
 class PathAttackType(StrEnum):
     """Categories of path attacks we detect and reject."""
@@ -96,17 +94,56 @@ class PathSecurityConfig:
     max_path_length: int = 4096
     max_filename_length: int = 255
     forbidden_names: frozenset[str] = field(
-        default_factory=lambda: frozenset({
-            ".", "..", "", "CON", "PRN", "AUX", "NUL",
-            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-        })
+        default_factory=lambda: frozenset(
+            {
+                ".",
+                "..",
+                "",
+                "CON",
+                "PRN",
+                "AUX",
+                "NUL",
+                "COM1",
+                "COM2",
+                "COM3",
+                "COM4",
+                "COM5",
+                "COM6",
+                "COM7",
+                "COM8",
+                "COM9",
+                "LPT1",
+                "LPT2",
+                "LPT3",
+                "LPT4",
+                "LPT5",
+                "LPT6",
+                "LPT7",
+                "LPT8",
+                "LPT9",
+            }
+        )
     )
     forbidden_extensions: frozenset[str] = field(
-        default_factory=lambda: frozenset({
-            ".exe", ".bat", ".cmd", ".com", ".scr", ".pif", ".vbs", ".js",
-            ".jar", ".app", ".deb", ".rpm", ".dmg", ".pkg", ".sh",
-        })
+        default_factory=lambda: frozenset(
+            {
+                ".exe",
+                ".bat",
+                ".cmd",
+                ".com",
+                ".scr",
+                ".pif",
+                ".vbs",
+                ".js",
+                ".jar",
+                ".app",
+                ".deb",
+                ".rpm",
+                ".dmg",
+                ".pkg",
+                ".sh",
+            }
+        )
     )
 
 
@@ -138,15 +175,13 @@ def validate_path_security(
         raise PathValidationError(
             path_str,
             PathAttackType.NON_CANONICAL,
-            f"Invalid path: {e}"
-        )
+            f"Invalid path: {e}",
+        ) from e
 
     # Reject obviously problematic inputs
     if not path_str or path_str.isspace():
         raise PathValidationError(
-            path_str,
-            PathAttackType.NON_CANONICAL,
-            "Empty or whitespace-only path"
+            path_str, PathAttackType.NON_CANONICAL, "Empty or whitespace-only path"
         )
 
     # Check for path length limits
@@ -154,7 +189,7 @@ def validate_path_security(
         raise PathValidationError(
             path_str,
             PathAttackType.NON_CANONICAL,
-            f"Path exceeds maximum length of {config.max_path_length}"
+            f"Path exceeds maximum length of {config.max_path_length}",
         )
 
     # If path is absolute, make it relative to workspace root for validation
@@ -166,7 +201,7 @@ def validate_path_security(
                 raise PathValidationError(
                     path_str,
                     PathAttackType.CROSS_WORKSPACE,
-                    f"Absolute path targets different workspace: {resolved} not in {workspace_root}"
+                    f"Absolute path targets different workspace: {resolved} not in {workspace_root}",
                 )
             # Convert to relative for further processing
             input_path = resolved.relative_to(workspace_root.resolve())
@@ -174,8 +209,8 @@ def validate_path_security(
             raise PathValidationError(
                 path_str,
                 PathAttackType.CROSS_WORKSPACE,
-                f"Path resolution error: {e}"
-            )
+                f"Path resolution error: {e}",
+            ) from e
 
     # Check for traversal attacks in components
     components = input_path.parts
@@ -185,22 +220,20 @@ def validate_path_security(
             raise PathValidationError(
                 path_str,
                 PathAttackType.TRAVERSAL_ATTACK,
-                f"Path contains parent traversal at component {i}"
+                f"Path contains parent traversal at component {i}",
             )
 
         if component == ".":
             raise PathValidationError(
                 path_str,
                 PathAttackType.NON_CANONICAL,
-                f"Path contains current-dir reference at component {i}"
+                f"Path contains current-dir reference at component {i}",
             )
 
         # Check for forbidden names
         if component.upper() in config.forbidden_names:
             raise PathValidationError(
-                path_str,
-                PathAttackType.SPECIAL_FILE,
-                f"Path contains forbidden name: {component}"
+                path_str, PathAttackType.SPECIAL_FILE, f"Path contains forbidden name: {component}"
             )
 
         # Check filename length
@@ -208,7 +241,7 @@ def validate_path_security(
             raise PathValidationError(
                 path_str,
                 PathAttackType.NON_CANONICAL,
-                f"Component {component} exceeds max filename length of {config.max_filename_length}"
+                f"Component {component} exceeds max filename length of {config.max_filename_length}",
             )
 
     # Build the full path
@@ -224,7 +257,7 @@ def validate_path_security(
             raise PathValidationError(
                 path_str,
                 PathAttackType.SYMLINK_ESCAPE,
-                f"Canonicalized path escapes workspace: {canonical}"
+                f"Canonicalized path escapes workspace: {canonical}",
             )
 
         # Check if parent is a symlink (if symlinks not allowed)
@@ -234,7 +267,7 @@ def validate_path_security(
                     raise PathValidationError(
                         path_str,
                         PathAttackType.SYMLINK_ESCAPE,
-                        f"Parent path {parent} is a symbolic link"
+                        f"Parent path {parent} is a symbolic link",
                     )
 
     except Exception as e:
@@ -243,8 +276,8 @@ def validate_path_security(
         raise PathValidationError(
             path_str,
             PathAttackType.NON_CANONICAL,
-            f"Path canonicalization failed: {e}"
-        )
+            f"Path canonicalization failed: {e}",
+        ) from e
 
     return canonical
 
@@ -262,17 +295,13 @@ def validate_target_not_special_file(path: Path) -> None:
         # Reject device files
         if stat.S_ISBLK(mode) or stat.S_ISCHR(mode):
             raise PathValidationError(
-                str(path),
-                PathAttackType.SPECIAL_FILE,
-                "Target is a device file"
+                str(path), PathAttackType.SPECIAL_FILE, "Target is a device file"
             )
 
         # Reject sockets and named pipes
         if stat.S_ISSOCK(mode) or stat.S_ISFIFO(mode):
             raise PathValidationError(
-                str(path),
-                PathAttackType.SPECIAL_FILE,
-                "Target is a socket or named pipe"
+                str(path), PathAttackType.SPECIAL_FILE, "Target is a socket or named pipe"
             )
 
         # Reject directories unless explicitly allowed
@@ -280,20 +309,21 @@ def validate_target_not_special_file(path: Path) -> None:
             raise PathValidationError(
                 str(path),
                 PathAttackType.SPECIAL_FILE,
-                "Target is a directory (use directory operations)"
+                "Target is a directory (use directory operations)",
             )
 
     except OSError as e:
         raise PathValidationError(
             str(path),
             PathAttackType.SPECIAL_FILE,
-            f"Failed to stat target: {e}"
-        )
+            f"Failed to stat target: {e}",
+        ) from e
 
 
 # =============================================================================
 # Operation Limits
 # =============================================================================
+
 
 @dataclass
 class OperationLimits:
@@ -310,6 +340,7 @@ class OperationLimits:
 # =============================================================================
 # Discriminated Operation Models
 # =============================================================================
+
 
 class PreflightCheckResult(BaseModel):
     """Result of preflight validation."""
@@ -454,14 +485,14 @@ class DerivedArtifactReplaceOperation(FilesystemOperation):
     new_hash: str = Field(description="BLAKE3 of new content")
     derivation_id: str = Field(description="Identifier of derivation process")
     expected_input_hashes: dict[str, str] = Field(
-        default_factory=dict,
-        description="Input file hashes that produced this artifact"
+        default_factory=dict, description="Input file hashes that produced this artifact"
     )
 
 
 # =============================================================================
 # Forbidden Operations Detection
 # =============================================================================
+
 
 class ForbiddenOperationType(StrEnum):
     """Categories of forbidden operations."""
@@ -484,9 +515,7 @@ class ForbiddenOperationError(WorkspaceError):
     def __init__(self, operation_type: ForbiddenOperationType, reason: str) -> None:
         self.operation_type = operation_type
         self.reason = reason
-        super().__init__(
-            f"Forbidden operation: {operation_type.value} - {reason}"
-        )
+        super().__init__(f"Forbidden operation: {operation_type.value} - {reason}")
 
 
 def detect_forbidden_operation(operation: FilesystemOperation) -> None:
@@ -500,12 +529,15 @@ def detect_forbidden_operation(operation: FilesystemOperation) -> None:
         metadata = operation.metadata  # type: ignore
         for key, value in metadata.items():
             # Detect command injection attempts
-            if "cmd" in key.lower() or "exec" in key.lower():
-                if isinstance(value, str) and any(c in value for c in [";", "&", "|", "`", "$"]):
-                    raise ForbiddenOperationError(
-                        ForbiddenOperationType.ARBITRARY_COMMANDS,
-                        f"Metadata contains command-like patterns: {key}"
-                    )
+            if (
+                ("cmd" in key.lower() or "exec" in key.lower())
+                and isinstance(value, str)
+                and any(c in value for c in [";", "&", "|", "`", "$"])
+            ):
+                raise ForbiddenOperationError(
+                    ForbiddenOperationType.ARBITRARY_COMMANDS,
+                    f"Metadata contains command-like patterns: {key}",
+                )
 
     # Check for path patterns that suggest system modification
     for field_name in ["target_path", "source_path"]:
@@ -516,16 +548,24 @@ def detect_forbidden_operation(operation: FilesystemOperation) -> None:
 
                 # System directories
                 system_targets = [
-                    "/etc", "/system", "/sys", "/proc", "/dev",
-                    "\\windows\\system32", "\\program Files",
-                    "/usr/bin", "/usr/sbin", "/bin", "/sbin",
+                    "/etc",
+                    "/system",
+                    "/sys",
+                    "/proc",
+                    "/dev",
+                    "\\windows\\system32",
+                    "\\program Files",
+                    "/usr/bin",
+                    "/usr/sbin",
+                    "/bin",
+                    "/sbin",
                 ]
 
                 for system_target in system_targets:
                     if system_target.lower() in lower_path:
                         raise ForbiddenOperationError(
                             ForbiddenOperationType.SYSTEM_MODIFICATIONS,
-                            f"Path targets system directory: {path_value}"
+                            f"Path targets system directory: {path_value}",
                         )
 
                 # Git operations (we allow read-only git access, not history rewrite)
@@ -535,13 +575,14 @@ def detect_forbidden_operation(operation: FilesystemOperation) -> None:
                 ]:
                     raise ForbiddenOperationError(
                         ForbiddenOperationType.GIT_HISTORY_REWRITE,
-                        f"Direct .git modification not allowed: {path_value}"
+                        f"Direct .git modification not allowed: {path_value}",
                     )
 
 
 # =============================================================================
 # Preflight Checks
 # =============================================================================
+
 
 @dataclass
 class PreflightContext:
@@ -642,22 +683,7 @@ def perform_preflight_checks(
                     f"Base hash mismatch: expected {operation.base_hash}, got {base_hash}"
                 )
 
-    elif isinstance(operation, CopyOperation):
-        source_file = context.workspace_root / operation.source_path
-
-        if not source_file.exists():
-            failures.append(f"Source file does not exist: {operation.source_path}")
-        else:
-            estimated_bytes = source_file.stat().st_size
-
-            # Verify source hash
-            source_hash = compute_blake3_hash(source_file)
-            if source_hash != operation.expected_source_hash:
-                failures.append(
-                    f"Source hash mismatch: expected {operation.expected_source_hash}, got {source_hash}"
-                )
-
-    elif isinstance(operation, InWorkspaceMoveOperation):
+    elif isinstance(operation, (CopyOperation, InWorkspaceMoveOperation)):
         source_file = context.workspace_root / operation.source_path
 
         if not source_file.exists():
@@ -725,6 +751,7 @@ def perform_preflight_checks(
 # Hash Utilities
 # =============================================================================
 
+
 def compute_blake3_hash(file_path: Path) -> str:
     """Compute BLAKE3 hash of a file.
 
@@ -765,6 +792,7 @@ def compute_content_hash(content: bytes) -> str:
     """
     try:
         import blake3
+
         return blake3.blake3(content).hexdigest()
     except ImportError:
         return hashlib.sha256(content).hexdigest()
@@ -773,6 +801,7 @@ def compute_content_hash(content: bytes) -> str:
 # =============================================================================
 # Deterministic In-Memory Patching
 # =============================================================================
+
 
 class PatchApplicationError(WorkspaceError):
     """Failed to apply patch deterministically."""
@@ -813,9 +842,7 @@ def apply_patch_in_memory(
             # Fall back to binary patch
             result_content = _apply_binary_patch(base_content, patch_data)
         except Exception as e:
-            raise PatchApplicationError(
-                f"Failed to apply patch in memory: {e}"
-            )
+            raise PatchApplicationError(f"Failed to apply patch in memory: {e}") from e
 
     # Verify output hash
     actual_hash = compute_content_hash(result_content)
@@ -840,7 +867,6 @@ def _apply_unified_diff(base_content: bytes, patch_data: bytes) -> bytes:
     Returns:
         Patched content bytes
     """
-    import io
 
     # Decode patch to text
     patch_text = patch_data.decode("utf-8", errors="replace")
@@ -867,7 +893,6 @@ def _apply_unified_diff(base_content: bytes, patch_data: bytes) -> bytes:
                     old_start, old_count = map(int, hunk_info[1:].split(","))
                 else:
                     old_start = int(hunk_info[1:])
-                    old_count = 1
 
                 # Apply hunk
                 i += 1
@@ -893,7 +918,7 @@ def _apply_unified_diff(base_content: bytes, patch_data: bytes) -> bytes:
                     i += 1
 
             except (ValueError, IndexError) as e:
-                raise ValueError(f"Failed to parse hunk header: {line} - {e}")
+                raise ValueError(f"Failed to parse hunk header: {line} - {e}") from e
         else:
             i += 1
 
@@ -924,6 +949,7 @@ def _apply_binary_patch(base_content: bytes, patch_data: bytes) -> bytes:
 # =============================================================================
 # Operation Execution
 # =============================================================================
+
 
 @dataclass
 class OperationResult:
@@ -1111,10 +1137,8 @@ class FilesystemOperationExecutor:
         except OSError as e:
             # Restore backup if we had one
             if backup_path and Path(backup_path).exists():
-                try:
+                with contextlib.suppress(Exception):
                     shutil.copy2(backup_path, target_path)
-                except Exception:
-                    pass
             return OperationResult(
                 operation_id=op.operation_id,
                 success=False,
@@ -1193,10 +1217,8 @@ class FilesystemOperationExecutor:
         except OSError as e:
             # Restore backup
             if backup_path and Path(backup_path).exists():
-                try:
+                with contextlib.suppress(Exception):
                     shutil.copy2(backup_path, target_path)
-                except Exception:
-                    pass
             return OperationResult(
                 operation_id=op.operation_id,
                 success=False,
@@ -1249,14 +1271,12 @@ class FilesystemOperationExecutor:
         if op.verify_after_copy:
             target_hash = compute_blake3_hash(target_path)
             if target_hash != source_hash:
-                try:
+                with contextlib.suppress(Exception):
                     target_path.unlink()
-                except Exception:
-                    pass
                 return OperationResult(
                     operation_id=op.operation_id,
                     success=False,
-                    error_message=f"Copy verification failed: hash mismatch after copy",
+                    error_message="Copy verification failed: hash mismatch after copy",
                 )
 
         return OperationResult(
@@ -1306,14 +1326,12 @@ class FilesystemOperationExecutor:
             target_hash = compute_blake3_hash(target_path)
             if target_hash != source_hash:
                 # Try to move back
-                try:
+                with contextlib.suppress(Exception):
                     shutil.move(str(target_path), str(source_path))
-                except Exception:
-                    pass
                 return OperationResult(
                     operation_id=op.operation_id,
                     success=False,
-                    error_message=f"Move verification failed: hash mismatch after move",
+                    error_message="Move verification failed: hash mismatch after move",
                 )
 
         return OperationResult(
@@ -1391,6 +1409,7 @@ class FilesystemOperationExecutor:
         metadata_path = quarantine_path / "quarantine.json"
         try:
             import json
+
             metadata = {
                 "operation_id": op.operation_id,
                 "original_path": op.target_path,
@@ -1435,7 +1454,7 @@ class FilesystemOperationExecutor:
             return OperationResult(
                 operation_id=op.operation_id,
                 success=False,
-                error_message=f"No restorable file found in quarantine",
+                error_message="No restorable file found in quarantine",
             )
 
         quarantined_file = actual_files[0]
@@ -1458,6 +1477,7 @@ class FilesystemOperationExecutor:
             if metadata_path.exists():
                 try:
                     import json
+
                     with metadata_path.open("r") as f:
                         metadata = json.load(f)
                     target_path = self.workspace_root / metadata["original_path"]
@@ -1486,7 +1506,7 @@ class FilesystemOperationExecutor:
                 return OperationResult(
                     operation_id=op.operation_id,
                     success=False,
-                    error_message=f"Restore verification failed: hash mismatch",
+                    error_message="Restore verification failed: hash mismatch",
                 )
 
         return OperationResult(
@@ -1495,7 +1515,9 @@ class FilesystemOperationExecutor:
             bytes_written=target_path.stat().st_size,
         )
 
-    def _execute_derived_artifact_replace(self, op: DerivedArtifactReplaceOperation) -> OperationResult:
+    def _execute_derived_artifact_replace(
+        self, op: DerivedArtifactReplaceOperation
+    ) -> OperationResult:
         """Execute a derived artifact replace operation."""
         target_path = self.workspace_root / op.target_path
 
@@ -1542,9 +1564,11 @@ class FilesystemOperationExecutor:
 # Utilities
 # =============================================================================
 
+
 def create_operation_id() -> str:
     """Create a unique operation ID."""
     import uuid
+
     return f"op_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
 
 

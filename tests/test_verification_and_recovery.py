@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -15,8 +16,6 @@ from katsi_core.workspace.contracts import (
     ChangeSetStatus,
     CreateFileOperation,
     ResourceDependency,
-    ResourceId,
-    ResourceVersionId,
     RiskClass,
 )
 from katsi_core.workspace.rollback import (
@@ -26,7 +25,6 @@ from katsi_core.workspace.rollback import (
     RollbackStepKind,
 )
 from katsi_core.workspace.rollback_service import (
-    PreimageMissingError,
     RollbackInterruptedError,
     RollbackService,
 )
@@ -68,7 +66,6 @@ def _find_true_executable() -> str:
     return sys.executable  # Use Python as fallback
 
 
-import sys
 TRUE_EXECUTABLE = _find_true_executable()
 
 
@@ -848,7 +845,7 @@ def test_full_verification_and_rollback_workflow(
     test_file.write_text("original content")
 
     # Create preimage
-    preimage = executor.create_preimage(
+    executor.create_preimage(
         original_path=test_file,
         change_set_id=sample_change_set.id,
         operation_ordinal=0,

@@ -73,7 +73,7 @@ class AdjacentStagingManager:
         if not source_path.exists():
             raise FileNotFoundError(f"Source file not found: {source_path}")
 
-        stage_path = self.get_stage_path(target_path)
+        self.get_stage_path(target_path)
 
         # Copy file to staging location
         with open(source_path, "rb") as src:

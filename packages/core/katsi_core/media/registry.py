@@ -223,6 +223,27 @@ class RepresentationRegistry:
 
             return self._row_to_representation(row)
 
+    def is_current(self, representation_id: UUID) -> bool:
+        """Whether this immutable representation is currently visible.
+
+        Status alone is insufficient because a newer representation of the
+        same kind can supersede it while its historical status remains current.
+        """
+        with self._database.connection() as conn:
+            row = conn.execute(
+                "SELECT status, is_current FROM representations WHERE id = ?",
+                (str(representation_id),),
+            ).fetchone()
+        return bool(
+            row
+            and row["is_current"]
+            and row["status"]
+            in {
+                MediaRepresentationStatus.CURRENT.value,
+                MediaRepresentationStatus.PARTIAL.value,
+            }
+        )
+
     def get_current_representation(
         self,
         resource_version_id: ResourceVersionId,

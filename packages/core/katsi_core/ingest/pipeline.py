@@ -9,7 +9,7 @@ import blake3
 
 from katsi_core.clients.embed import EmbedClient
 from katsi_core.clients.llm import ExtractionError, LLMClient
-from katsi_core.config import Settings
+from katsi_core.config import ChunkingThresholds, Settings
 from katsi_core.ingest.chunk import chunk
 from katsi_core.ingest.enrich import apply_extraction, project_chunks
 from katsi_core.ingest.extract import extract_text
@@ -161,8 +161,10 @@ class IngestPipeline:
         chunks = chunk(
             file_id,
             text,
-            target_tokens=self._settings.ingest.chunk_token_target,
-            overlap=self._settings.ingest.chunk_token_overlap,
+            settings=ChunkingThresholds(
+                target_tokens=self._settings.ingest.chunk_token_target,
+                overlap=self._settings.ingest.chunk_token_overlap,
+            ),
         )
         if not chunks:
             self._delete_current_projections(file_id)

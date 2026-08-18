@@ -90,7 +90,7 @@ def _split_recursively(
             merged_pieces.append(current_group)
 
         # Recurse into any pieces still over target using remaining separators
-        remaining_seps = separators[sep_idx + 1:]
+        remaining_seps = separators[sep_idx + 1 :]
         final_pieces: list[str] = []
 
         for piece in merged_pieces:
@@ -98,9 +98,7 @@ def _split_recursively(
                 final_pieces.append(piece)
             elif remaining_seps:
                 # Recurse with remaining separators
-                final_pieces.extend(_split_recursively(
-                    piece, target_tokens, remaining_seps
-                ))
+                final_pieces.extend(_split_recursively(piece, target_tokens, remaining_seps))
             else:
                 # No more separators - this piece is an unbreakable atom
                 final_pieces.append(piece)
@@ -127,7 +125,7 @@ def _apply_overlap(pieces: list[str], overlap: int) -> list[str]:
 
         # Extract overlap tokens from tail of previous piece
         # Count non-whitespace characters to find overlap boundary
-        overlap_chars_needed = overlap * 3  # Approximate chars per token
+        overlap * 3  # Approximate chars per token
         overlap_text = ""
         ws_count = 0
 

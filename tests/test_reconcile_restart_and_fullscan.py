@@ -12,7 +12,6 @@ This is a safety guarantee ensuring stale data cannot persist after reconciliati
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 
@@ -65,7 +64,9 @@ def projection_stores(tmp_path: Path):
     return vectors, graph
 
 
-def test_restart_full_scan_removes_deleted_resources_from_current_search(workspace_with_resources, projection_stores):
+def test_restart_full_scan_removes_deleted_resources_from_current_search(
+    workspace_with_resources, projection_stores
+):
     """After restart and full scan, deleted resources cannot be found via search."""
     factory, repository, workspace, reconciler, root = workspace_with_resources
     vectors, graph = projection_stores
@@ -121,7 +122,9 @@ def test_restart_full_scan_removes_deleted_resources_from_current_search(workspa
     assert all(r.current_path != "file1.md" for r in current_resources)
 
     # The deleted resource should still exist in database but with deleted status
-    deleted_resource_id = resources[0].id if resources[0].current_path == "file1.md" else resources[1].id
+    deleted_resource_id = (
+        resources[0].id if resources[0].current_path == "file1.md" else resources[1].id
+    )
     deleted_resource = repository.get_resource(deleted_resource_id)
     assert deleted_resource is not None
     assert deleted_resource.status.value == "deleted"
@@ -133,9 +136,7 @@ def test_full_scan_invalidate_claims_for_deleted_resources(workspace_with_resour
     """Full scan invalidates claims when their resource evidence is deleted."""
     factory, repository, workspace, reconciler, root = workspace_with_resources
 
-    # Get initial resource
     resources = repository.list_current_resources(workspace.id)
-    resource_id = resources[0].id
 
     # The reconciler doesn't have a claims service, so we just verify the deletion flow
     # Delete the file
@@ -151,7 +152,9 @@ def test_full_scan_invalidate_claims_for_deleted_resources(workspace_with_resour
     factory.close_all()
 
 
-def test_restart_cleans_up_deleted_resource_relationships(workspace_with_resources, projection_stores):
+def test_restart_cleans_up_deleted_resource_relationships(
+    workspace_with_resources, projection_stores
+):
     """After restart, deleted resources cannot maintain graph relationships."""
     factory, repository, workspace, reconciler, root = workspace_with_resources
     vectors, graph = projection_stores
@@ -287,13 +290,17 @@ def test_restart_with_sequence_gap_triggers_full_scan(workspace_with_resources):
     # First, process an event with sequence 1 to establish baseline
     reconciler.handle_event(
         workspace.id,
-        FilesystemEvent(FilesystemEventKind.MODIFIED, root / resources[1].current_path, source_sequence=1),
+        FilesystemEvent(
+            FilesystemEventKind.MODIFIED, root / resources[1].current_path, source_sequence=1
+        ),
     )
 
     # Now process event with sequence 3 when we last saw 1 (gap detected: 2 was missed)
     reconciler.handle_event(
         workspace.id,
-        FilesystemEvent(FilesystemEventKind.MODIFIED, root / resources[1].current_path, source_sequence=3),
+        FilesystemEvent(
+            FilesystemEventKind.MODIFIED, root / resources[1].current_path, source_sequence=3
+        ),
     )
 
     # Full scan should have been triggered due to sequence gap
@@ -358,7 +365,15 @@ def test_full_scan_removal_propagates_to_projections(workspace_with_resources, p
     )
 
     # Add to vector projection
-    chunks = [Chunk(id=f"{str(resource_id)}:0", file_id=str(resource_id), ordinal=0, text="test", token_count=1)]
+    chunks = [
+        Chunk(
+            id=f"{str(resource_id)}:0",
+            file_id=str(resource_id),
+            ordinal=0,
+            text="test",
+            token_count=1,
+        )
+    ]
     vectors.upsert_chunks(chunks, [[1.0, 0.0, 0.0, 0.0]])
 
     # Add to graph projection
@@ -380,7 +395,9 @@ def test_full_scan_removal_propagates_to_projections(workspace_with_resources, p
 
     # Verify resource is removed from both projections
     assert vectors.count() == 0, "Deleted resource should not be in vector projection"
-    assert graph.get_file(str(resource_id)) is None, "Deleted resource should not be in graph projection"
+    assert graph.get_file(str(resource_id)) is None, (
+        "Deleted resource should not be in graph projection"
+    )
 
     factory.close_all()
 

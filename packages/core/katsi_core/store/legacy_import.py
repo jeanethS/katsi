@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -12,13 +13,29 @@ from katsi_core.store.workspace_repository import WorkspaceRepository
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.workspace.contracts import ResourceId, WorkspaceId
 
+if TYPE_CHECKING:
+    from katsi_core.media.registry import RepresentationRegistry
+
 
 class LegacyFileRecordImporter:
     """Imports valid legacy records once without modifying the source JSON file."""
 
-    def __init__(self, database: WorkspaceSQLite, repository: WorkspaceRepository) -> None:
+    def __init__(
+        self,
+        database: WorkspaceSQLite,
+        repository: WorkspaceRepository,
+        representation_registry: RepresentationRegistry | None = None,
+    ) -> None:
         self._database = database
         self._repository = repository
+        if representation_registry is None:
+            self._representation_migrator = None
+        else:
+            from katsi_core.media.migration import LegacyTextRepresentationMigrator
+
+            self._representation_migrator = LegacyTextRepresentationMigrator(
+                representation_registry
+            )
 
     def import_file(
         self, legacy_path: Path, workspace_id: WorkspaceId, enrichment_fingerprint: str
@@ -62,6 +79,14 @@ class LegacyFileRecordImporter:
                     resource.state_version,
                 )
             self._persist_enrichment(record, enrichment_fingerprint)
+            if self._representation_migrator is not None:
+                self._representation_migrator.import_text(
+                    legacy_id=legacy_id,
+                    resource_version_id=version.id,
+                    content_hash=record.content_hash,
+                    text=record.summary or "",
+                    created_at=record.last_indexed_at,
+                )
             self._mark_imported(workspace.id, legacy_id, version.resource_id)
             imported += 1
         return imported

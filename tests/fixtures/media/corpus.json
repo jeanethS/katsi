@@ -1,0 +1,10 @@
+[
+  {"id": "screenshot", "media_type": "image/svg+xml", "coverage": "screenshot OCR", "builder": "tests/test_media_image_pipeline.py", "license": "MIT"},
+  {"id": "diagram", "media_type": "image/svg+xml", "coverage": "diagram caption and OCR", "builder": "tests/test_media_image_pipeline.py", "license": "MIT"},
+  {"id": "scan", "media_type": "application/pdf", "coverage": "image-only PDF and page OCR", "builder": "tests/test_media_document_pipeline.py", "license": "MIT"},
+  {"id": "speech", "media_type": "audio/wav", "coverage": "timestamped speech", "builder": "tests/test_media_audio_pipeline.py", "license": "MIT"},
+  {"id": "multi-speaker-audio", "media_type": "audio/wav", "coverage": "anonymous speaker segmentation", "builder": "tests/test_media_audio_pipeline.py", "license": "MIT"},
+  {"id": "slides", "media_type": "video/mp4", "coverage": "slides as sampled keyframes", "builder": "tests/test_media_video_pipeline.py", "license": "MIT"},
+  {"id": "silent-video", "media_type": "video/mp4", "coverage": "silent video sampling", "builder": "tests/test_media_video_pipeline.py", "license": "MIT"},
+  {"id": "speech-plus-visual-video", "media_type": "video/mp4", "coverage": "transcript plus keyframe evidence", "builder": "tests/test_media_video_pipeline.py", "license": "MIT"}
+]

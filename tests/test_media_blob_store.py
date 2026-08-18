@@ -149,10 +149,12 @@ def test_blob_retention_policy(blob_store, sample_content):
 
     # Manually age the metadata to simulate passage of time beyond retention period
     from datetime import timedelta
+
     old_metadata = BlobMetadata(
         blob_hash=metadata.blob_hash,
         byte_count=metadata.byte_count,
-        created_at=datetime.now(UTC) - timedelta(days=400),  # Very old, past both retention and max_age
+        created_at=datetime.now(UTC)
+        - timedelta(days=400),  # Very old, past both retention and max_age
         access_count=metadata.access_count,
         last_accessed_at=datetime.now(UTC) - timedelta(days=400),
         retention_until=datetime.now(UTC) - timedelta(days=1),  # Retention expired yesterday
@@ -234,10 +236,7 @@ def test_list_blobs(blob_store):
 
 def test_blob_metadata(blob_store, sample_content):
     """Test blob metadata."""
-    blob_hash, byte_count = blob_store.store_blob(
-        sample_content,
-        retention_days=30
-    )
+    blob_hash, byte_count = blob_store.store_blob(sample_content, retention_days=30)
 
     metadata = blob_store.get_blob_info(blob_hash)
     assert metadata is not None
@@ -409,10 +408,7 @@ def test_blob_reference_factory_nonexistent_hash(blob_store):
 
 def test_blob_metadata_serialization(blob_store, sample_content):
     """Test blob metadata serialization and deserialization."""
-    blob_hash, _ = blob_store.store_blob(
-        sample_content,
-        retention_days=30
-    )
+    blob_hash, _ = blob_store.store_blob(sample_content, retention_days=30)
 
     metadata = blob_store.get_blob_info(blob_hash)
     assert metadata is not None

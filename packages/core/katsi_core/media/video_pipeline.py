@@ -293,9 +293,7 @@ class VideoMetadataPipeline(MediaPipelineProtocol):
         pipeline_fingerprint: PipelineFingerprint,
         working_directory: Path,
     ) -> DerivedRepresentation:
-        result = BoundedSubprocessExecutor().execute(
-            self._definition, file_path, working_directory
-        )
+        result = BoundedSubprocessExecutor().execute(self._definition, file_path, working_directory)
         now = datetime.now(UTC)
         producer = ProducerProvenance(
             producer_type=self._definition.producer_type,
@@ -534,9 +532,7 @@ class VideoCoveragePlanner:
             )
             escalation_ceiling_ms = budget.max_duration_ms * budget.approval_escalation_multiplier
             if metadata.duration_ms > escalation_ceiling_ms:
-                return _unavailable_plan(
-                    [reason, "exceeds owner-approval escalation multiplier"]
-                )
+                return _unavailable_plan([reason, "exceeds owner-approval escalation multiplier"])
             if not budget.allow_owner_approval:
                 return _unavailable_plan([reason, "owner approval is disabled"])
             return _owner_approval_plan(
@@ -575,7 +571,8 @@ class VideoCoveragePlanner:
             reason = "scene-scan overhead alone exceeds wall-time budget"
             if budget.allow_owner_approval:
                 return _owner_approval_plan(
-                    [reason], requested_duration_ms=target_duration_ms,
+                    [reason],
+                    requested_duration_ms=target_duration_ms,
                     compute_class=required_compute_class,
                 )
             return _unavailable_plan([reason])
@@ -590,7 +587,8 @@ class VideoCoveragePlanner:
             reason = "computed budgets leave no viable keyframes across the full duration"
             if budget.allow_owner_approval:
                 return _owner_approval_plan(
-                    [reason], requested_duration_ms=target_duration_ms,
+                    [reason],
+                    requested_duration_ms=target_duration_ms,
                     compute_class=required_compute_class,
                 )
             return _unavailable_plan([reason])
@@ -1127,9 +1125,7 @@ class SceneDetectionPipeline(MediaPipelineProtocol):
         pipeline_fingerprint: PipelineFingerprint,
         working_directory: Path,
     ) -> DerivedRepresentation:
-        result = BoundedSubprocessExecutor().execute(
-            self._definition, file_path, working_directory
-        )
+        result = BoundedSubprocessExecutor().execute(self._definition, file_path, working_directory)
         now = datetime.now(UTC)
         producer = ProducerProvenance(
             producer_type=self._definition.producer_type,
@@ -1371,9 +1367,7 @@ class KeyframeExtractionPipeline(MediaPipelineProtocol):
             )
 
         if self._blob_store is None:
-            raise RuntimeError(
-                "KeyframeExtractionPipeline requires a blob_store to persist output"
-            )
+            raise RuntimeError("KeyframeExtractionPipeline requires a blob_store to persist output")
 
         image_bytes = output_path.read_bytes()
         blob_hash, byte_count = self._blob_store.store_blob(image_bytes)
@@ -1607,9 +1601,7 @@ def embed_keyframe_via_image_pipeline(
 # =============================================================================
 
 
-def _segments_overlap_scene(
-    segment: DerivedRepresentation, start_ms: int, end_ms: int
-) -> bool:
+def _segments_overlap_scene(segment: DerivedRepresentation, start_ms: int, end_ms: int) -> bool:
     for locator in segment.locators:
         if not isinstance(locator, TimeRangeLocator):
             continue
@@ -1662,8 +1654,7 @@ def build_scene_representations(
             if _segments_overlap_scene(seg, scene.start_ms, scene.end_ms)
         ]
         textual_payload = (
-            "\n".join(seg.textual_payload for seg in overlapping if seg.textual_payload)
-            or None
+            "\n".join(seg.textual_payload for seg in overlapping if seg.textual_payload) or None
         )
 
         rep_id = uuid4()

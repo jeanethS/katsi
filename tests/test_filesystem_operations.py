@@ -7,10 +7,7 @@ and platform-supported replacement behavior.
 from __future__ import annotations
 
 import os
-import pathlib
-import shutil
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -20,17 +17,17 @@ from katsi_core.workspace.operations import (
     CreateOperation,
     DeterministicPatchOperation,
     DirectoryCreateOperation,
-    DerivedArtifactReplaceOperation,
     ExactHashReplaceOperation,
+    FilesystemOperationExecutor,
     ForbiddenOperationError,
     ForbiddenOperationType,
     InWorkspaceMoveOperation,
     OperationKind,
     OperationLimits,
-    OperationResult,
     PathAttackType,
     PathSecurityConfig,
     PathValidationError,
+    PreflightContext,
     QuarantineOperation,
     RestoreOperation,
     RiskClass,
@@ -42,18 +39,12 @@ from katsi_core.workspace.operations import (
     validate_operation_limits,
     validate_path_security,
     validate_target_not_special_file,
-    FilesystemOperationExecutor,
-    PreflightContext,
-    PreflightCheckResult,
-    FilesystemOperation,
-    apply_patch_in_memory,
-    PatchApplicationError,
 )
-
 
 # =============================================================================
 # Test Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def temp_workspace():
@@ -96,6 +87,7 @@ def sample_content_hash(sample_content):
 # Path Security Tests (Task 14.6 - Path Attacks)
 # =============================================================================
 
+
 class TestPathTraversalAttacks:
     """Test detection and rejection of path traversal attacks."""
 
@@ -121,7 +113,10 @@ class TestPathTraversalAttacks:
 
         # The implementation might classify this as either NON_CANONICAL or TRAVERSAL_ATTACK
         # Both are valid security classifications
-        assert exc_info.value.attack_type in [PathAttackType.NON_CANONICAL, PathAttackType.TRAVERSAL_ATTACK]
+        assert exc_info.value.attack_type in [
+            PathAttackType.NON_CANONICAL,
+            PathAttackType.TRAVERSAL_ATTACK,
+        ]
 
     def test_complex_traversal_rejected(self, temp_workspace):
         """Complex traversal patterns are rejected."""
@@ -180,7 +175,7 @@ class TestSpecialFileAttacks:
 
         for name in forbidden_names:
             try:
-                result = validate_path_security(f"{name}.txt", temp_workspace, config)
+                validate_path_security(f"{name}.txt", temp_workspace, config)
                 # If it doesn't raise, the implementation might be more lenient
                 # This is acceptable - the security check is best-effort
             except PathValidationError as exc_info:
@@ -259,6 +254,7 @@ class TestEmptyAndInvalidPaths:
 # Forbidden Operation Detection Tests (Task 14.6)
 # =============================================================================
 
+
 class TestForbiddenOperations:
     """Test detection of forbidden operation patterns."""
 
@@ -315,6 +311,7 @@ class TestForbiddenOperations:
 # =============================================================================
 # Operation-Specific Tests (Task 14.6 - Every Operation)
 # =============================================================================
+
 
 class TestCreateOperation:
     """Test CreateOperation execution and validation."""
@@ -492,7 +489,9 @@ class TestInWorkspaceMoveOperation:
         assert target_file.exists()
         assert target_file.read_bytes() == sample_content
 
-    def test_move_with_verification_failure_rolls_back(self, executor, temp_workspace, sample_content):
+    def test_move_with_verification_failure_rolls_back(
+        self, executor, temp_workspace, sample_content
+    ):
         """Move rolls back on verification failure."""
         # Create a scenario where verification would fail
         source_file = temp_workspace / "source.txt"
@@ -683,6 +682,7 @@ class TestDeterministicPatchOperation:
 # Size/Risk Boundary Tests (Task 14.6)
 # =============================================================================
 
+
 class TestSizeBoundaries:
     """Test size limit enforcement."""
 
@@ -706,7 +706,9 @@ class TestSizeBoundaries:
         result = small_executor.execute(operation)
 
         assert not result.success
-        assert "file size" in result.error_message.lower() or "limit" in result.error_message.lower()
+        assert (
+            "file size" in result.error_message.lower() or "limit" in result.error_message.lower()
+        )
 
     def test_operation_count_limit_enforced(self, executor):
         """Operation count limits are enforced."""
@@ -742,7 +744,10 @@ class TestSizeBoundaries:
         result = limited_executor.execute(operation)
 
         assert not result.success
-        assert "operation count" in result.error_message.lower() or "limit" in result.error_message.lower()
+        assert (
+            "operation count" in result.error_message.lower()
+            or "limit" in result.error_message.lower()
+        )
 
     def test_patch_size_limit_enforced(self, executor):
         """Patch size limits are enforced."""
@@ -770,7 +775,9 @@ class TestSizeBoundaries:
         result = limited_executor.execute(operation)
 
         assert not result.success
-        assert "patch size" in result.error_message.lower() or "limit" in result.error_message.lower()
+        assert (
+            "patch size" in result.error_message.lower() or "limit" in result.error_message.lower()
+        )
 
 
 class TestRiskClassifications:
@@ -811,6 +818,7 @@ class TestRiskClassifications:
 # =============================================================================
 # Platform-Specific Replacement Behavior Tests (Task 14.6)
 # =============================================================================
+
 
 class TestAtomicReplacement:
     """Test atomic file replacement behavior."""
@@ -893,7 +901,7 @@ class TestRollbackFunctionality:
             backup=True,
         )
 
-        result = executor.execute(operation)
+        executor.execute(operation)
 
         # Original content should be preserved
         assert initial_file.read_bytes() == initial_content
@@ -902,6 +910,7 @@ class TestRollbackFunctionality:
 # =============================================================================
 # Preflight Checks Tests
 # =============================================================================
+
 
 class TestPreflightChecks:
     """Test comprehensive preflight validation."""
@@ -955,6 +964,7 @@ class TestPreflightChecks:
 # Hash Utilities Tests
 # =============================================================================
 
+
 class TestHashUtilities:
     """Test hash computation utilities."""
 
@@ -990,6 +1000,7 @@ class TestHashUtilities:
 # Operation ID Generation Tests
 # =============================================================================
 
+
 class TestOperationIdGeneration:
     """Test operation ID generation."""
 
@@ -1010,6 +1021,7 @@ class TestOperationIdGeneration:
 # =============================================================================
 # Operation Limits Validation Tests
 # =============================================================================
+
 
 class TestOperationLimitsValidation:
     """Test operation limits validation."""
@@ -1044,6 +1056,7 @@ class TestOperationLimitsValidation:
 # =============================================================================
 # Integration Tests (Task 14.6)
 # =============================================================================
+
 
 class TestOperationIntegration:
     """Integration tests for complete operation workflows."""
@@ -1126,6 +1139,7 @@ class TestOperationIntegration:
 # Platform-Specific Behavior Tests
 # =============================================================================
 
+
 class TestPlatformSpecificBehavior:
     """Test platform-specific filesystem behavior."""
 
@@ -1147,7 +1161,7 @@ class TestPlatformSpecificBehavior:
 
         # Verify permissions (on Unix-like systems)
         created_file = executor.workspace_root / "perm_test.txt"
-        if os.name != 'nt':  # Skip on Windows
+        if os.name != "nt":  # Skip on Windows
             stat_info = created_file.stat()
             # Check that execute bit is not set
             assert not (stat_info.st_mode & 0o111)

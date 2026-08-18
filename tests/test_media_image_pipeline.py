@@ -82,7 +82,9 @@ def _make_png_with_trns(width: int = 4, height: int = 2) -> bytes:
 
 def _make_gif(width: int = 4, height: int = 2, *, with_transparency: bool = False) -> bytes:
     header = b"GIF89a"
-    logical_screen = struct.pack("<HH", width, height) + bytes([0x80, 0, 0])  # global color table, depth 1
+    logical_screen = struct.pack("<HH", width, height) + bytes(
+        [0x80, 0, 0]
+    )  # global color table, depth 1
     body = header + logical_screen
     if with_transparency:
         body += b"\x21\xf9\x04\x01\x00\x00\x00\x00"
@@ -309,9 +311,7 @@ class TestImageMetadataExtraction:
         assert result.safe_fields.get("camera_make") == "ABC"
 
     def test_jpeg_gps_classified_as_location_privacy(self, tmp_path):
-        data = _make_jpeg_with_exif(
-            8, 8, gps=(37.0, 46.0, "N", 122.0, 25.0, "W")
-        )
+        data = _make_jpeg_with_exif(8, 8, gps=(37.0, 46.0, "N", 122.0, 25.0, "W"))
         path = _write(tmp_path, "geo.jpg", data)
 
         result = extract_image_metadata(path, "image/jpeg", include_privacy_fields=False)
@@ -321,9 +321,7 @@ class TestImageMetadataExtraction:
         assert result.privacy_fields == {}
 
     def test_jpeg_gps_fields_only_populated_when_explicitly_requested(self, tmp_path):
-        data = _make_jpeg_with_exif(
-            8, 8, gps=(37.0, 46.0, "N", 122.0, 25.0, "W")
-        )
+        data = _make_jpeg_with_exif(8, 8, gps=(37.0, 46.0, "N", 122.0, 25.0, "W"))
         path = _write(tmp_path, "geo2.jpg", data)
 
         result = extract_image_metadata(path, "image/jpeg", include_privacy_fields=True)
@@ -351,7 +349,10 @@ class TestImageMetadataRepresentation:
         path = _write(tmp_path, "a.png", data)
 
         rep = build_image_metadata_representation(
-            path, resource_version_id=uuid4(), source_content_hash=_content_hash(data), mime_type="image/png"
+            path,
+            resource_version_id=uuid4(),
+            source_content_hash=_content_hash(data),
+            mime_type="image/png",
         )
 
         assert rep.kind == MediaRepresentationKind.METADATA
@@ -431,11 +432,7 @@ def blob_store(tmp_path) -> BlobStore:
 class TestImageThumbnailPipeline:
     def _script_writing_png(self, width: int = 4, height: int = 4) -> str:
         png_hex = _make_png(width, height, color_type=6).hex()
-        return (
-            "import sys; "
-            f"data = bytes.fromhex('{png_hex}'); "
-            "open(sys.argv[2], 'wb').write(data)"
-        )
+        return f"import sys; data = bytes.fromhex('{png_hex}'); open(sys.argv[2], 'wb').write(data)"
 
     def test_process_stores_thumbnail_blob(self, tmp_path, blob_store):
         source = _write(tmp_path, "source.png", _make_png(64, 64))
@@ -502,7 +499,9 @@ class TestImageThumbnailPipeline:
                 working_dir,
             )
 
-    def test_malformed_input_via_orchestrator_yields_failed_representation(self, tmp_path, blob_store):
+    def test_malformed_input_via_orchestrator_yields_failed_representation(
+        self, tmp_path, blob_store
+    ):
         """Task 5.7: malformed input never crashes the pipeline; it produces FAILED."""
         source = _write(tmp_path, "garbage.png", b"not an image")
         definition = build_thumbnail_pipeline_definition(
@@ -536,9 +535,7 @@ class TestImageThumbnailPipeline:
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
             textual_payload="x",
-            pipeline_fingerprint=_fingerprint(
-                MediaRepresentationKind.OCR_TEXT, PipelineStage.OCR
-            ),
+            pipeline_fingerprint=_fingerprint(MediaRepresentationKind.OCR_TEXT, PipelineStage.OCR),
             producer=ProducerProvenance(
                 producer_type=MediaProducerType.DETERMINISTIC,
                 adapter_name="x",

@@ -47,7 +47,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = [".venv", "build", "dist"]
+extend-exclude = [".venv", "build", "dist", ".claude/worktrees/multimedia-understanding"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "N"]

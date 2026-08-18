@@ -17,6 +17,7 @@ class OllamaSettings(BaseModel):
     host: str = "http://localhost:11434"
     embed_model: str = "bge-m3"
     llm_model: str = "qwen2.5:7b"
+    num_ctx: int = 8_192
     timeout: float = 120.0
 
 
@@ -121,6 +122,7 @@ class WorkspaceSettings(BaseModel):
 class IngestSettings(BaseModel):
     chunk_token_target: int = 512
     chunk_token_overlap: int = 64
+    max_extraction_chars: int = 24_000
     dedup_similarity_threshold: float = 0.92
     include_globs: list[str] = Field(
         default_factory=lambda: [

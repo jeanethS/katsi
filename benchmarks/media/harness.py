@@ -6,12 +6,12 @@ Uses standard library only (resource module) to avoid external dependencies.
 
 from __future__ import annotations
 
+import contextlib
 import resource
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 from benchmarks.media.contracts import (
     BenchmarkRun,
@@ -112,20 +112,24 @@ class BenchmarkHarness:
             )
 
     def _create_test_script(self, adapter: CandidateAdapter, test_data_path: str) -> str:
-        """Create a test script that exercises the adapter."""
+        """Create a test script that exercises the adapter.
+
+        This simulates the resource footprint of running an adapter without
+        importing the adapter's actual package: availability is `probes.py`'s
+        job, not the harness's. Importing `adapter.name` here made every
+        benchmark run fail unless a real package matching the adapter name
+        happened to be installed under that exact import name.
+        """
         return f"""
 import sys
 import time
 
-# Simulate adapter processing
 try:
-    import {adapter.name}
-
-    # Simulate some work
+    # Simulate adapter processing time.
     time.sleep(0.1)
 
-    # Read test data if provided
-    test_data_path = '{test_data_path}'
+    # Read test data if provided.
+    test_data_path = {test_data_path!r}
     if test_data_path:
         with open(test_data_path, 'r') as f:
             data = f.read()
@@ -176,12 +180,10 @@ except Exception as e:
                 return_code=process.returncode or 0,
             )
 
-        except Exception as e:
+        except Exception:
             # Ensure process is terminated
-            try:
+            with contextlib.suppress(Exception):
                 process.kill()
-            except Exception:
-                pass
 
             return ProcessMeasurement(
                 peak_memory_kb=peak_memory_kb,

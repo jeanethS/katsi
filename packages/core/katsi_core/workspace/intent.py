@@ -29,7 +29,7 @@ class IntentService:
                 )
             version = current + 1
             connection.execute(
-                "INSERT INTO workspace_intents VALUES (?, ?, ?, ?) "
+                "INSERT INTO workspace_intents (workspace_id, goal, version, updated_at) VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(workspace_id) DO UPDATE SET goal = excluded.goal, version = excluded.version, updated_at = excluded.updated_at",
                 (str(workspace_id), goal, version, now),
             )

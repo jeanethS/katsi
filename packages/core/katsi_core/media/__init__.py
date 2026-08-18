@@ -56,6 +56,18 @@ from katsi_core.media.contracts import (
     compute_sampling_fingerprint,
     extraction_to_representation,
 )
+from katsi_core.media.governed_operations import (
+    DerivedMediaArtifactExecutor,
+    DerivedMediaOperationError,
+    MaterializedMediaArtifact,
+)
+from katsi_core.media.privacy import (
+    UntrustedMediaEvidence,
+    classify_metadata,
+    redact_sensitive_metadata,
+    render_untrusted_media_prompt,
+    require_sensitive_media_access,
+)
 from katsi_core.media.registry import (
     RepresentationLifecycleManager,
     RepresentationRegistry,
@@ -103,6 +115,14 @@ __all__ = [
     "chunk_to_representation",
     "extraction_to_representation",
     "compute_sampling_fingerprint",
+    "UntrustedMediaEvidence",
+    "classify_metadata",
+    "redact_sensitive_metadata",
+    "render_untrusted_media_prompt",
+    "require_sensitive_media_access",
+    "DerivedMediaArtifactExecutor",
+    "DerivedMediaOperationError",
+    "MaterializedMediaArtifact",
 ]
 
 __version__ = "0.1.0"

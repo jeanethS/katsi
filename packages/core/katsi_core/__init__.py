@@ -1,5 +1,24 @@
 """katsi core package."""
 
+# Re-export key multimedia contracts for convenience
+from katsi_core.media.contracts import (
+    DerivedRepresentation,
+    EvidenceLocatorUnion,
+    ImageRegionLocator,
+    MediaDescriptor,
+    MediaProcessingConfig,
+    MediaRepresentationKind,
+    MediaRepresentationStatus,
+    MediaTypeFamily,
+    PageLocator,
+    SceneLocator,
+    TextRangeLocator,
+    TimeRangeLocator,
+    VideoFrameLocator,
+    WholeResourceLocator,
+    chunk_to_representation,
+    extraction_to_representation,
+)
 from katsi_core.workspace import (
     ActionOutcome,
     AgentIdentity,
@@ -23,26 +42,6 @@ from katsi_core.workspace import (
     Workspace,
     WorkspaceError,
     WorkspaceEvent,
-)
-
-# Re-export key multimedia contracts for convenience
-from katsi_core.media.contracts import (
-    DerivedRepresentation,
-    EvidenceLocatorUnion,
-    ImageRegionLocator,
-    MediaDescriptor,
-    MediaProcessingConfig,
-    MediaRepresentationKind,
-    MediaRepresentationStatus,
-    MediaTypeFamily,
-    PageLocator,
-    SceneLocator,
-    TextRangeLocator,
-    TimeRangeLocator,
-    VideoFrameLocator,
-    WholeResourceLocator,
-    chunk_to_representation,
-    extraction_to_representation,
 )
 
 __version__ = "0.1.0"

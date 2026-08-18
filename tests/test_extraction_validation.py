@@ -11,7 +11,6 @@ The validation, retry, and error states are tested to ensure safety guarantees.
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -195,7 +194,13 @@ class TestInvalidExtractionCannotPublish:
 
         # Setup: Initial valid chunks
         valid_chunks = [
-            Chunk(id="test-file:0", file_id="test-file", ordinal=0, text="valid content", token_count=2)
+            Chunk(
+                id="test-file:0",
+                file_id="test-file",
+                ordinal=0,
+                text="valid content",
+                token_count=2,
+            )
         ]
         project_chunks(file_record, valid_chunks, [[1.0, 0.0, 0.0, 0.0]], vectors)
         assert vectors.count() == 1
@@ -205,7 +210,13 @@ class TestInvalidExtractionCannotPublish:
 
         # Attempt to publish new chunks with errored status
         invalid_chunks = [
-            Chunk(id="test-file:1", file_id="test-file", ordinal=0, text="invalid content", token_count=2)
+            Chunk(
+                id="test-file:1",
+                file_id="test-file",
+                ordinal=0,
+                text="invalid content",
+                token_count=2,
+            )
         ]
 
         # The projection should reject errored resources
@@ -259,9 +270,13 @@ class TestInvalidExtractionCannotPublish:
 
         # Previous relationships should be removed (replace semantics)
         relationships_after = graph.get_direct_relationships("test-file")
-        assert len(relationships_after["entities"]) == 0 and len(relationships_after["topics"]) == 0, "Invalid extraction should not preserve stale relationships"
+        assert (
+            len(relationships_after["entities"]) == 0 and len(relationships_after["topics"]) == 0
+        ), "Invalid extraction should not preserve stale relationships"
 
-    def test_non_current_status_cannot_publish_chunks(self, file_record: FileRecord, projection_stores):
+    def test_non_current_status_cannot_publish_chunks(
+        self, file_record: FileRecord, projection_stores
+    ):
         """Non-current statuses (pending, error, deleted) cannot publish chunks."""
         vectors, graph = projection_stores
 
@@ -302,7 +317,13 @@ class TestInvalidExtractionCannotPublish:
 
         # Attempt to project chunks
         chunks = [
-            Chunk(id="test-file:0", file_id="test-file", ordinal=0, text="failed content", token_count=2)
+            Chunk(
+                id="test-file:0",
+                file_id="test-file",
+                ordinal=0,
+                text="failed content",
+                token_count=2,
+            )
         ]
 
         # Should be rejected due to ERROR status
@@ -371,7 +392,9 @@ class TestExtractionIdempotencyWithInvalidation:
         relationships = graph.get_direct_relationships("test-file")
         assert len(relationships["entities"]) == 0 and len(relationships["topics"]) == 0
 
-    def test_recovery_from_error_state_requires_valid_extraction(self, file_record: FileRecord, projection_stores):
+    def test_recovery_from_error_state_requires_valid_extraction(
+        self, file_record: FileRecord, projection_stores
+    ):
         """Recovery from error requires a new valid extraction."""
         vectors, graph = projection_stores
 
@@ -530,7 +553,9 @@ class TestValidationErrorTerminalState:
         # Exactly 2 attempts, no more
         assert attempts == 2
 
-    def test_terminal_error_prevents_any_publishing(self, file_record: FileRecord, projection_stores):
+    def test_terminal_error_prevents_any_publishing(
+        self, file_record: FileRecord, projection_stores
+    ):
         """Terminal validation error prevents any data from being published."""
         vectors, graph = projection_stores
 
@@ -587,7 +612,10 @@ class TestExtractionSafetyAcrossMultipleResources:
 
         # Project both
         project_chunks(
-            file1, [Chunk(id="file1:0", file_id="file1", ordinal=0, text="invalid", token_count=1)], [], vectors
+            file1,
+            [Chunk(id="file1:0", file_id="file1", ordinal=0, text="invalid", token_count=1)],
+            [],
+            vectors,
         )
         project_chunks(
             file2,

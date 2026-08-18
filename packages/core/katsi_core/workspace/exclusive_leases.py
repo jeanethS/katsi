@@ -267,12 +267,14 @@ class ExclusiveLeaseService:
                 overlap = existing_scope & requested_scope
 
                 if overlap:
-                    conflicts.append({
-                        "lease_id": str(lease_id),
-                        "holder_id": row["holder_id"],
-                        "conflicting_paths": sorted(overlap),
-                        "expires_at": row["expires_at"],
-                    })
+                    conflicts.append(
+                        {
+                            "lease_id": str(lease_id),
+                            "holder_id": row["holder_id"],
+                            "conflicting_paths": sorted(overlap),
+                            "expires_at": row["expires_at"],
+                        }
+                    )
 
         return conflicts
 

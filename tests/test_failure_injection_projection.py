@@ -10,17 +10,14 @@ These tests verify that:
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import uuid4
-from unittest.mock import Mock, patch
-import tempfile
-import shutil
+from unittest.mock import patch
 
 import pytest
 
+from katsi_core.ingest.enrich import apply_extraction, project_chunks
 from katsi_core.models import Chunk, Extraction, FileRecord, IndexStatus
 from katsi_core.store.graph import GraphStore
 from katsi_core.store.vectors import VectorStore
-from katsi_core.ingest.enrich import apply_extraction, project_chunks
 
 
 @pytest.fixture
@@ -52,8 +49,20 @@ def sample_file_record(temp_workspace: Path) -> FileRecord:
 def sample_chunks() -> list[Chunk]:
     """Create sample chunks for testing."""
     return [
-        Chunk(id="test-file:0", file_id="test-file", ordinal=0, text="Test content chunk 0", token_count=4),
-        Chunk(id="test-file:1", file_id="test-file", ordinal=1, text="Test content chunk 1", token_count=4),
+        Chunk(
+            id="test-file:0",
+            file_id="test-file",
+            ordinal=0,
+            text="Test content chunk 0",
+            token_count=4,
+        ),
+        Chunk(
+            id="test-file:1",
+            file_id="test-file",
+            ordinal=1,
+            text="Test content chunk 1",
+            token_count=4,
+        ),
     ]
 
 
@@ -92,10 +101,14 @@ class TestProjectionFailureScenarios:
         assert vectors.count() == 1
 
         # Simulate vector projection failure on second chunk
-        with patch.object(vectors._tbl, 'add', side_effect=RuntimeError("Simulated vector database failure")):
-            with pytest.raises(RuntimeError, match="Simulated vector database failure"):
-                # Try to add both chunks, but fail on the add operation
-                project_chunks(sample_file_record, sample_chunks, sample_embeddings, vectors)
+        with (
+            patch.object(
+                vectors._tbl, "add", side_effect=RuntimeError("Simulated vector database failure")
+            ),
+            pytest.raises(RuntimeError, match="Simulated vector database failure"),
+        ):
+            # Try to add both chunks, but fail on the add operation
+            project_chunks(sample_file_record, sample_chunks, sample_embeddings, vectors)
 
         # Verify authoritative data (file record) is still valid
         assert sample_file_record.id == "test-file"
@@ -113,14 +126,15 @@ class TestProjectionFailureScenarios:
         graph = GraphStore(tmp_path / "graph")
 
         # Simulate graph projection failure
-        original_add_mentions = graph.add_mentions
 
         def failing_add_mentions(file_id, entities, weight=1.0):
             raise RuntimeError("Simulated graph database failure")
 
-        with patch.object(graph, 'add_mentions', side_effect=failing_add_mentions):
-            with pytest.raises(RuntimeError, match="Simulated graph database failure"):
-                apply_extraction(sample_file_record, sample_extraction, graph)
+        with (
+            patch.object(graph, "add_mentions", side_effect=failing_add_mentions),
+            pytest.raises(RuntimeError, match="Simulated graph database failure"),
+        ):
+            apply_extraction(sample_file_record, sample_extraction, graph)
 
         # Verify authoritative data (file record) is still valid
         assert sample_file_record.id == "test-file"
@@ -135,13 +149,15 @@ class TestProjectionFailureScenarios:
         # Create stores
         vectors = VectorStore(tmp_path / "vectors")
         vectors.init_table(embed_dim=4)
-        graph = GraphStore(tmp_path / "graph")
+        GraphStore(tmp_path / "graph")
 
         # Simulate connection failure
-        with patch.object(vectors._tbl, 'add', side_effect=Exception("Connection lost")):
-            with pytest.raises(Exception, match="Connection lost"):
-                chunks = [Chunk(id="test:0", file_id="test", ordinal=0, text="test", token_count=1)]
-                vectors.upsert_chunks(chunks, [[1.0, 0.0, 0.0, 0.0]])
+        with (
+            patch.object(vectors._tbl, "add", side_effect=Exception("Connection lost")),
+            pytest.raises(Exception, match="Connection lost"),
+        ):
+            chunks = [Chunk(id="test:0", file_id="test", ordinal=0, text="test", token_count=1)]
+            vectors.upsert_chunks(chunks, [[1.0, 0.0, 0.0, 0.0]])
 
         # Verify connection recovery - retry should work
         chunks = [Chunk(id="test:0", file_id="test", ordinal=0, text="test", token_count=1)]
@@ -182,7 +198,12 @@ class TestProjectionFailureScenarios:
         assert vectors.count() == 2
 
     def test_simultaneous_projection_failures(
-        self, tmp_path: Path, sample_file_record, sample_chunks, sample_embeddings, sample_extraction
+        self,
+        tmp_path: Path,
+        sample_file_record,
+        sample_chunks,
+        sample_embeddings,
+        sample_extraction,
     ):
         """System handles simultaneous vector and graph projection failures."""
         # Create stores
@@ -191,13 +212,17 @@ class TestProjectionFailureScenarios:
         graph = GraphStore(tmp_path / "graph")
 
         # Simulate both projections failing
-        with patch.object(vectors._tbl, 'add', side_effect=Exception("Vector DB failed")):
-            with pytest.raises(Exception, match="Vector DB failed"):
-                project_chunks(sample_file_record, sample_chunks, sample_embeddings, vectors)
+        with (
+            patch.object(vectors._tbl, "add", side_effect=Exception("Vector DB failed")),
+            pytest.raises(Exception, match="Vector DB failed"),
+        ):
+            project_chunks(sample_file_record, sample_chunks, sample_embeddings, vectors)
 
-        with patch.object(graph, 'add_mentions', side_effect=Exception("Graph DB failed")):
-            with pytest.raises(Exception, match="Graph DB failed"):
-                apply_extraction(sample_file_record, sample_extraction, graph)
+        with (
+            patch.object(graph, "add_mentions", side_effect=Exception("Graph DB failed")),
+            pytest.raises(Exception, match="Graph DB failed"),
+        ):
+            apply_extraction(sample_file_record, sample_extraction, graph)
 
         # Verify authoritative data is preserved
         assert sample_file_record.id == "test-file"
@@ -354,9 +379,11 @@ class TestAuthoritativeEventPreservation:
         deleted_record = sample_file_record.model_copy(update={"status": IndexStatus.ERROR})
 
         # Projection fails during deletion
-        with patch.object(vectors._tbl, 'delete', side_effect=Exception("Delete failed")):
-            with pytest.raises(Exception, match="Delete failed"):
-                vectors.delete_by_file("test-file")
+        with (
+            patch.object(vectors._tbl, "delete", side_effect=Exception("Delete failed")),
+            pytest.raises(Exception, match="Delete failed"),
+        ):
+            vectors.delete_by_file("test-file")
 
         # Verify authoritative error state is preserved
         assert deleted_record.status == IndexStatus.ERROR
@@ -389,12 +416,20 @@ class TestAuthoritativeEventPreservation:
 
         # Projection fails during update
         new_chunks = [
-            Chunk(id="test-file:0", file_id="test-file", ordinal=0, text="Updated content", token_count=2)
+            Chunk(
+                id="test-file:0",
+                file_id="test-file",
+                ordinal=0,
+                text="Updated content",
+                token_count=2,
+            )
         ]
 
-        with patch.object(vectors._tbl, 'delete', side_effect=Exception("Update failed")):
-            with pytest.raises(Exception, match="Update failed"):
-                project_chunks(updated_record, new_chunks, [[1.0, 0.0, 0.0, 0.0]], vectors)
+        with (
+            patch.object(vectors._tbl, "delete", side_effect=Exception("Update failed")),
+            pytest.raises(Exception, match="Update failed"),
+        ):
+            project_chunks(updated_record, new_chunks, [[1.0, 0.0, 0.0, 0.0]], vectors)
 
         # Verify authoritative update state is preserved
         assert updated_record.content_hash == "new-hash"
@@ -414,7 +449,12 @@ class TestSystemResilience:
     """Test overall system resilience to projection failures."""
 
     def test_cascading_failures_handled_gracefully(
-        self, tmp_path: Path, sample_file_record, sample_chunks, sample_embeddings, sample_extraction
+        self,
+        tmp_path: Path,
+        sample_file_record,
+        sample_chunks,
+        sample_embeddings,
+        sample_extraction,
     ):
         """System handles cascading failures gracefully."""
         # Create stores
@@ -432,7 +472,7 @@ class TestSystemResilience:
             return original_add(*args, **kwargs)  # Success on 3rd attempt
 
         # Try vector projection with cascading failures
-        with patch.object(vectors._tbl, 'add', side_effect=mock_failing_operation):
+        with patch.object(vectors._tbl, "add", side_effect=mock_failing_operation):
             for attempt in range(3):
                 try:
                     project_chunks(sample_file_record, sample_chunks, sample_embeddings, vectors)
@@ -461,16 +501,22 @@ class TestSystemResilience:
         file2_record = sample_file_record.model_copy(update={"id": "file2"})
 
         # Add good data for file1
-        file1_chunks = [Chunk(id="file1:0", file_id="file1", ordinal=0, text="file1 content", token_count=2)]
+        file1_chunks = [
+            Chunk(id="file1:0", file_id="file1", ordinal=0, text="file1 content", token_count=2)
+        ]
         project_chunks(file1_record, file1_chunks, [[1.0, 0.0, 0.0, 0.0]], vectors)
         assert vectors.count() == 1
 
         # Try to add data for file2 but fail
-        file2_chunks = [Chunk(id="file2:0", file_id="file2", ordinal=0, text="file2 content", token_count=2)]
+        file2_chunks = [
+            Chunk(id="file2:0", file_id="file2", ordinal=0, text="file2 content", token_count=2)
+        ]
 
-        with patch.object(vectors._tbl, 'add', side_effect=Exception("Partial failure")):
-            with pytest.raises(Exception, match="Partial failure"):
-                project_chunks(file2_record, file2_chunks, [[0.0, 1.0, 0.0, 0.0]], vectors)
+        with (
+            patch.object(vectors._tbl, "add", side_effect=Exception("Partial failure")),
+            pytest.raises(Exception, match="Partial failure"),
+        ):
+            project_chunks(file2_record, file2_chunks, [[0.0, 1.0, 0.0, 0.0]], vectors)
 
         # Verify file1's good data is not corrupted (file2 data failed to add)
         assert vectors.count() == 1

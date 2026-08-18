@@ -2,8 +2,62 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from uuid import uuid4
+
+import pytest
+
+from katsi_core.media.contracts import (
+    DerivedRepresentation,
+    MediaCoverage,
+    MediaProducerType,
+    MediaRepresentationKind,
+    MediaRepresentationStatus,
+    PipelineFingerprint,
+    PipelineStage,
+    ProducerProvenance,
+    WholeResourceLocator,
+)
 from katsi_core.models import Chunk
 from katsi_core.store.vectors import VectorStore
+
+
+def _media_text_representation(
+    kind: MediaRepresentationKind = MediaRepresentationKind.OCR_TEXT,
+) -> DerivedRepresentation:
+    resource_version_id = uuid4()
+    representation_id = uuid4()
+    now = datetime.now(UTC)
+    return DerivedRepresentation(
+        id=representation_id,
+        resource_version_id=resource_version_id,
+        kind=kind,
+        media_type="text/plain",
+        status=MediaRepresentationStatus.CURRENT,
+        created_at=now,
+        updated_at=now,
+        textual_payload="OCR text from a screenshot",
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=resource_version_id,
+                representation_id=representation_id,
+            ),
+        ),
+        coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
+        producer=ProducerProvenance(
+            producer_type=MediaProducerType.DETERMINISTIC,
+            adapter_name="fake-ocr",
+            adapter_version="1",
+        ),
+        pipeline_fingerprint=PipelineFingerprint(
+            source_content_hash="a" * 64,
+            representation_kind=kind,
+            stage=PipelineStage.EXTRACT_TEXT,
+            adapter_name="fake-ocr",
+            adapter_version="1",
+            sampling_fingerprint="b" * 64,
+        ),
+    )
 
 
 def test_init_creates_table(tmp_path):
@@ -26,6 +80,39 @@ def test_count_opens_existing_table(tmp_path):
     reopened = VectorStore(tmp_path / "vectors", "test_chunks")
 
     assert reopened.count() == 1
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        MediaRepresentationKind.OCR_TEXT,
+        MediaRepresentationKind.IMAGE_CAPTION,
+        MediaRepresentationKind.TRANSCRIPT_SEGMENT,
+    ],
+)
+def test_media_text_projection_preserves_representation_and_locator_metadata(tmp_path, kind):
+    vector_store = VectorStore(tmp_path / "vectors", "test_chunks")
+    representation = _media_text_representation(kind)
+
+    vector_store.upsert_media_text([representation], [[1.0, 0.0, 0.0, 0.0]])
+
+    results = vector_store.search_media_text([1.0, 0.0, 0.0, 0.0])
+    assert len(results) == 1
+    result = results[0]
+    assert result.representation_id == representation.id
+    assert result.resource_version_id == representation.resource_version_id
+    assert result.kind is kind
+    assert result.locators[0]["locator_type"] == "whole_resource"
+
+
+def test_media_text_projection_removes_stale_resource_version(tmp_path):
+    vector_store = VectorStore(tmp_path / "vectors", "test_chunks")
+    representation = _media_text_representation()
+    vector_store.upsert_media_text([representation], [[1.0, 0.0, 0.0, 0.0]])
+
+    vector_store.delete_media_by_resource_version(representation.resource_version_id)
+
+    assert vector_store.search_media_text([1.0, 0.0, 0.0, 0.0]) == []
 
 
 def test_upsert_and_search(tmp_path):

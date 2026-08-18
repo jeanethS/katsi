@@ -87,14 +87,14 @@ def test_registry_initialization(registry):
     assert registry is not None
     # Check that schema was created
     with registry._database.connection() as conn:
-        tables = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         table_names = [t[0] for t in tables]
         assert "representations" in table_names
 
 
-def test_register_pending_representation(registry, sample_resource_id, sample_producer, sample_fingerprint):
+def test_register_pending_representation(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test registering a pending representation."""
     representation = DerivedRepresentation(
         id=uuid4(),
@@ -105,10 +105,12 @@ def test_register_pending_representation(registry, sample_resource_id, sample_pr
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         textual_payload="Sample OCR text",  # Required for text representations
-        locators=(WholeResourceLocator(
-            resource_version_id=sample_resource_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=sample_resource_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=False, coverage_fraction=0.0),
         producer=sample_producer,
         pipeline_fingerprint=sample_fingerprint,
@@ -124,7 +126,9 @@ def test_register_pending_representation(registry, sample_resource_id, sample_pr
     assert retrieved.kind == MediaRepresentationKind.OCR_TEXT
 
 
-def test_register_current_representation(registry, sample_resource_id, sample_producer, sample_fingerprint):
+def test_register_current_representation(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test registering a current representation."""
     representation = DerivedRepresentation(
         id=uuid4(),
@@ -135,10 +139,12 @@ def test_register_current_representation(registry, sample_resource_id, sample_pr
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         textual_payload="Sample text content",
-        locators=(WholeResourceLocator(
-            resource_version_id=sample_resource_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=sample_resource_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=sample_producer,
         pipeline_fingerprint=sample_fingerprint,
@@ -153,7 +159,9 @@ def test_register_current_representation(registry, sample_resource_id, sample_pr
     assert retrieved.textual_payload == "Sample text content"
 
 
-def test_get_current_representation(registry, sample_resource_id, sample_producer, sample_fingerprint):
+def test_get_current_representation(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test retrieving the current representation for a resource and kind."""
     # Create multiple representations
     rep1 = DerivedRepresentation(
@@ -165,10 +173,12 @@ def test_get_current_representation(registry, sample_resource_id, sample_produce
         created_at=datetime.now(UTC) - timedelta(hours=2),
         updated_at=datetime.now(UTC) - timedelta(hours=2),
         textual_payload="Old content",
-        locators=(WholeResourceLocator(
-            resource_version_id=sample_resource_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=sample_resource_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=sample_producer,
         pipeline_fingerprint=sample_fingerprint,
@@ -183,10 +193,12 @@ def test_get_current_representation(registry, sample_resource_id, sample_produce
         created_at=datetime.now(UTC) - timedelta(hours=1),
         updated_at=datetime.now(UTC) - timedelta(hours=1),
         textual_payload="Newer content",
-        locators=(WholeResourceLocator(
-            resource_version_id=sample_resource_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=sample_resource_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=sample_producer,
         pipeline_fingerprint=sample_fingerprint,
@@ -197,15 +209,16 @@ def test_get_current_representation(registry, sample_resource_id, sample_produce
 
     # Should get the most recent current representation
     current = registry.get_current_representation(
-        sample_resource_id,
-        MediaRepresentationKind.EXTRACTED_TEXT
+        sample_resource_id, MediaRepresentationKind.EXTRACTED_TEXT
     )
 
     assert current is not None
     assert current.textual_payload == "Newer content"
 
 
-def test_get_representations_by_resource(registry, sample_resource_id, sample_producer, sample_fingerprint):
+def test_get_representations_by_resource(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test retrieving all representations for a resource."""
     # Create representations with different statuses
     statuses = [
@@ -225,17 +238,20 @@ def test_get_representations_by_resource(registry, sample_resource_id, sample_pr
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
             textual_payload="Sample OCR text",  # Required for text representations
-            locators=(WholeResourceLocator(
-                resource_version_id=sample_resource_id,
-                representation_id=uuid4(),
-            ),),
+            locators=(
+                WholeResourceLocator(
+                    resource_version_id=sample_resource_id,
+                    representation_id=uuid4(),
+                ),
+            ),
             coverage=MediaCoverage(is_complete=False, coverage_fraction=0.0),
             producer=sample_producer,
             pipeline_fingerprint=sample_fingerprint,
             error=RepresentationError(
-                error_category="test_error",
-                error_message="Test error message"
-            ) if status == MediaRepresentationStatus.FAILED else None,
+                error_category="test_error", error_message="Test error message"
+            )
+            if status == MediaRepresentationStatus.FAILED
+            else None,
         )
         registry.register_representation(rep, make_current=False)
 
@@ -245,14 +261,15 @@ def test_get_representations_by_resource(registry, sample_resource_id, sample_pr
 
     # Filter by status
     current_reps = registry.get_representations_by_resource(
-        sample_resource_id,
-        MediaRepresentationStatus.CURRENT
+        sample_resource_id, MediaRepresentationStatus.CURRENT
     )
     assert len(current_reps) == 1
     assert current_reps[0].status == MediaRepresentationStatus.CURRENT
 
 
-def test_find_cached_representation(registry, sample_resource_id, sample_producer, sample_fingerprint):
+def test_find_cached_representation(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test finding cached representations by pipeline fingerprint."""
     representation = DerivedRepresentation(
         id=uuid4(),
@@ -263,10 +280,12 @@ def test_find_cached_representation(registry, sample_resource_id, sample_produce
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         textual_payload="Cached content",
-        locators=(WholeResourceLocator(
-            resource_version_id=sample_resource_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=sample_resource_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=sample_producer,
         pipeline_fingerprint=sample_fingerprint,
@@ -276,9 +295,7 @@ def test_find_cached_representation(registry, sample_resource_id, sample_produce
 
     # Find by pipeline fingerprint
     cached = registry.find_cached_representation(
-        sample_resource_id,
-        MediaRepresentationKind.OCR_TEXT,
-        sample_fingerprint
+        sample_resource_id, MediaRepresentationKind.OCR_TEXT, sample_fingerprint
     )
 
     assert cached is not None
@@ -316,10 +333,12 @@ def test_find_cached_representation_with_input_representation_id(
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         textual_payload="Cached content",
-        locators=(WholeResourceLocator(
-            resource_version_id=sample_resource_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=sample_resource_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=sample_producer,
         pipeline_fingerprint=fingerprint_with_input,
@@ -341,7 +360,9 @@ def test_find_cached_representation_with_input_representation_id(
     assert by_pipeline[0].id == representation.id
 
 
-def test_update_representation_status(registry, sample_resource_id, sample_producer, sample_fingerprint):
+def test_update_representation_status(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test updating representation status."""
     # Create a pending representation
     representation = DerivedRepresentation(
@@ -353,10 +374,12 @@ def test_update_representation_status(registry, sample_resource_id, sample_produ
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         textual_payload="Sample OCR text",  # Required for text representations
-        locators=(WholeResourceLocator(
-            resource_version_id=sample_resource_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=sample_resource_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=False, coverage_fraction=0.0),
         producer=sample_producer,
         pipeline_fingerprint=sample_fingerprint,
@@ -366,15 +389,11 @@ def test_update_representation_status(registry, sample_resource_id, sample_produ
 
     # Update to current
     error = RepresentationError(
-        error_category="test_category",
-        error_message="Test error",
-        is_retriable=True
+        error_category="test_category", error_message="Test error", is_retriable=True
     )
 
     registry.update_representation_status(
-        representation.id,
-        MediaRepresentationStatus.FAILED,
-        error
+        representation.id, MediaRepresentationStatus.FAILED, error
     )
 
     # Verify update
@@ -386,7 +405,9 @@ def test_update_representation_status(registry, sample_resource_id, sample_produ
     assert updated.error.is_retriable is True
 
 
-def test_handle_resource_deletion_preserve_historical(registry, sample_resource_id, sample_producer, sample_fingerprint):
+def test_handle_resource_deletion_preserve_historical(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test handling resource deletion while preserving historical data."""
     # Create multiple representations
     representations = []
@@ -400,10 +421,12 @@ def test_handle_resource_deletion_preserve_historical(registry, sample_resource_
             created_at=datetime.now(UTC) - timedelta(hours=i),
             updated_at=datetime.now(UTC) - timedelta(hours=i),
             textual_payload=f"Content {i}",
-            locators=(WholeResourceLocator(
-                resource_version_id=sample_resource_id,
-                representation_id=uuid4(),
-            ),),
+            locators=(
+                WholeResourceLocator(
+                    resource_version_id=sample_resource_id,
+                    representation_id=uuid4(),
+                ),
+            ),
             coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
             producer=sample_producer,
             pipeline_fingerprint=sample_fingerprint,
@@ -420,13 +443,14 @@ def test_handle_resource_deletion_preserve_historical(registry, sample_resource_
 
     # But no current representations should exist
     current = registry.get_current_representation(
-        sample_resource_id,
-        MediaRepresentationKind.OCR_TEXT
+        sample_resource_id, MediaRepresentationKind.OCR_TEXT
     )
     assert current is None
 
 
-def test_handle_resource_deletion_remove_all(registry, sample_resource_id, sample_producer, sample_fingerprint):
+def test_handle_resource_deletion_remove_all(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test handling resource deletion with complete removal."""
     # Create representations
     rep = DerivedRepresentation(
@@ -438,10 +462,12 @@ def test_handle_resource_deletion_remove_all(registry, sample_resource_id, sampl
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         textual_payload="Content",
-        locators=(WholeResourceLocator(
-            resource_version_id=sample_resource_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=sample_resource_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=sample_producer,
         pipeline_fingerprint=sample_fingerprint,
@@ -457,7 +483,9 @@ def test_handle_resource_deletion_remove_all(registry, sample_resource_id, sampl
     assert len(all_reps) == 0
 
 
-def test_lifecycle_manager_transitions(temp_db, sample_resource_id, sample_producer, sample_fingerprint):
+def test_lifecycle_manager_transitions(
+    temp_db, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test lifecycle manager state transitions."""
     registry = RepresentationRegistry(temp_db)
     manager = RepresentationLifecycleManager(registry)
@@ -478,7 +506,7 @@ def test_lifecycle_manager_transitions(temp_db, sample_resource_id, sample_produ
         pending.id,
         textual_payload="Completed content",
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
-        confidence=0.95
+        confidence=0.95,
     )
 
     assert current.status == MediaRepresentationStatus.CURRENT
@@ -486,7 +514,9 @@ def test_lifecycle_manager_transitions(temp_db, sample_resource_id, sample_produ
     assert current.confidence == 0.95
 
 
-def test_lifecycle_manager_partial_transition(temp_db, sample_resource_id, sample_producer, sample_fingerprint):
+def test_lifecycle_manager_partial_transition(
+    temp_db, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test lifecycle manager transition to partial status."""
     registry = RepresentationRegistry(temp_db)
     manager = RepresentationLifecycleManager(registry)
@@ -504,11 +534,9 @@ def test_lifecycle_manager_partial_transition(temp_db, sample_resource_id, sampl
     partial = manager.transition_to_partial(
         pending.id,
         coverage=MediaCoverage(
-            is_complete=False,
-            coverage_fraction=0.7,
-            detail="Processed 70% of audio"
+            is_complete=False, coverage_fraction=0.7, detail="Processed 70% of audio"
         ),
-        textual_payload="Partial transcript"
+        textual_payload="Partial transcript",
     )
 
     assert partial.status == MediaRepresentationStatus.PARTIAL
@@ -516,7 +544,9 @@ def test_lifecycle_manager_partial_transition(temp_db, sample_resource_id, sampl
     assert partial.textual_payload == "Partial transcript"
 
 
-def test_lifecycle_manager_failed_transition(temp_db, sample_resource_id, sample_producer, sample_fingerprint):
+def test_lifecycle_manager_failed_transition(
+    temp_db, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test lifecycle manager transition to failed status."""
     registry = RepresentationRegistry(temp_db)
     manager = RepresentationLifecycleManager(registry)
@@ -532,9 +562,7 @@ def test_lifecycle_manager_failed_transition(temp_db, sample_resource_id, sample
 
     # Transition to failed
     error = RepresentationError(
-        error_category="processing_error",
-        error_message="OCR processing failed",
-        is_retriable=False
+        error_category="processing_error", error_message="OCR processing failed", is_retriable=False
     )
 
     failed = manager.transition_to_failed(pending.id, error)
@@ -545,7 +573,9 @@ def test_lifecycle_manager_failed_transition(temp_db, sample_resource_id, sample
     assert failed.error.is_retriable is False
 
 
-def test_lifecycle_manager_unavailable_transition(temp_db, sample_resource_id, sample_producer, sample_fingerprint):
+def test_lifecycle_manager_unavailable_transition(
+    temp_db, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test lifecycle manager transition to unavailable status."""
     registry = RepresentationRegistry(temp_db)
     manager = RepresentationLifecycleManager(registry)
@@ -563,7 +593,7 @@ def test_lifecycle_manager_unavailable_transition(temp_db, sample_resource_id, s
     error = RepresentationError(
         error_category="unsupported_format",
         error_message="File format is not supported",
-        is_retriable=False
+        is_retriable=False,
     )
 
     unavailable = manager.transition_to_unavailable(pending.id, error)
@@ -573,7 +603,9 @@ def test_lifecycle_manager_unavailable_transition(temp_db, sample_resource_id, s
     assert unavailable.error.error_category == "unsupported_format"
 
 
-def test_invalid_lifecycle_transitions(temp_db, sample_resource_id, sample_producer, sample_fingerprint):
+def test_invalid_lifecycle_transitions(
+    temp_db, sample_resource_id, sample_producer, sample_fingerprint
+):
     """Test that invalid lifecycle transitions raise errors."""
     registry = RepresentationRegistry(temp_db)
     manager = RepresentationLifecycleManager(registry)
@@ -616,10 +648,12 @@ def test_immutable_replacement_preserves_history(
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         textual_payload="first version text",
-        locators=(WholeResourceLocator(
-            resource_version_id=sample_resource_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=sample_resource_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=sample_producer,
         pipeline_fingerprint=sample_fingerprint,
@@ -635,10 +669,12 @@ def test_immutable_replacement_preserves_history(
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         textual_payload="second version text",
-        locators=(WholeResourceLocator(
-            resource_version_id=sample_resource_id,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=sample_resource_id,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=sample_producer,
         pipeline_fingerprint=sample_fingerprint,
@@ -664,9 +700,7 @@ def test_immutable_replacement_preserves_history(
     assert {r.id for r in all_reps} == {first.id, second.id}
 
 
-def test_source_version_provenance_cache_reuse(
-    registry, sample_producer, sample_fingerprint
-):
+def test_source_version_provenance_cache_reuse(registry, sample_producer, sample_fingerprint):
     """Representations tied to different resource versions but sharing a
     pipeline fingerprint (same source content hash, adapter, and policy)
     remain individually addressable by fingerprint, supporting cache reuse
@@ -685,10 +719,12 @@ def test_source_version_provenance_cache_reuse(
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         textual_payload="shared content",
-        locators=(WholeResourceLocator(
-            resource_version_id=version_a,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=version_a,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=sample_producer,
         pipeline_fingerprint=sample_fingerprint,
@@ -704,10 +740,12 @@ def test_source_version_provenance_cache_reuse(
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         textual_payload="shared content",
-        locators=(WholeResourceLocator(
-            resource_version_id=version_b,
-            representation_id=uuid4(),
-        ),),
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=version_b,
+                representation_id=uuid4(),
+            ),
+        ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=sample_producer,
         pipeline_fingerprint=sample_fingerprint,

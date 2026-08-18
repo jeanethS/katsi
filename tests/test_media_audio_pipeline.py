@@ -137,7 +137,9 @@ class TestAudioMetadataExtraction:
         with pytest.raises(AudioMetadataError):
             parse_wav_metadata(wav)
 
-    def test_metadata_pipeline_via_orchestrator(self, resource_version_id, source_content_hash, tmp_path):
+    def test_metadata_pipeline_via_orchestrator(
+        self, resource_version_id, source_content_hash, tmp_path
+    ):
         wav_path = tmp_path / "sample.wav"
         wav_path.write_bytes(_build_wav_bytes(channels=1, sample_rate=16000, num_frames=16000))
 
@@ -209,9 +211,7 @@ class TestAudioDecodePipeline:
         # raw subprocess call of its own.
         script = tmp_path / "fake_ffmpeg.py"
         script.write_text(
-            "import shutil, sys\n"
-            "src, dst = sys.argv[1], sys.argv[2]\n"
-            "shutil.copyfile(src, dst)\n"
+            "import shutil, sys\nsrc, dst = sys.argv[1], sys.argv[2]\nshutil.copyfile(src, dst)\n"
         )
         return build_decode_definition(executable_path=sys.executable).model_copy(
             update={
@@ -476,7 +476,10 @@ class TestTranscriptChunkAssembly:
         fingerprint = self._fingerprint(resource_version_id, source_content_hash)
         segments = [
             TranscriptSegmentData(
-                start_ms=i * 1000, end_ms=(i + 1) * 1000, text=f"word{i}", confidence=0.9,
+                start_ms=i * 1000,
+                end_ms=(i + 1) * 1000,
+                text=f"word{i}",
+                confidence=0.9,
                 segment_kind="speech",
             )
             for i in range(5)
@@ -695,8 +698,15 @@ class TestAudioCacheReuse:
             status=MediaRepresentationStatus.CURRENT,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
-            textual_payload=json.dumps({"container": "wav", "codec": "pcm", "duration_ms": 1000,
-                                         "channels": 1, "sample_rate": 8000}),
+            textual_payload=json.dumps(
+                {
+                    "container": "wav",
+                    "codec": "pcm",
+                    "duration_ms": 1000,
+                    "channels": 1,
+                    "sample_rate": 8000,
+                }
+            ),
             locators=(
                 WholeResourceLocator(
                     resource_version_id=resource_version_id, representation_id=rep_id

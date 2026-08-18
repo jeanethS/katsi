@@ -220,7 +220,9 @@ class MediaDetectorProtocol(ABC):
             return False, f"Unknown software dependency: {dependency.value}"
 
     @classmethod
-    def _check_hardware_requirement(cls, requirement: HardwareRequirement) -> tuple[bool, str | None]:
+    def _check_hardware_requirement(
+        cls, requirement: HardwareRequirement
+    ) -> tuple[bool, str | None]:
         """Check if a hardware requirement is met.
 
         Args:
@@ -400,7 +402,9 @@ class MediaDetectorProtocol(ABC):
         pass
 
     @abstractmethod
-    def validate_file_integrity(self, file_path: Path, content_hash: ContentHash) -> tuple[bool, str | None]:
+    def validate_file_integrity(
+        self, file_path: Path, content_hash: ContentHash
+    ) -> tuple[bool, str | None]:
         """Validate file integrity using content hash.
 
         Args:
@@ -529,7 +533,9 @@ class MediaPipelineProtocol(ABC):
         return MediaDetectorProtocol._check_software_dependency(dependency)
 
     @classmethod
-    def _check_hardware_requirement(cls, requirement: HardwareRequirement) -> tuple[bool, str | None]:
+    def _check_hardware_requirement(
+        cls, requirement: HardwareRequirement
+    ) -> tuple[bool, str | None]:
         """Check if a hardware requirement is met.
 
         Args:
@@ -563,7 +569,10 @@ class MediaPipelineProtocol(ABC):
             if result.returncode == 0:
                 return True, None
             else:
-                return False, f"Probe command failed with exit code {result.returncode}: {result.stderr}"
+                return (
+                    False,
+                    f"Probe command failed with exit code {result.returncode}: {result.stderr}",
+                )
         except subprocess.TimeoutExpired:
             return False, "Probe command timed out"
         except (FileNotFoundError, PermissionError) as e:
@@ -709,7 +718,9 @@ class LazyAdapterLoader:
             self._failed_loads[pipeline_class_path] = error
             return None
 
-    def get_available_detectors(self, detector_class_paths: list[str]) -> list[type[MediaDetectorProtocol]]:
+    def get_available_detectors(
+        self, detector_class_paths: list[str]
+    ) -> list[type[MediaDetectorProtocol]]:
         """Get all available detector classes from a list.
 
         Args:
@@ -730,7 +741,9 @@ class LazyAdapterLoader:
 
         return available_detectors
 
-    def get_available_pipelines(self, pipeline_class_paths: list[str]) -> list[type[MediaPipelineProtocol]]:
+    def get_available_pipelines(
+        self, pipeline_class_paths: list[str]
+    ) -> list[type[MediaPipelineProtocol]]:
         """Get all available pipeline classes from a list.
 
         Args:

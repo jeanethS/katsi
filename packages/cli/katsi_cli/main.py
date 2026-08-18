@@ -6,6 +6,8 @@ import fnmatch
 import json
 import logging
 from pathlib import Path
+from pathlib import Path as PathLib
+from uuid import UUID
 
 import typer
 from rich.console import Console
@@ -21,21 +23,18 @@ from katsi_core.retrieve.context import build_context
 from katsi_core.retrieve.search import search
 from katsi_core.store.graph import GraphStore
 from katsi_core.store.vectors import VectorStore
-from katsi_core.synth import SynthConfigError, build_synthesizer
 from katsi_core.store.workspace_migrations import apply_migrations
 from katsi_core.store.workspace_repository import WorkspaceRepository
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
-from katsi_core.workspace.identity import IdentityService
+from katsi_core.synth import SynthConfigError, build_synthesizer
 from katsi_core.workspace.contracts import (
-    AgentIdentity,
     CapabilityGrant,
     CapabilityOperationClass,
     PortableProjectState,
     RiskClass,
 )
+from katsi_core.workspace.identity import IdentityService
 from katsi_core.workspace.portable_state import PortableStateStore as PortableStateService
-from pathlib import Path as PathLib
-from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +116,7 @@ def index(
     s = svc["settings"]
     if not path.exists():
         console.print(f"[red]error:[/] path not found: {path}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     files = _walk_files(path, s.ingest.include_globs, s.ingest.exclude_globs)
     console.print(f"[bold]indexing[/] {len(files)} file(s) under {path}")
     pipeline = svc["pipeline"]
@@ -345,20 +344,21 @@ def workspace_cmd(
         console.print(table)
     except Exception as e:
         console.print(f"[red]workspace registration failed:[/] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 @app.command(name="export-state")
 def export_state_cmd(
     workspace_id: str = typer.Argument(..., help="Workspace UUID to export state for."),  # noqa: B008
-    output: PathLib = typer.Option(None, "--output", "-o", help="Output file path (default: stdout)."),  # noqa: B008
+    output: PathLib = typer.Option(  # noqa: B008
+        None, "--output", "-o", help="Output file path (default: stdout)."
+    ),
 ) -> None:
     """Export portable project state from a workspace.
 
     Creates a portable state bundle containing workspace intent and metadata
     that can travel with the workspace or be imported elsewhere.
     """
-    from uuid import UUID
     import json
 
     svc = _services()
@@ -382,7 +382,7 @@ def export_state_cmd(
             console.print(json.dumps(state_dict, indent=2))
     except Exception as e:
         console.print(f"[red]state export failed:[/] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 @app.command(name="import-state")
@@ -395,7 +395,6 @@ def import_state_cmd(
     Loads a previously exported portable state bundle and applies it
     to the target workspace.
     """
-    from uuid import UUID
     import json
 
     svc = _services()
@@ -416,7 +415,7 @@ def import_state_cmd(
         console.print(f"[green]state imported into workspace:[/] {workspace_id}")
     except Exception as e:
         console.print(f"[red]state import failed:[/] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 @app.command(name="issue-identity")
@@ -456,10 +455,10 @@ def issue_identity_cmd(
         console.print(f"[white on black]{issued.credential}[/]")
 
         console.print("\n[bold]configure with:[/]")
-        console.print(f"  export KATSI_AGENT_CREDENTIAL=\"{issued.credential}\"")
+        console.print(f'  export KATSI_AGENT_CREDENTIAL="{issued.credential}"')
     except Exception as e:
         console.print(f"[red]identity issuance failed:[/] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 @app.command(name="rotate-credential")
@@ -471,7 +470,6 @@ def rotate_credential_cmd(
     Invalidates all existing credentials and issues a new one.
     The new credential is displayed only once.
     """
-    from uuid import UUID
 
     svc = _services()
 
@@ -490,10 +488,10 @@ def rotate_credential_cmd(
         console.print(f"[white on black]{issued.credential}[/]")
 
         console.print("\n[bold]configure with:[/]")
-        console.print(f"  export KATSI_AGENT_CREDENTIAL=\"{issued.credential}\"")
+        console.print(f'  export KATSI_AGENT_CREDENTIAL="{issued.credential}"')
     except Exception as e:
         console.print(f"[red]credential rotation failed:[/] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 @app.command(name="revoke-identity")
@@ -505,7 +503,6 @@ def revoke_identity_cmd(
     Immediately deactivates the identity and invalidates all credentials.
     This action cannot be undone.
     """
-    from uuid import UUID
 
     svc = _services()
 
@@ -514,7 +511,7 @@ def revoke_identity_cmd(
         console.print(f"[green]identity revoked:[/] {identity_id}")
     except Exception as e:
         console.print(f"[red]identity revocation failed:[/] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 @app.command(name="list-identities")
@@ -528,9 +525,11 @@ def list_identities_cmd() -> None:
     database = svc["workspace_database"]
 
     try:
-        rows = database.connection().execute(
-            "SELECT * FROM agent_identities ORDER BY created_at"
-        ).fetchall()
+        rows = (
+            database.connection()
+            .execute("SELECT * FROM agent_identities ORDER BY created_at")
+            .fetchall()
+        )
 
         if not rows:
             console.print("[yellow]no identities found[/]")
@@ -557,15 +556,20 @@ def list_identities_cmd() -> None:
         console.print(table)
     except Exception as e:
         console.print(f"[red]list identities failed:[/] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 @app.command(name="grant-capability")
 def grant_capability_cmd(
     identity_id: str = typer.Argument(..., help="Identity UUID to grant capability to."),  # noqa: B008
     workspace_id: str = typer.Argument(..., help="Workspace UUID for the capability."),  # noqa: B008
-    operations: str = typer.Argument(..., help="Comma-separated operation classes (read,claim,lease,change_set,governed_execution)."),  # noqa: B008
-    resource_scope: str = typer.Option("", "--scope", help="Comma-separated path scope (default: all paths)."),  # noqa: B008
+    operations: str = typer.Argument(
+        ...,
+        help="Comma-separated operation classes (read,claim,lease,change_set,governed_execution).",
+    ),  # noqa: B008
+    resource_scope: str = typer.Option(
+        "", "--scope", help="Comma-separated path scope (default: all paths)."
+    ),  # noqa: B008
     max_risk: str = typer.Option("low", "--risk", help="Maximum risk level (low, medium, high)."),  # noqa: B008
 ) -> None:
     """Grant a capability to an identity for a workspace.
@@ -573,23 +577,23 @@ def grant_capability_cmd(
     Creates a capability grant allowing specific operations within
     optional resource scope and risk limits.
     """
-    from uuid import UUID, uuid4
     from datetime import UTC, datetime
+    from uuid import uuid4
 
     svc = _services()
 
     try:
         # Parse operation classes
         op_classes = frozenset(
-            CapabilityOperationClass(op.strip())
-            for op in operations.split(",")
-            if op.strip()
+            CapabilityOperationClass(op.strip()) for op in operations.split(",") if op.strip()
         )
 
         # Parse resource scope
-        scope_paths = tuple(
-            p.strip() for p in resource_scope.split(",") if p.strip()
-        ) if resource_scope else ()
+        scope_paths = (
+            tuple(p.strip() for p in resource_scope.split(",") if p.strip())
+            if resource_scope
+            else ()
+        )
 
         # Parse risk class
         risk = RiskClass(max_risk.lower())
@@ -619,7 +623,7 @@ def grant_capability_cmd(
         console.print(table)
     except Exception as e:
         console.print(f"[red]capability grant failed:[/] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 @app.command(name="revoke-grant")
@@ -630,7 +634,6 @@ def revoke_grant_cmd(
 
     Immediately removes the grant. The grant record is preserved for audit.
     """
-    from uuid import UUID
 
     svc = _services()
 
@@ -639,7 +642,7 @@ def revoke_grant_cmd(
         console.print(f"[green]capability grant revoked:[/] {grant_id}")
     except Exception as e:
         console.print(f"[red]grant revocation failed:[/] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 @app.command(name="inspect-capabilities")
@@ -652,7 +655,6 @@ def inspect_capabilities_cmd(
     Shows all active capability grants for the identity, optionally
     filtered to a specific workspace.
     """
-    from uuid import UUID
 
     svc = _services()
     database = svc["workspace_database"]
@@ -698,7 +700,7 @@ def inspect_capabilities_cmd(
         console.print(table)
     except Exception as e:
         console.print(f"[red]capability inspection failed:[/] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 def main() -> None:

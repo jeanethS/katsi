@@ -77,15 +77,15 @@ def test_immutability_guarantees(tmp_path: Path) -> None:
     submitted = service.submit(proposal)
 
     # Test that the Change Set is frozen/immutable
-    with pytest.raises(Exception):  # TypeError for frozen models
+    with pytest.raises(ValueError):
         submitted.title = "Modified title"
 
     # Test that operations tuple is immutable
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         submitted.operations = ()
 
     # Test that dependencies tuple is immutable
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         submitted.dependencies = ()
 
 
@@ -107,7 +107,9 @@ def test_successor_relationships(tmp_path: Path) -> None:
         title="Original",
         idempotency_key="original-v1",
         dependencies=(),
-        operations=(CreateFileOperation(path="original.md", byte_count=5, result_content_hash=HASH),),
+        operations=(
+            CreateFileOperation(path="original.md", byte_count=5, result_content_hash=HASH),
+        ),
         risk=RiskClass.LOW,
         created_at=datetime.now(UTC),
     )
@@ -122,7 +124,9 @@ def test_successor_relationships(tmp_path: Path) -> None:
         title="Successor",
         idempotency_key="successor-v1",
         dependencies=(),
-        operations=(CreateFileOperation(path="successor.md", byte_count=10, result_content_hash=HASH),),
+        operations=(
+            CreateFileOperation(path="successor.md", byte_count=10, result_content_hash=HASH),
+        ),
         risk=RiskClass.LOW,
         created_at=datetime.now(UTC),
     )
@@ -141,7 +145,9 @@ def test_successor_relationships(tmp_path: Path) -> None:
         title="Second Successor",
         idempotency_key="successor-v2",
         dependencies=(),
-        operations=(CreateFileOperation(path="second.md", byte_count=15, result_content_hash=HASH),),
+        operations=(
+            CreateFileOperation(path="second.md", byte_count=15, result_content_hash=HASH),
+        ),
         risk=RiskClass.LOW,
         created_at=datetime.now(UTC),
     )
@@ -166,7 +172,9 @@ def test_idempotency(tmp_path: Path) -> None:
         title="Idempotent proposal",
         idempotency_key="idempotent-key",
         dependencies=(),
-        operations=(CreateFileOperation(path="idempotent.md", byte_count=20, result_content_hash=HASH),),
+        operations=(
+            CreateFileOperation(path="idempotent.md", byte_count=20, result_content_hash=HASH),
+        ),
         risk=RiskClass.LOW,
         created_at=datetime.now(UTC),
     )
@@ -181,7 +189,9 @@ def test_idempotency(tmp_path: Path) -> None:
         title="Different title",
         idempotency_key="idempotent-key",  # Same key
         dependencies=(),
-        operations=(CreateFileOperation(path="different.md", byte_count=99, result_content_hash=HASH),),
+        operations=(
+            CreateFileOperation(path="different.md", byte_count=99, result_content_hash=HASH),
+        ),
         risk=RiskClass.HIGH,  # Different risk
         created_at=datetime.now(UTC),
     )
@@ -264,7 +274,9 @@ def test_stale_and_rejected_terminal_states(tmp_path: Path) -> None:
         title="Terminal states test",
         idempotency_key="terminal-test",
         dependencies=(),
-        operations=(CreateFileOperation(path="terminal.md", byte_count=1, result_content_hash=HASH),),
+        operations=(
+            CreateFileOperation(path="terminal.md", byte_count=1, result_content_hash=HASH),
+        ),
         risk=RiskClass.LOW,
         created_at=datetime.now(UTC),
     )
@@ -284,7 +296,9 @@ def test_stale_and_rejected_terminal_states(tmp_path: Path) -> None:
         title="Rejected proposal",
         idempotency_key="rejected-test",
         dependencies=(),
-        operations=(CreateFileOperation(path="rejected.md", byte_count=1, result_content_hash=HASH),),
+        operations=(
+            CreateFileOperation(path="rejected.md", byte_count=1, result_content_hash=HASH),
+        ),
         risk=RiskClass.LOW,
         created_at=datetime.now(UTC),
     )

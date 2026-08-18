@@ -9,11 +9,10 @@ These tests verify that full rebuilds:
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 
-from katsi_core.models import Chunk, FileRecord, IndexStatus
+from katsi_core.models import Chunk
 from katsi_core.store.graph import GraphStore
 from katsi_core.store.vectors import VectorStore
 
@@ -136,9 +135,7 @@ class TestVectorStoreRebuild:
         best_match = max(results, key=lambda x: x[2])
         assert best_match[0] == "file2:0"
 
-    def test_rebuild_idempotent(
-        self, vector_store: VectorStore, sample_chunks, sample_vectors
-    ):
+    def test_rebuild_idempotent(self, vector_store: VectorStore, sample_chunks, sample_vectors):
         """Rebuild is idempotent and safe to run multiple times."""
         # First rebuild
         vector_store.rebuild_from_authoritative(sample_chunks, sample_vectors)
@@ -162,7 +159,9 @@ class TestVectorStoreRebuild:
     ):
         """Rebuild clears previous data before rebuilding."""
         # Add some initial data using normal upsert
-        initial_chunks = [Chunk(id="old:0", file_id="old", ordinal=0, text="old data", token_count=2)]
+        initial_chunks = [
+            Chunk(id="old:0", file_id="old", ordinal=0, text="old data", token_count=2)
+        ]
         vector_store.upsert_chunks(initial_chunks, [[0.5, 0.5, 0.5, 0.5]])
         assert vector_store.count() == 1
 
@@ -240,7 +239,7 @@ class TestGraphStoreRebuild:
         )
 
         # Verify all File nodes created
-        for file_id, path, name, summary in sample_resources:
+        for file_id, path, _name, _summary in sample_resources:
             file_node = graph_store.get_file(file_id)
             assert file_node is not None
             assert file_node.id == file_id
@@ -396,15 +395,23 @@ class TestGraphStoreRebuild:
         file2_neighbors = graph_store.neighbors("file2")
 
         # Both should share Entity1
-        file1_entity_names = [n.get("name") for n in file1_neighbors if n.get("via") == "mentioned-entity"]
-        file2_entity_names = [n.get("name") for n in file2_neighbors if n.get("via") == "mentioned-entity"]
+        file1_entity_names = [
+            n.get("name") for n in file1_neighbors if n.get("via") == "mentioned-entity"
+        ]
+        file2_entity_names = [
+            n.get("name") for n in file2_neighbors if n.get("via") == "mentioned-entity"
+        ]
 
         assert "Entity1" in file1_entity_names
         assert "Entity1" in file2_entity_names
 
         # Verify shared topic relationship
-        file1_topic_names = [n.get("name") for n in file1_neighbors if n.get("via") == "shared-topic"]
-        file2_topic_names = [n.get("name") for n in file2_neighbors if n.get("via") == "shared-topic"]
+        file1_topic_names = [
+            n.get("name") for n in file1_neighbors if n.get("via") == "shared-topic"
+        ]
+        file2_topic_names = [
+            n.get("name") for n in file2_neighbors if n.get("via") == "shared-topic"
+        ]
 
         assert "topic1" in file1_topic_names
         assert "topic1" in file2_topic_names
@@ -446,7 +453,7 @@ class TestRebuildIntegration:
         # Verify consistency: same files exist in both
         vector_file_ids = set()
         results = vectors.search([1.0, 0.0, 0.0, 0.0], k=10)
-        for chunk_id, file_id, score in results:
+        for _chunk_id, file_id, _score in results:
             vector_file_ids.add(file_id)
 
         # Check that vector file IDs exist in graph

@@ -513,6 +513,10 @@ class DerivedRepresentation(ImmutableModel):
     confidence: float | None = Field(
         default=None, ge=0.0, le=1.0, description="Confidence score where applicable"
     )
+    privacy_classes: frozenset[MediaPrivacyClass] = Field(
+        default_factory=frozenset,
+        description="Sensitive classifications carried by this representation",
+    )
 
     # Provenance
     producer: ProducerProvenance = Field(description="Information about the producer")

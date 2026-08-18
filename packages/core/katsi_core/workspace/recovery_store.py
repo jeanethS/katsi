@@ -6,7 +6,6 @@ import hashlib
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import UUID
 
 from katsi_core.config import RecoverySettings
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
@@ -66,7 +65,9 @@ class RecoveryBlobStore:
                 temp_path.unlink()
 
         # Record metadata in database
-        retained_until = datetime.now(UTC) + timedelta(days=retention_days or self._settings.retention_days)
+        retained_until = datetime.now(UTC) + timedelta(
+            days=retention_days or self._settings.retention_days
+        )
 
         with self._database.connection() as connection, write_transaction(connection):
             connection.execute(
@@ -112,7 +113,7 @@ class RecoveryBlobStore:
         with self._database.connection() as connection:
             row = connection.execute(
                 "SELECT storage_path FROM recovery_blobs WHERE content_hash = ?",
-                (str(content_hash),)
+                (str(content_hash),),
             ).fetchone()
 
             if row is None:
@@ -135,7 +136,7 @@ class RecoveryBlobStore:
         with self._database.connection() as connection, write_transaction(connection):
             expired = connection.execute(
                 "SELECT content_hash, storage_path FROM recovery_blobs WHERE retained_until <= ?",
-                (now.isoformat(),)
+                (now.isoformat(),),
             ).fetchall()
 
             for row in expired:
@@ -158,8 +159,7 @@ class RecoveryBlobStore:
 
             # Remove from database
             connection.execute(
-                "DELETE FROM recovery_blobs WHERE retained_until <= ?",
-                (now.isoformat(),)
+                "DELETE FROM recovery_blobs WHERE retained_until <= ?", (now.isoformat(),)
             )
 
         return removed_count
@@ -167,17 +167,15 @@ class RecoveryBlobStore:
     def get_stats(self) -> dict[str, int]:
         """Get statistics about the recovery blob store."""
         with self._database.connection() as connection:
-            total_blobs = connection.execute(
-                "SELECT COUNT(*) FROM recovery_blobs"
-            ).fetchone()[0]
+            total_blobs = connection.execute("SELECT COUNT(*) FROM recovery_blobs").fetchone()[0]
 
-            total_bytes = connection.execute(
-                "SELECT SUM(byte_count) FROM recovery_blobs"
-            ).fetchone()[0] or 0
+            total_bytes = (
+                connection.execute("SELECT SUM(byte_count) FROM recovery_blobs").fetchone()[0] or 0
+            )
 
             expired_count = connection.execute(
                 "SELECT COUNT(*) FROM recovery_blobs WHERE retained_until <= ?",
-                (datetime.now(UTC).isoformat(),)
+                (datetime.now(UTC).isoformat(),),
             ).fetchone()[0]
 
         return {
@@ -213,8 +211,7 @@ class RecoveryBlobStore:
         """Check if content hash already exists (for deduplication)."""
         with self._database.connection() as connection:
             row = connection.execute(
-                "SELECT * FROM recovery_blobs WHERE content_hash = ?",
-                (content_hash,)
+                "SELECT * FROM recovery_blobs WHERE content_hash = ?", (content_hash,)
             ).fetchone()
 
             if row is None:

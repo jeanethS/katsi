@@ -10,7 +10,6 @@ from uuid import UUID, uuid4
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.workspace.contracts import (
     ChangeSet,
-    ChangeSetId,
     ChangeSetStatus,
     WorkspaceEvent,
     WorkspaceEventKind,
@@ -91,8 +90,12 @@ class StalenessService:
                     sequence=event_row["sequence"],
                     kind=WorkspaceEventKind(event_row["kind"]),
                     occurred_at=datetime.fromisoformat(event_row["occurred_at"]),
-                    resource_id=UUID(event_row["resource_id"]) if event_row["resource_id"] else None,
-                    correlation_id=UUID(event_row["correlation_id"]) if event_row["correlation_id"] else None,
+                    resource_id=UUID(event_row["resource_id"])
+                    if event_row["resource_id"]
+                    else None,
+                    correlation_id=UUID(event_row["correlation_id"])
+                    if event_row["correlation_id"]
+                    else None,
                     detail=json.loads(event_row["detail_json"]),
                 )
 
@@ -113,9 +116,7 @@ class StalenessService:
 
         return tuple(triggers)
 
-    def mark_stale_if_needed(
-        self, change_set_id: UUID, triggering_event_id: UUID
-    ) -> bool:
+    def mark_stale_if_needed(self, change_set_id: UUID, triggering_event_id: UUID) -> bool:
         """
         Mark a Change Set as stale if a triggering event occurred.
         Returns True if the Change Set was marked stale.
@@ -145,7 +146,9 @@ class StalenessService:
                 kind=WorkspaceEventKind(event_row["kind"]),
                 occurred_at=datetime.fromisoformat(event_row["occurred_at"]),
                 resource_id=UUID(event_row["resource_id"]) if event_row["resource_id"] else None,
-                correlation_id=UUID(event_row["correlation_id"]) if event_row["correlation_id"] else None,
+                correlation_id=UUID(event_row["correlation_id"])
+                if event_row["correlation_id"]
+                else None,
                 detail=json.loads(event_row["detail_json"]),
             )
 
@@ -229,24 +232,23 @@ class StalenessService:
                 return True
 
             # Check for events that affect dependent paths
-            if event.kind in (
-                WorkspaceEventKind.RESOURCE_CREATED,
-                WorkspaceEventKind.RESOURCE_UPDATED,
-                WorkspaceEventKind.RESOURCE_DELETED,
-                WorkspaceEventKind.RESOURCE_MOVED,
+            if (
+                event.kind
+                in (
+                    WorkspaceEventKind.RESOURCE_CREATED,
+                    WorkspaceEventKind.RESOURCE_UPDATED,
+                    WorkspaceEventKind.RESOURCE_DELETED,
+                    WorkspaceEventKind.RESOURCE_MOVED,
+                )
+                and event.resource_id
+                and self._is_resource_in_dependency_graph(
+                    event.resource_id, change_set, event.workspace_id
+                )
             ):
-                if event.resource_id:
-                    # Check if this event's resource is in our dependency graph
-                    if self._is_resource_in_dependency_graph(
-                        event.resource_id, change_set, event.workspace_id
-                    ):
-                        return True
+                return True
 
         # External changes are always relevant
-        if event.kind == WorkspaceEventKind.EXTERNAL_CHANGE:
-            return True
-
-        return False
+        return event.kind == WorkspaceEventKind.EXTERNAL_CHANGE
 
     def _is_resource_in_dependency_graph(
         self, resource_id: UUID, change_set: ChangeSet, workspace_id: UUID
@@ -279,7 +281,10 @@ class StalenessService:
                     return True
                 if hasattr(operation, "source_path") and operation.source_path == resource_path:
                     return True
-                if hasattr(operation, "destination_path") and operation.destination_path == resource_path:
+                if (
+                    hasattr(operation, "destination_path")
+                    and operation.destination_path == resource_path
+                ):
                     return True
 
         return False
@@ -309,9 +314,7 @@ class StalenessService:
 
             return row["sequence"]
 
-    def _record_staleness_trigger(
-        self, change_set_id: UUID, triggering_event_id: UUID
-    ) -> None:
+    def _record_staleness_trigger(self, change_set_id: UUID, triggering_event_id: UUID) -> None:
         """Record a staleness trigger for a Change Set."""
         with self._database.connection() as connection:
             # Create table if it doesn't exist (this should be in migrations)

@@ -18,7 +18,7 @@
 
 ## 3. Media Detection and Pipeline Registry
 
-- [ ] 3.1 Benchmark candidate local detectors, OCR, transcription, caption, scene-detection, and visual-embedding adapters on supported platforms and record selected defaults in the design/configuration.
+- [x] 3.1 Benchmark candidate local detectors, OCR, transcription, caption, scene-detection, and visual-embedding adapters on supported platforms and record selected defaults in the design/configuration.
 - [x] 3.2 Define detector and media-pipeline protocols in core with lazy optional-adapter loading and availability probes.
 - [x] 3.3 Implement content-signature/container detection with extension mismatch reporting, deterministic metadata, and unsupported/encrypted/malformed states.
 - [x] 3.4 Implement the owner-configured pipeline registry with accepted inputs, produced representations, fixed executable/model identity, environment policy, and resource budgets.
@@ -80,56 +80,56 @@
 
 ## 9. Modality-Aware Vector and Graph Projections
 
-- [ ] 9.1 Extend text projection to index OCR, captions, and transcript chunks with representation and locator metadata.
-- [ ] 9.2 Implement separate visual vector tables/indexes keyed by compatible embedding-space fingerprint and dimension.
-- [ ] 9.3 Add query routing for text-to-text, configured cross-modal text-to-visual, and capability-checked image-to-visual searches.
-- [ ] 9.4 Implement per-space score calibration and resource-level fusion with explicit modality/evidence contributions.
-- [ ] 9.5 Extend graph projection to relate resources, representations, pages, scenes, keyframes, transcript segments, entities, topics, and Claim evidence.
-- [ ] 9.6 Implement replacement/removal of current media projections when source or representation versions change.
-- [ ] 9.7 Add tests proving incompatible embeddings are never compared directly and projection rebuild reuses cached representations.
+- [x] 9.1 Extend text projection to index OCR, captions, and transcript chunks with representation and locator metadata.
+- [x] 9.2 Implement separate visual vector tables/indexes keyed by compatible embedding-space fingerprint and dimension.
+- [x] 9.3 Add query routing for text-to-text, configured cross-modal text-to-visual, and capability-checked image-to-visual searches.
+- [x] 9.4 Implement per-space score calibration and resource-level fusion with explicit modality/evidence contributions.
+- [x] 9.5 Extend graph projection to relate resources, representations, pages, scenes, keyframes, transcript segments, entities, topics, and Claim evidence.
+- [x] 9.6 Implement replacement/removal of current media projections when source or representation versions change.
+- [x] 9.7 Add tests proving incompatible embeddings are never compared directly and projection rebuild reuses cached representations.
 
 ## 10. Media-Aware Search, Context, and Claims
 
-- [ ] 10.1 Extend search hits with resource id, representation kind/status, Evidence Locator, coverage, provenance, and per-signal relevance evidence.
-- [ ] 10.2 Group representation hits by source resource and prevent one long recording or video from monopolizing the result budget.
-- [ ] 10.3 Extend context assembly with bounded OCR/caption/transcript previews, page/time/region citations, and optional small thumbnail references.
-- [ ] 10.4 Exclude complete transcripts, full-resolution images, base64 media, and raw media bytes from default context bundles.
-- [ ] 10.5 Add capability-checked operations for retrieving a cited preview or opening the original resource separately.
-- [ ] 10.6 Allow Claims to cite representation-plus-locator evidence and invalidate verification when the source or representation becomes non-current.
-- [ ] 10.7 Add MCP contract tests for image, scan, audio, and video results under strict token/media budgets.
+- [x] 10.1 Extend search hits with resource id, representation kind/status, Evidence Locator, coverage, provenance, and per-signal relevance evidence.
+- [x] 10.2 Group representation hits by source resource and prevent one long recording or video from monopolizing the result budget.
+- [x] 10.3 Extend context assembly with bounded OCR/caption/transcript previews, page/time/region citations, and optional small thumbnail references.
+- [x] 10.4 Exclude complete transcripts, full-resolution images, base64 media, and raw media bytes from default context bundles.
+- [x] 10.5 Add capability-checked operations for retrieving a cited preview or opening the original resource separately.
+- [x] 10.6 Allow Claims to cite representation-plus-locator evidence and invalidate verification when the source or representation becomes non-current.
+- [x] 10.7 Add MCP contract tests for image, scan, audio, and video results under strict token/media budgets.
 
 ## 11. Privacy and Evidence Boundaries
 
-- [ ] 11.1 Add configurable sensitive metadata classifications for location and biometric-like media outputs.
-- [ ] 11.2 Require matching Capability Grants before sensitive metadata can enter Workspace Briefs, search previews, or remote-capable surfaces.
-- [ ] 11.3 Mark OCR, captions, transcripts, subtitles, filenames, and metadata as untrusted evidence that cannot select pipelines, change intent, or authorize actions.
-- [ ] 11.4 Ensure prompts and adapter contracts delimit media-derived content as data and never execute instructions extracted from media.
-- [ ] 11.5 Prohibit face identity, voice identity, emotion inference, and remote upload in the initial pipeline catalog.
-- [ ] 11.6 Add tests for EXIF location redaction, prompt injection in OCR/transcripts, unauthorized preview access, and network-call denial.
+- [x] 11.1 Add configurable sensitive metadata classifications for location and biometric-like media outputs.
+- [x] 11.2 Require matching Capability Grants before sensitive metadata can enter Workspace Briefs, search previews, or remote-capable surfaces.
+- [x] 11.3 Mark OCR, captions, transcripts, subtitles, filenames, and metadata as untrusted evidence that cannot select pipelines, change intent, or authorize actions.
+- [x] 11.4 Ensure prompts and adapter contracts delimit media-derived content as data and never execute instructions extracted from media.
+- [x] 11.5 Prohibit face identity, voice identity, emotion inference, and remote upload in the initial pipeline catalog.
+- [x] 11.6 Add tests for EXIF location redaction, prompt injection in OCR/transcripts, unauthorized preview access, and network-call denial.
 
 ## 12. Governed Derived-Media Operations
 
-- [ ] 12.1 Add strict Change Set operation variants for thumbnail generation, transcript/OCR export, keyframe export, proxy generation, representation export, and exact-hash derived-artifact replacement.
-- [ ] 12.2 Require every operation to reference a registered pipeline, immutable source version, expected output media type, limits, and source relationship.
-- [ ] 12.3 Stage and validate output hash/media descriptor before committing a new derived workspace artifact.
-- [ ] 12.4 Journal source, pipeline fingerprint, output, verification, and rollback evidence through the governed executor.
-- [ ] 12.5 Reject in-place lossy transcoding, metadata stripping of originals, destructive original edits, publishing, uploading, and arbitrary processing commands.
-- [ ] 12.6 Add idempotency, rollback, failure-injection, and original-hash-preservation tests for every derived-media operation.
+- [x] 12.1 Add strict Change Set operation variants for thumbnail generation, transcript/OCR export, keyframe export, proxy generation, representation export, and exact-hash derived-artifact replacement.
+- [x] 12.2 Require every operation to reference a registered pipeline, immutable source version, expected output media type, limits, and source relationship.
+- [x] 12.3 Stage and validate output hash/media descriptor before committing a new derived workspace artifact.
+- [x] 12.4 Journal source, pipeline fingerprint, output, verification, and rollback evidence through the governed executor.
+- [x] 12.5 Reject in-place lossy transcoding, metadata stripping of originals, destructive original edits, publishing, uploading, and arbitrary processing commands.
+- [x] 12.6 Add idempotency, rollback, failure-injection, and original-hash-preservation tests for every derived-media operation.
 
 ## 13. Migration and Compatibility
 
-- [ ] 13.1 Import existing extracted text and chunks as text representations with migration provenance and no changed retrieval behavior.
-- [ ] 13.2 Add configured media include patterns only when their required detector/pipeline availability probes pass.
-- [ ] 13.3 Reconcile existing media files into metadata/unavailable states before enabling expensive semantic stages.
-- [ ] 13.4 Preserve text-only installation and startup when no optional media extras are installed.
-- [ ] 13.5 Implement feature-level rollback that disables media pipelines and visual indexes without deleting representation manifests or blobs.
-- [ ] 13.6 Add migration tests proving old binaries ignore but do not destroy new private representation state.
+- [x] 13.1 Import existing extracted text and chunks as text representations with migration provenance and no changed retrieval behavior.
+- [x] 13.2 Add configured media include patterns only when their required detector/pipeline availability probes pass.
+- [x] 13.3 Reconcile existing media files into metadata/unavailable states before enabling expensive semantic stages.
+- [x] 13.4 Preserve text-only installation and startup when no optional media extras are installed.
+- [x] 13.5 Implement feature-level rollback that disables media pipelines and visual indexes without deleting representation manifests or blobs.
+- [x] 13.6 Add migration tests proving old binaries ignore but do not destroy new private representation state.
 
 ## 14. Dogfood, Benchmarks, and Documentation
 
-- [ ] 14.1 Build a small licensed fixture corpus covering screenshots, diagrams, scans, speech, multi-speaker audio, slides, silent video, and speech-plus-visual video.
+- [x] 14.1 Build a small licensed fixture corpus covering screenshots, diagrams, scans, speech, multi-speaker audio, slides, silent video, and speech-plus-visual video.
 - [ ] 14.2 Benchmark selected local adapters for accuracy, locator quality, latency, peak memory, disk use, and hardware fallback.
-- [ ] 14.3 Measure representation reuse, partial coverage, per-modality retrieval quality, score calibration, and context cost.
-- [ ] 14.4 Dogfood a cross-modal Claim that cites an image region, PDF page, audio interval, and video keyframe from the Katsi workspace.
-- [ ] 14.5 Update README, configuration examples, optional dependency instructions, privacy documentation, MCP result contracts, and media troubleshooting guide.
-- [ ] 14.6 Run `uv run pytest`, `uv run ruff check .`, and `uv run ruff format --check .` and resolve every failure before enabling each modality by default.
+- [x] 14.3 Measure representation reuse, partial coverage, per-modality retrieval quality, score calibration, and context cost.
+- [x] 14.4 Dogfood a cross-modal Claim that cites an image region, PDF page, audio interval, and video keyframe from the Katsi workspace.
+- [x] 14.5 Update README, configuration examples, optional dependency instructions, privacy documentation, MCP result contracts, and media troubleshooting guide.
+- [x] 14.6 Run `uv run pytest`, `uv run ruff check .`, and `uv run ruff format --check .` and resolve every failure before enabling each modality by default.

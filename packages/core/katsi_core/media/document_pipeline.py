@@ -431,9 +431,11 @@ class PdfPageRenderPipeline(MediaPipelineProtocol):
 
         rendered = sorted(
             working_directory.glob("page-*.png"),
-            key=lambda p: int(_RENDERED_PAGE_RE.search(p.name).group(1))  # type: ignore[union-attr]
-            if _RENDERED_PAGE_RE.search(p.name)
-            else 0,
+            key=lambda p: (
+                int(_RENDERED_PAGE_RE.search(p.name).group(1))  # type: ignore[union-attr]
+                if _RENDERED_PAGE_RE.search(p.name)
+                else 0
+            ),
         )
         if not rendered:
             raise RuntimeError("Page renderer produced no output pages")
@@ -871,9 +873,7 @@ class DocumentUnderstandingPipeline:
         unpack_dir.mkdir(parents=True, exist_ok=True)
         all_pages = _unpack_rendered_pages(bundle_bytes, unpack_dir)
         pages_needing_ocr = {
-            page: path
-            for page, path in all_pages.items()
-            if page in sufficiency.image_only_pages
+            page: path for page, path in all_pages.items() if page in sufficiency.image_only_pages
         }
 
         coordinator = DocumentOcrCoordinator(self.registry)

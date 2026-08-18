@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from katsi_core.config import LeaseSettings
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.store.workspace_transactions import write_transaction
+from katsi_core.workspace.authorization import AuthorizationService
 from katsi_core.workspace.contracts import (
     AgentIdentityId,
     CapabilityOperationClass,
@@ -18,7 +19,6 @@ from katsi_core.workspace.contracts import (
     WorkLeaseStatus,
     WorkspaceId,
 )
-from katsi_core.workspace.authorization import AuthorizationService
 from katsi_core.workspace.errors import AuthorizationDeniedError, ConflictError
 from katsi_core.workspace.identity import IdentityService
 
@@ -31,7 +31,11 @@ class WorkLeaseService:
     """Creates visible, time-bounded advisory leases for active agent work."""
 
     def __init__(
-        self, database: WorkspaceSQLite, identities: IdentityService, settings: LeaseSettings, authorization: AuthorizationService | None = None
+        self,
+        database: WorkspaceSQLite,
+        identities: IdentityService,
+        settings: LeaseSettings,
+        authorization: AuthorizationService | None = None,
     ) -> None:
         self._database = database
         self._identities = identities
@@ -152,7 +156,9 @@ class WorkLeaseService:
         if identity is None or not identity.active:
             raise AuthorizationDeniedError("identity is not active")
 
-    def _require_lease_capability(self, identity_id: AgentIdentityId, workspace_id: WorkspaceId) -> None:
+    def _require_lease_capability(
+        self, identity_id: AgentIdentityId, workspace_id: WorkspaceId
+    ) -> None:
         """Require that the actor has LEASE capability for the workspace.
 
         This checks:
@@ -195,9 +201,7 @@ class WorkLeaseService:
 
         # Verify LEASE operation class is in the grant
         if CapabilityOperationClass.LEASE not in grant.operation_classes:
-            raise AuthorizationDeniedError(
-                "LEASE operation class not included in capability grant"
-            )
+            raise AuthorizationDeniedError("LEASE operation class not included in capability grant")
 
     @staticmethod
     def _from_row(row: object) -> WorkLease:

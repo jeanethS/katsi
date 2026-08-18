@@ -15,7 +15,6 @@ from katsi_core.workspace.contracts import (
     CapabilityOperationClass,
     ChangeSet,
     ChangeSetId,
-    ChangeSetStatus,
     Operation,
     RelativePath,
     RiskClass,
@@ -23,7 +22,6 @@ from katsi_core.workspace.contracts import (
     YoloAuthorization,
     YoloMode,
     YoloModeStatus,
-    YoloSuspensionEvent,
 )
 from katsi_core.workspace.errors import AuthorizationDeniedError
 
@@ -82,9 +80,7 @@ class YoloService:
         # Check for existing active mode
         existing = self._get_active_mode(workspace_id, agent_identity_id)
         if existing is not None:
-            raise AuthorizationDeniedError(
-                f"Agent already has active YOLO mode: {existing.id}"
-            )
+            raise AuthorizationDeniedError(f"Agent already has active YOLO mode: {existing.id}")
 
         yolo_mode = YoloMode(
             id=uuid4(),
@@ -156,7 +152,13 @@ class YoloService:
                 """UPDATE yolo_modes
                    SET status = ?, revoked_at = ?, updated_at = ?
                    WHERE id = ? AND status = ?""",
-                (YoloModeStatus.REVOKED.value, now, now, str(yolo_mode.id), YoloModeStatus.ACTIVE.value),
+                (
+                    YoloModeStatus.REVOKED.value,
+                    now,
+                    now,
+                    str(yolo_mode.id),
+                    YoloModeStatus.ACTIVE.value,
+                ),
             )
 
         updated = self.get(yolo_mode.id)
@@ -182,7 +184,12 @@ class YoloService:
                 """UPDATE yolo_modes
                    SET status = ?, suspended_at = ?, updated_at = ?
                    WHERE id = ?""",
-                (YoloModeStatus.SUSPENDED.value, now.isoformat(), now.isoformat(), str(yolo_mode_id)),
+                (
+                    YoloModeStatus.SUSPENDED.value,
+                    now.isoformat(),
+                    now.isoformat(),
+                    str(yolo_mode_id),
+                ),
             )
 
             # Record suspension event
@@ -291,9 +298,7 @@ class YoloService:
             )
         return auth
 
-    def get_authorization_history(
-        self, yolo_mode_id: UUID
-    ) -> tuple[YoloAuthorization, ...]:
+    def get_authorization_history(self, yolo_mode_id: UUID) -> tuple[YoloAuthorization, ...]:
         """Get authorization history for a YOLO mode."""
         with self._database.connection() as connection:
             rows = connection.execute(
@@ -369,8 +374,12 @@ class YoloService:
             allow_reversible_organization=bool(row["allow_reversible_organization"]),
             require_owner_approval_for_originals=bool(row["require_owner_approval_for_originals"]),
             status=YoloModeStatus(row["status"]),
-            activated_at=datetime.fromisoformat(row["activated_at"]) if row["activated_at"] else None,
-            suspended_at=datetime.fromisoformat(row["suspended_at"]) if row["suspended_at"] else None,
+            activated_at=datetime.fromisoformat(row["activated_at"])
+            if row["activated_at"]
+            else None,
+            suspended_at=datetime.fromisoformat(row["suspended_at"])
+            if row["suspended_at"]
+            else None,
             revoked_at=datetime.fromisoformat(row["revoked_at"]) if row["revoked_at"] else None,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
@@ -393,9 +402,7 @@ class YoloService:
         # Derived artifacts are always allowed if policy permits
         if operation_kind == "replace_derived_artifact":
             if yolo_mode.allow_derived_artifacts:
-                return YoloService._PolicyCheck(
-                    allowed=True, rule="allow_derived_artifacts"
-                )
+                return YoloService._PolicyCheck(allowed=True, rule="allow_derived_artifacts")
             return YoloService._PolicyCheck(
                 allowed=False,
                 reason="Derived artifacts not allowed by YOLO policy",
@@ -404,9 +411,7 @@ class YoloService:
         # Reversible organization operations
         if operation_kind in ("move_file", "copy_file", "create_directory"):
             if yolo_mode.allow_reversible_organization:
-                return YoloService._PolicyCheck(
-                    allowed=True, rule="allow_reversible_organization"
-                )
+                return YoloService._PolicyCheck(allowed=True, rule="allow_reversible_organization")
             return YoloService._PolicyCheck(
                 allowed=False,
                 reason="Reversible organization not allowed by YOLO policy",
@@ -426,16 +431,12 @@ class YoloService:
                     allowed=False,
                     reason="Original modifications not allowed under YOLO policy",
                 )
-            return YoloService._PolicyCheck(
-                allowed=True, rule="allow_original_modifications"
-            )
+            return YoloService._PolicyCheck(allowed=True, rule="allow_original_modifications")
 
         # Quarantine and restore operations (reversible)
         if operation_kind in ("quarantine_file", "restore_quarantined_file"):
             if yolo_mode.allow_reversible_organization:
-                return YoloService._PolicyCheck(
-                    allowed=True, rule="allow_reversible_operations"
-                )
+                return YoloService._PolicyCheck(allowed=True, rule="allow_reversible_operations")
             return YoloService._PolicyCheck(
                 allowed=False,
                 reason="Quarantine operations not allowed by YOLO policy",

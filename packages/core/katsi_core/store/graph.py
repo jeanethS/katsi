@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from uuid import UUID
 
 import kuzu
 
+from katsi_core.media.contracts import (
+    DerivedRepresentation,
+    MediaRepresentationKind,
+    MediaRepresentationStatus,
+)
 from katsi_core.models import FileRecord, IndexStatus
 
 
@@ -49,6 +55,50 @@ class GraphStore:
         )
         self._conn.execute(
             "CREATE REL TABLE IF NOT EXISTS DUPLICATE_OF(FROM File TO File, similarity DOUBLE)"
+        )
+        self._conn.execute(
+            "CREATE NODE TABLE IF NOT EXISTS MediaResourceVersion(id STRING, PRIMARY KEY(id))"
+        )
+        self._conn.execute(
+            "CREATE NODE TABLE IF NOT EXISTS MediaRepresentation("
+            "id STRING, kind STRING, status STRING, coverage DOUBLE, PRIMARY KEY(id))"
+        )
+        self._conn.execute(
+            "CREATE NODE TABLE IF NOT EXISTS MediaPage(id STRING, number INT64, PRIMARY KEY(id))"
+        )
+        self._conn.execute("CREATE NODE TABLE IF NOT EXISTS MediaScene(id STRING, PRIMARY KEY(id))")
+        self._conn.execute(
+            "CREATE NODE TABLE IF NOT EXISTS MediaKeyframe(id STRING, PRIMARY KEY(id))"
+        )
+        self._conn.execute(
+            "CREATE NODE TABLE IF NOT EXISTS TranscriptSegment(id STRING, PRIMARY KEY(id))"
+        )
+        self._conn.execute(
+            "CREATE NODE TABLE IF NOT EXISTS ClaimEvidenceNode(id STRING, PRIMARY KEY(id))"
+        )
+        self._conn.execute(
+            "CREATE REL TABLE IF NOT EXISTS HAS_REPRESENTATION(FROM MediaResourceVersion TO MediaRepresentation)"
+        )
+        self._conn.execute(
+            "CREATE REL TABLE IF NOT EXISTS HAS_PAGE(FROM MediaResourceVersion TO MediaPage)"
+        )
+        self._conn.execute(
+            "CREATE REL TABLE IF NOT EXISTS HAS_SCENE(FROM MediaResourceVersion TO MediaScene)"
+        )
+        self._conn.execute(
+            "CREATE REL TABLE IF NOT EXISTS HAS_KEYFRAME(FROM MediaResourceVersion TO MediaKeyframe)"
+        )
+        self._conn.execute(
+            "CREATE REL TABLE IF NOT EXISTS HAS_TRANSCRIPT_SEGMENT(FROM MediaResourceVersion TO TranscriptSegment)"
+        )
+        self._conn.execute(
+            "CREATE REL TABLE IF NOT EXISTS EVIDENCES(FROM MediaRepresentation TO ClaimEvidenceNode)"
+        )
+        self._conn.execute(
+            "CREATE REL TABLE IF NOT EXISTS DESCRIBES_ENTITY(FROM MediaRepresentation TO Entity)"
+        )
+        self._conn.execute(
+            "CREATE REL TABLE IF NOT EXISTS ABOUT_MEDIA(FROM MediaRepresentation TO Topic)"
         )
 
     def upsert_file(self, file: FileRecord) -> None:
@@ -295,11 +345,13 @@ class GraphStore:
         )
         while r.has_next():
             row = r.get_next()
-            entities.append({
-                "name": _unwrap(row[0]),
-                "kind": _unwrap(row[1]),
-                "weight": _unwrap(row[2]),
-            })
+            entities.append(
+                {
+                    "name": _unwrap(row[0]),
+                    "kind": _unwrap(row[1]),
+                    "weight": _unwrap(row[2]),
+                }
+            )
 
         # Get topics this file is about
         r = self._conn.execute(
@@ -367,6 +419,110 @@ class GraphStore:
         self._conn.execute(
             "MATCH (f:File {id: $id}) DETACH DELETE f",
             {"id": file_id},
+        )
+
+    def project_media_representations(self, representations: list[DerivedRepresentation]) -> None:
+        """Replace current graph projection from immutable media representations.
+
+        The registry remains authoritative: this only materializes searchable
+        CURRENT/PARTIAL representations and their locator-backed structure.
+        """
+        by_resource: dict[UUID, list[DerivedRepresentation]] = {}
+        for item in representations:
+            by_resource.setdefault(item.resource_version_id, []).append(item)
+        for resource_id, items in by_resource.items():
+            self.remove_media_resource_projection(resource_id)
+            self._conn.execute("MERGE (r:MediaResourceVersion {id: $id})", {"id": str(resource_id)})
+            for item in items:
+                if item.status not in {
+                    MediaRepresentationStatus.CURRENT,
+                    MediaRepresentationStatus.PARTIAL,
+                }:
+                    continue
+                self._conn.execute(
+                    "MERGE (p:MediaRepresentation {id: $id}) "
+                    "SET p.kind = $kind, p.status = $status, p.coverage = $coverage",
+                    {
+                        "id": str(item.id),
+                        "kind": item.kind.value,
+                        "status": item.status.value,
+                        "coverage": item.coverage.coverage_fraction,
+                    },
+                )
+                self._conn.execute(
+                    "MATCH (r:MediaResourceVersion {id: $resource}), (p:MediaRepresentation {id: $representation}) "
+                    "MERGE (r)-[:HAS_REPRESENTATION]->(p)",
+                    {"resource": str(resource_id), "representation": str(item.id)},
+                )
+                self._project_media_locator(resource_id, item)
+
+    def _project_media_locator(self, resource_id: UUID, item: DerivedRepresentation) -> None:
+        for locator in item.locators:
+            locator_data = locator.model_dump(mode="json")
+            locator_type = locator_data["locator_type"]
+            if locator_type == "page":
+                node_id = f"{item.id}:page:{locator_data['page_number']}"
+                self._conn.execute(
+                    "MERGE (p:MediaPage {id: $id}) SET p.number = $number",
+                    {"id": node_id, "number": locator_data["page_number"]},
+                )
+                self._connect_media_node(resource_id, "MediaPage", node_id, "HAS_PAGE")
+            elif locator_type == "scene":
+                self._connect_media_node(resource_id, "MediaScene", str(item.id), "HAS_SCENE")
+            elif locator_type == "video_frame":
+                self._connect_media_node(resource_id, "MediaKeyframe", str(item.id), "HAS_KEYFRAME")
+            elif item.kind is MediaRepresentationKind.TRANSCRIPT_SEGMENT:
+                self._connect_media_node(
+                    resource_id, "TranscriptSegment", str(item.id), "HAS_TRANSCRIPT_SEGMENT"
+                )
+
+    def _connect_media_node(
+        self, resource_id: UUID, label: str, node_id: str, relation: str
+    ) -> None:
+        self._conn.execute(f"MERGE (n:{label} {{id: $id}})", {"id": node_id})
+        self._conn.execute(
+            f"MATCH (r:MediaResourceVersion {{id: $resource}}), (n:{label} {{id: $id}}) "
+            f"MERGE (r)-[:{relation}]->(n)",
+            {"resource": str(resource_id), "id": node_id},
+        )
+
+    def link_media_representation_entity(
+        self, representation_id: UUID, name: str, kind: str
+    ) -> None:
+        """Add graph-only entity evidence without making it authoritative."""
+        self.upsert_entity(name, kind)
+        self._conn.execute(
+            "MATCH (p:MediaRepresentation {id: $representation}), (e:Entity {name: $name}) "
+            "MERGE (p)-[:DESCRIBES_ENTITY]->(e)",
+            {"representation": str(representation_id), "name": name},
+        )
+
+    def link_media_representation_topic(self, representation_id: UUID, topic: str) -> None:
+        self.upsert_topic(topic)
+        self._conn.execute(
+            "MATCH (p:MediaRepresentation {id: $representation}), (t:Topic {name: $topic}) "
+            "MERGE (p)-[:ABOUT_MEDIA]->(t)",
+            {"representation": str(representation_id), "topic": topic},
+        )
+
+    def link_media_claim_evidence(self, representation_id: UUID, evidence_id: UUID) -> None:
+        self._conn.execute("MERGE (e:ClaimEvidenceNode {id: $id})", {"id": str(evidence_id)})
+        self._conn.execute(
+            "MATCH (p:MediaRepresentation {id: $representation}), (e:ClaimEvidenceNode {id: $evidence}) "
+            "MERGE (p)-[:EVIDENCES]->(e)",
+            {"representation": str(representation_id), "evidence": str(evidence_id)},
+        )
+
+    def remove_media_resource_projection(self, resource_version_id: UUID) -> None:
+        """Remove current graph visibility without touching representation authority."""
+        self._conn.execute(
+            "MATCH (:MediaResourceVersion {id: $id})-[:HAS_REPRESENTATION]->(p:MediaRepresentation) "
+            "DETACH DELETE p",
+            {"id": str(resource_version_id)},
+        )
+        self._conn.execute(
+            "MATCH (r:MediaResourceVersion {id: $id}) DETACH DELETE r",
+            {"id": str(resource_version_id)},
         )
 
     def count_nodes(self) -> dict[str, int]:

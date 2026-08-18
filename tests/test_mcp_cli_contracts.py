@@ -16,21 +16,19 @@ from uuid import uuid4
 import pytest
 
 from katsi_core.config import Settings
-from katsi_core.workspace.contracts import (
-    AgentIdentity,
-    CapabilityGrant,
-    CapabilityOperationClass,
-    RiskClass,
-    Claim,
-    ClaimStatus,
-)
-from katsi_core.workspace.identity import IdentityService
-from katsi_core.workspace.errors import AuthorizationDeniedError
 from katsi_core.store.workspace_migrations import apply_migrations
 from katsi_core.store.workspace_repository import WorkspaceRepository
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.workspace.authorization import AuthorizationService
 from katsi_core.workspace.claims import ClaimService
+from katsi_core.workspace.contracts import (
+    CapabilityGrant,
+    CapabilityOperationClass,
+    Claim,
+    RiskClass,
+)
+from katsi_core.workspace.errors import AuthorizationDeniedError
+from katsi_core.workspace.identity import IdentityService
 from katsi_core.workspace.leases import WorkLeaseService
 
 
@@ -64,12 +62,14 @@ class TestMultipleAuthenticatedClients:
             id=uuid4(),
             identity_id=client_a.id,
             workspace_id=workspace.id,
-            operation_classes=frozenset([
-                CapabilityOperationClass.READ,
-                CapabilityOperationClass.CLAIM,
-                CapabilityOperationClass.LEASE,
-                CapabilityOperationClass.CHANGE_SET,
-            ]),
+            operation_classes=frozenset(
+                [
+                    CapabilityOperationClass.READ,
+                    CapabilityOperationClass.CLAIM,
+                    CapabilityOperationClass.LEASE,
+                    CapabilityOperationClass.CHANGE_SET,
+                ]
+            ),
             resource_scope=(),
             maximum_risk=RiskClass.HIGH,
             issued_at=datetime.now(UTC),
@@ -226,7 +226,9 @@ class TestCapabilityDenialCases:
     def test_no_capability_denial_for_claim_publish(self, capability_setup):
         """Identity with no capabilities cannot publish claims."""
         setup = capability_setup
-        claims = ClaimService(setup["database"], setup["identities"], AuthorizationService(setup["database"]))
+        claims = ClaimService(
+            setup["database"], setup["identities"], AuthorizationService(setup["database"])
+        )
 
         claim = Claim(
             id=uuid4(),
@@ -244,7 +246,10 @@ class TestCapabilityDenialCases:
         """Identity with no capabilities cannot acquire leases."""
         setup = capability_setup
         leases = WorkLeaseService(
-            setup["database"], setup["identities"], Settings().lease, AuthorizationService(setup["database"])
+            setup["database"],
+            setup["identities"],
+            Settings().lease,
+            AuthorizationService(setup["database"]),
         )
 
         with pytest.raises(AuthorizationDeniedError):
@@ -358,7 +363,7 @@ class TestCredentialRedaction:
         assert len(issued.credential) > 20  # Should be a substantial credential
 
         # But the identity object itself doesn't store it
-        assert not hasattr(identity, 'credential') or identity.credential is None
+        assert not hasattr(identity, "credential") or identity.credential is None
 
     def test_credential_not_in_identity_repr(self, tmp_path: Path):
         """Credential is not exposed in identity string representation."""
@@ -495,8 +500,8 @@ class TestExpiredGrants:
                     str(grant.identity_id),
                     str(grant.workspace_id),
                     '["CLAIM"]',
-                    '[]',
-                    'low',
+                    "[]",
+                    "low",
                     grant.issued_at.isoformat(),
                     (datetime.now(UTC) - timedelta(days=1)).isoformat(),
                 ),

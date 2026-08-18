@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.store.workspace_transactions import write_transaction
+from katsi_core.workspace.authorization import AuthorizationService
 from katsi_core.workspace.contracts import (
     AgentIdentityId,
     CapabilityOperationClass,
@@ -18,7 +19,6 @@ from katsi_core.workspace.contracts import (
     ClaimStatus,
     ClaimTransition,
 )
-from katsi_core.workspace.authorization import AuthorizationService
 from katsi_core.workspace.errors import AuthorizationDeniedError, InvalidTransitionError
 from katsi_core.workspace.identity import IdentityService
 
@@ -63,7 +63,10 @@ class ClaimService:
     """Stores immutable assertions and their append-only provenance history."""
 
     def __init__(
-        self, database: WorkspaceSQLite, identities: IdentityService, authorization: AuthorizationService
+        self,
+        database: WorkspaceSQLite,
+        identities: IdentityService,
+        authorization: AuthorizationService,
     ) -> None:
         self._database = database
         self._identities = identities
@@ -270,6 +273,79 @@ class ClaimService:
                 transitions.append(transition)
         return transitions
 
+    def invalidate_media_evidence(
+        self,
+        workspace_id: UUID,
+        resource_version_id: UUID,
+        representation_id: UUID | None = None,
+    ) -> list[ClaimTransition]:
+        """Invalidate verified Claims citing a no-longer-current media source.
+
+        Media evidence is stored as immutable string fields so older workspace
+        databases remain compatible: ``resource_version_id``,
+        ``representation_id`` and a JSON-encoded ``locator``.  Historical
+        evidence is deliberately retained; only the verification state moves.
+        """
+        timestamp = _now()
+        transitions: list[ClaimTransition] = []
+        with self._database.connection() as connection, write_transaction(connection):
+            rows = connection.execute(
+                """
+                SELECT DISTINCT claims.id FROM claims
+                JOIN claim_evidence ON claim_evidence.claim_id = claims.id
+                WHERE claims.workspace_id = ? AND claims.status = ?
+                """,
+                (str(workspace_id), ClaimStatus.VERIFIED.value),
+            ).fetchall()
+            for row in rows:
+                claim_id = UUID(row["id"])
+                references = connection.execute(
+                    "SELECT reference_json FROM claim_evidence WHERE claim_id = ?",
+                    (str(claim_id),),
+                ).fetchall()
+                matching = any(
+                    (reference := json.loads(item["reference_json"])).get("resource_version_id")
+                    == str(resource_version_id)
+                    and (
+                        representation_id is None
+                        or reference.get("representation_id") == str(representation_id)
+                    )
+                    for item in references
+                )
+                if not matching:
+                    continue
+                transition = ClaimTransition(
+                    id=uuid4(),
+                    claim_id=claim_id,
+                    from_status=ClaimStatus.VERIFIED,
+                    to_status=ClaimStatus.INVALIDATED,
+                    actor_id=None,
+                    occurred_at=timestamp,
+                    evidence={
+                        "reason": "media_evidence_non_current",
+                        "resource_version_id": str(resource_version_id),
+                        "representation_id": str(representation_id) if representation_id else "",
+                    },
+                )
+                connection.execute(
+                    "UPDATE claims SET status = ? WHERE id = ?",
+                    (ClaimStatus.INVALIDATED.value, str(claim_id)),
+                )
+                connection.execute(
+                    "INSERT INTO claim_transitions VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(transition.id),
+                        str(claim_id),
+                        ClaimStatus.VERIFIED.value,
+                        ClaimStatus.INVALIDATED.value,
+                        None,
+                        timestamp.isoformat(),
+                        json.dumps(transition.evidence),
+                    ),
+                )
+                transitions.append(transition)
+        return transitions
+
     def _require_claim_capability(self, actor_id: AgentIdentityId, workspace_id: UUID) -> None:
         """Require that the actor has CLAIM capability for the workspace.
 
@@ -309,9 +385,7 @@ class ClaimService:
 
         # Verify CLAIM operation class is in the grant
         if CapabilityOperationClass.CLAIM not in grant.operation_classes:
-            raise AuthorizationDeniedError(
-                "CLAIM operation class not included in capability grant"
-            )
+            raise AuthorizationDeniedError("CLAIM operation class not included in capability grant")
 
     @staticmethod
     def _insert_evidence(connection: object, evidence: tuple[ClaimEvidence, ...]) -> None:

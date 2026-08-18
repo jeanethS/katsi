@@ -309,6 +309,11 @@ Rollback disables modality pipelines and visual indexes while retaining represen
 
 ## Open Questions
 
-- Default local OCR, transcription, vision-caption, scene-detection, and visual-embedding adapters require benchmark results across supported operating systems and hardware; their identities remain configured regardless of defaults.
+- The Apple M4 local benchmark is recorded in
+  [`benchmarks/media/results/macos-apple-m4-2026-08-17.md`](../../../benchmarks/media/results/macos-apple-m4-2026-08-17.md).
+  It selects the built-in content-signature detector and FFmpeg 8.1.2 for
+  deterministic decode/sampling. OCR, transcription, captioning,
+  scene-detection, and visual-embedding defaults remain disabled until their
+  local adapters can be benchmarked with licensed ground-truth fixtures.
 - Initial visual query input may arrive through an MCP resource reference or a workspace resource id; both map to the same capability-checked query planner.
 - Representation retention defaults and thumbnail/proxy quality settings require dogfood measurements of disk use versus retrieval value.

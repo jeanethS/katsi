@@ -9,10 +9,7 @@ Provides:
 
 from __future__ import annotations
 
-import asyncio
-import json
 import tempfile
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -27,12 +24,10 @@ from katsi_core.workspace.authorization import AuthorizationService
 from katsi_core.workspace.change_sets import ChangeSetService
 from katsi_core.workspace.claims import ClaimService
 from katsi_core.workspace.contracts import (
-    AgentIdentityId,
     ChangeSet,
     ChangeSetStatus,
     Claim,
     ClaimEvidence,
-    ClaimEvidenceKind,
     ClaimStatus,
     CreateFileOperation,
     ResourceDependency,
@@ -63,7 +58,9 @@ class SimulatedMCPClient:
         self._workspace_root = workspace_root
         self._identity_service = IdentityService(database)
         self._authorization_service = AuthorizationService(database)
-        self._claim_service = ClaimService(database, self._identity_service, self._authorization_service)
+        self._claim_service = ClaimService(
+            database, self._identity_service, self._authorization_service
+        )
         self._change_set_service = ChangeSetService(database)
         self._metrics = WorkspaceMetrics()
 

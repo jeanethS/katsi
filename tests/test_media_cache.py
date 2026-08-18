@@ -79,7 +79,9 @@ def _fingerprint(settings=None, **overrides):
     return build_pipeline_fingerprint(**kwargs)
 
 
-def _representation(resource_version_id, fingerprint, producer, status=MediaRepresentationStatus.CURRENT):
+def _representation(
+    resource_version_id, fingerprint, producer, status=MediaRepresentationStatus.CURRENT
+):
     now = datetime.now(UTC)
     return DerivedRepresentation(
         id=uuid4(),
@@ -91,7 +93,9 @@ def _representation(resource_version_id, fingerprint, producer, status=MediaRepr
         updated_at=now,
         textual_payload="expensive extracted text",
         locators=(
-            WholeResourceLocator(resource_version_id=resource_version_id, representation_id=uuid4()),
+            WholeResourceLocator(
+                resource_version_id=resource_version_id, representation_id=uuid4()
+            ),
         ),
         coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
         producer=producer,
@@ -129,7 +133,9 @@ def test_copied_file_reuses_representation_without_recompute(cache, registry, pr
     original = _representation(original_resource_id, fingerprint, producer)
     registry.register_representation(original, make_current=True)
 
-    result = cache.find_compatible(copied_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint)
+    result = cache.find_compatible(
+        copied_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint
+    )
     assert result is not None
     assert result.is_exact_resource_match is False
     assert result.reused_from_resource_version_id == original_resource_id
@@ -140,7 +146,9 @@ def test_copied_file_reuses_representation_without_recompute(cache, registry, pr
     assert reused.id != original.id  # new immutable row, not the same representation
 
     # The copy is now itself directly (exact-match) cached for future lookups.
-    direct = cache.find_compatible(copied_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint)
+    direct = cache.find_compatible(
+        copied_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint
+    )
     assert direct is not None
     assert direct.is_exact_resource_match is True
 
@@ -163,7 +171,9 @@ def test_a_to_b_to_a_history_reuses_original_representation(cache, registry, pro
     registry.register_representation(rep_b, make_current=True)
 
     # Content reverts to A's bytes -> A's fingerprint again.
-    result = cache.find_compatible(resource_a_again, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint_a)
+    result = cache.find_compatible(
+        resource_a_again, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint_a
+    )
 
     assert result is not None
     assert result.reused_from_resource_version_id == resource_a
@@ -174,7 +184,9 @@ def test_get_or_mark_miss_returns_none_when_nothing_compatible(cache):
     resource_id = ResourceVersionId(str(uuid4()))
     fingerprint = _fingerprint()
 
-    result = cache.get_or_mark_miss(resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint)
+    result = cache.get_or_mark_miss(
+        resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint
+    )
 
     assert result is None
 
@@ -202,7 +214,9 @@ def test_failed_representation_does_not_satisfy_compatible_lookup(cache, registr
     )
     registry.register_representation(failed, make_current=False)
 
-    result = cache.find_compatible(other_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint)
+    result = cache.find_compatible(
+        other_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint
+    )
 
     assert result is None
 
@@ -220,7 +234,9 @@ def test_partial_representation_is_reused_but_marked_partial(cache, registry, pr
     )
     registry.register_representation(partial, make_current=True)
 
-    result = cache.find_compatible(other_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint)
+    result = cache.find_compatible(
+        other_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint
+    )
 
     assert result is not None
     reused = cache.reuse_for_resource(other_resource_id, result)
@@ -274,7 +290,9 @@ def test_changed_target_tokens_registers_distinct_representation_version(cache, 
     resource_id = ResourceVersionId(str(uuid4()))
 
     default_settings = MediaSamplingSettings()
-    changed_settings = MediaSamplingSettings(chunking=ChunkingThresholds(target_tokens=2048, overlap=32))
+    changed_settings = MediaSamplingSettings(
+        chunking=ChunkingThresholds(target_tokens=2048, overlap=32)
+    )
 
     default_fingerprint = _fingerprint(default_settings)
     changed_fingerprint = _fingerprint(changed_settings)
@@ -284,13 +302,20 @@ def test_changed_target_tokens_registers_distinct_representation_version(cache, 
 
     # No compatible cached result under the new policy -> caller must produce
     # a new representation version (simulated here by registering one).
-    assert cache.find_compatible(resource_id, MediaRepresentationKind.EXTRACTED_TEXT, changed_fingerprint) is None
+    assert (
+        cache.find_compatible(
+            resource_id, MediaRepresentationKind.EXTRACTED_TEXT, changed_fingerprint
+        )
+        is None
+    )
 
     new_version = _representation(resource_id, changed_fingerprint, producer)
     registry.register_representation(new_version, make_current=True)
 
     # Both versions persist in history; the new one is retrievable by its own fingerprint.
-    result = cache.find_compatible(resource_id, MediaRepresentationKind.EXTRACTED_TEXT, changed_fingerprint)
+    result = cache.find_compatible(
+        resource_id, MediaRepresentationKind.EXTRACTED_TEXT, changed_fingerprint
+    )
     assert result is not None
     assert result.representation.id == new_version.id
     assert result.representation.pipeline_fingerprint.sampling_fingerprint != (
@@ -308,5 +333,7 @@ def test_changed_adapter_version_also_produces_cache_miss(cache, registry, produ
     original = _representation(resource_id, fingerprint_v1, producer)
     registry.register_representation(original, make_current=True)
 
-    result = cache.find_compatible(new_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint_v2)
+    result = cache.find_compatible(
+        new_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint_v2
+    )
     assert result is None

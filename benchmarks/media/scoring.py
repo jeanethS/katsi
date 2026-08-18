@@ -6,10 +6,7 @@ library (no numpy, jiwer, or external packages).
 
 from __future__ import annotations
 
-import math
 import re
-from difflib import SequenceMatcher
-from typing import Tuple
 
 from benchmarks.media.contracts import AccuracyMetric, AccuracyScore
 
@@ -42,14 +39,12 @@ def word_accuracy(pred_text: str, true_text: str) -> AccuracyScore:
     # Count matches (both words must exist and be in same position)
     matches = sum(
         1
-        for p, t in zip(pred_words, true_words)
+        for p, t in zip(pred_words, true_words, strict=False)
         if p == t and p in true_words and t in pred_words
     )
     accuracy = matches / max(len(pred_words), len(true_words))
 
-    return AccuracyScore(
-        metric=AccuracyMetric.WORD_ACCURACY, value=accuracy, higher_is_better=True
-    )
+    return AccuracyScore(metric=AccuracyMetric.WORD_ACCURACY, value=accuracy, higher_is_better=True)
 
 
 def text_iou(pred_text: str, true_text: str) -> AccuracyScore:
@@ -75,9 +70,7 @@ def text_iou(pred_text: str, true_text: str) -> AccuracyScore:
 
     # Average IoU across all true boxes
     avg_iou = sum(ious) / len(ious) if ious else 0.0
-    return AccuracyScore(
-        metric=AccuracyMetric.TEXT_IOU, value=avg_iou, higher_is_better=True
-    )
+    return AccuracyScore(metric=AccuracyMetric.TEXT_IOU, value=avg_iou, higher_is_better=True)
 
 
 def word_error_rate(pred_text: str, true_text: str) -> AccuracyScore:
@@ -94,9 +87,7 @@ def word_error_rate(pred_text: str, true_text: str) -> AccuracyScore:
     distance = levenshtein_distance(pred_words, true_words)
     wer = distance / len(true_words)
 
-    return AccuracyScore(
-        metric=AccuracyMetric.WORD_ERROR_RATE, value=wer, higher_is_better=False
-    )
+    return AccuracyScore(metric=AccuracyMetric.WORD_ERROR_RATE, value=wer, higher_is_better=False)
 
 
 def character_error_rate(pred_text: str, true_text: str) -> AccuracyScore:
@@ -121,28 +112,19 @@ def seq2seq_f1(pred_text: str, true_text: str) -> AccuracyScore:
     true_tokens = set(tokenize_words(true_text))
 
     if not true_tokens:
-        return AccuracyScore(
-            metric=AccuracyMetric.SEQ2SEQ_F1, value=1.0, higher_is_better=True
-        )
+        return AccuracyScore(metric=AccuracyMetric.SEQ2SEQ_F1, value=1.0, higher_is_better=True)
 
     if not pred_tokens:
-        return AccuracyScore(
-            metric=AccuracyMetric.SEQ2SEQ_F1, value=0.0, higher_is_better=True
-        )
+        return AccuracyScore(metric=AccuracyMetric.SEQ2SEQ_F1, value=0.0, higher_is_better=True)
 
     # Calculate precision, recall, F1
     intersection = pred_tokens & true_tokens
     precision = len(intersection) / len(pred_tokens) if pred_tokens else 0.0
     recall = len(intersection) / len(true_tokens) if true_tokens else 0.0
 
-    if precision + recall == 0:
-        f1 = 0.0
-    else:
-        f1 = 2 * (precision * recall) / (precision + recall)
+    f1 = 0.0 if precision + recall == 0 else 2 * (precision * recall) / (precision + recall)
 
-    return AccuracyScore(
-        metric=AccuracyMetric.SEQ2SEQ_F1, value=f1, higher_is_better=True
-    )
+    return AccuracyScore(metric=AccuracyMetric.SEQ2SEQ_F1, value=f1, higher_is_better=True)
 
 
 # Helper functions
@@ -175,10 +157,10 @@ def tokenize_words(text: str) -> list[str]:
     """Split text into words, handling whitespace and punctuation."""
     # Split on whitespace and strip punctuation
     words = re.split(r"\s+", text.strip())
-    return [w.strip('.,!?;:"\'-()[]{}') for w in words if w.strip()]
+    return [w.strip(".,!?;:\"'-()[]{}") for w in words if w.strip()]
 
 
-def parse_bounding_boxes(text: str) -> list[Tuple[int, int, int, int, str]]:
+def parse_bounding_boxes(text: str) -> list[tuple[int, int, int, int, str]]:
     """Parse bounding boxes from text format 'x1,y1,x2,y2;text'."""
     boxes = []
     for line in text.strip().split("\n"):
@@ -200,7 +182,7 @@ def parse_bounding_boxes(text: str) -> list[Tuple[int, int, int, int, str]]:
 
 
 def calculate_box_iou(
-    box1: Tuple[int, int, int, int, str], box2: Tuple[int, int, int, int, str]
+    box1: tuple[int, int, int, int, str], box2: tuple[int, int, int, int, str]
 ) -> float:
     """Calculate IoU between two bounding boxes."""
     x1_1, y1_1, x2_1, y2_1, _ = box1

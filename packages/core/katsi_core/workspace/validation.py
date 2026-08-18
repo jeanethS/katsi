@@ -9,15 +9,11 @@ from uuid import UUID
 
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.workspace.contracts import (
-    ActionOutcomeStatus,
     ChangeSet,
     ChangeSetStatus,
     Operation,
     ResourceDependency,
     ResourceStatus,
-    RiskClass,
-    WorkspaceEvent,
-    WorkspaceEventKind,
 )
 from katsi_core.workspace.errors import ConflictError, StaleStateError
 
@@ -54,7 +50,9 @@ class ValidationResult:
             "violated_dependencies": [
                 {
                     "resource_id": str(d.resource_id),
-                    "expected_version_id": str(d.expected_version_id) if d.expected_version_id else None,
+                    "expected_version_id": str(d.expected_version_id)
+                    if d.expected_version_id
+                    else None,
                     "expected_content_hash": d.expected_content_hash,
                     "expected_absent": d.expected_absent,
                 }
@@ -149,7 +147,10 @@ class ValidationService:
                         violated_dependencies.append(dependency)
 
                 # Check for unexpected presence
-                if dependency.expected_absent and resource_row["status"] != ResourceStatus.DELETED.value:
+                if (
+                    dependency.expected_absent
+                    and resource_row["status"] != ResourceStatus.DELETED.value
+                ):
                     unexpected_presence.append(dependency.resource_id)
                     violated_dependencies.append(dependency)
 
@@ -245,9 +246,7 @@ class ValidationService:
 
         return operation_validation
 
-    def check_state_freshness(
-        self, change_set_id: UUID, max_age_seconds: int = 300
-    ) -> bool:
+    def check_state_freshness(self, change_set_id: UUID, max_age_seconds: int = 300) -> bool:
         """
         Check if validation state is still fresh.
         Returns True if validation is within max_age_seconds.
@@ -275,9 +274,7 @@ class ValidationService:
 
         return ChangeSetService(self._database).get(change_set_id)
 
-    def _get_last_validation_result(
-        self, change_set_id: UUID
-    ) -> dict[str, object] | None:
+    def _get_last_validation_result(self, change_set_id: UUID) -> dict[str, object] | None:
         """Get the last validation result for comparison."""
         with self._database.connection() as connection:
             row = connection.execute(
@@ -302,8 +299,7 @@ class ValidationService:
             return True
 
         old_violations = set(
-            dep["resource_id"]
-            for dep in old_result.get("violated_dependencies", [])
+            dep["resource_id"] for dep in old_result.get("violated_dependencies", [])
         )
         new_violations = {str(d.resource_id) for d in new_result.violated_dependencies}
 
@@ -373,9 +369,7 @@ class ValidationService:
         # In a more sophisticated implementation, we would check path relationships
         return True
 
-    def _get_workspace_invariants(
-        self, connection, workspace_id: UUID
-    ) -> tuple[str, ...]:
+    def _get_workspace_invariants(self, connection, workspace_id: UUID) -> tuple[str, ...]:
         """Retrieve invariant definitions for the workspace."""
         row = connection.execute(
             "SELECT invariants_json FROM workspace_intents WHERE workspace_id = ?",
@@ -413,9 +407,7 @@ class ValidationService:
         # In a real implementation, this would verify that operations produce expected outputs
         return None
 
-    def record_validation(
-        self, change_set_id: UUID, result: ValidationResult
-    ) -> None:
+    def record_validation(self, change_set_id: UUID, result: ValidationResult) -> None:
         """Record a validation result for future comparison."""
         with self._database.connection() as connection:
             # Create table if it doesn't exist (this should be in migrations)

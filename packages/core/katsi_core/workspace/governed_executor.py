@@ -2,34 +2,29 @@
 
 from __future__ import annotations
 
-import json
 import random
-from datetime import UTC, datetime
+from contextlib import suppress
 from pathlib import Path
-from typing import Callable
-from uuid import UUID
+from typing import TYPE_CHECKING
 
 from katsi_core.config import LeaseSettings, ObserverSettings, RecoverySettings
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.workspace.action_journal import ActionJournalService
 from katsi_core.workspace.contracts import (
     ActionOutcomeId,
-    ActionOutcomeStatus,
     AgentIdentityId,
     ChangeSet,
-    ChangeSetId,
-    ChangeSetStatus,
     Operation,
     RelativePath,
     ResourceDependency,
-    ResourceId,
-    WorkspaceId,
 )
-from katsi_core.workspace.errors import AuthorizationDeniedError, ConflictError
 from katsi_core.workspace.exclusive_leases import ExclusiveLeaseService
 from katsi_core.workspace.identity import IdentityService
 from katsi_core.workspace.recovery_store import RecoveryBlobStore
 from katsi_core.workspace.staging import AdjacentStagingManager
+
+if TYPE_CHECKING:
+    from katsi_core.media.governed_operations import DerivedMediaArtifactExecutor
 
 
 class FaultInjector:
@@ -71,18 +66,18 @@ class GovernedExecutor:
         observer_settings: ObserverSettings,
         recovery_settings: RecoverySettings,
         fault_injector: FaultInjector | None = None,
+        media_artifact_executor: DerivedMediaArtifactExecutor | None = None,
     ) -> None:
         self._database = database
         self._identities = identities
 
         # Initialize services
-        self._lease_service = ExclusiveLeaseService(
-            database, identities, lease_settings
-        )
+        self._lease_service = ExclusiveLeaseService(database, identities, lease_settings)
         self._action_journal = ActionJournalService(database)
         self._recovery_store = RecoveryBlobStore(database, recovery_settings)
         self._staging_manager = AdjacentStagingManager(observer_settings)
         self._fault_injector = fault_injector or FaultInjector(enabled=False)
+        self._media_artifact_executor = media_artifact_executor
 
     def execute_change_set(
         self,
@@ -110,9 +105,7 @@ class GovernedExecutor:
             self._fault_injector.maybe_fail("before_journal_write")
 
             # Collect affected hashes and preimages
-            affected_hashes, preimages = self._collect_state(
-                workspace_root, change_set.operations
-            )
+            affected_hashes, preimages = self._collect_state(workspace_root, change_set.operations)
 
             outcome = self._action_journal.create_planning_entry(
                 change_set_id=change_set.id,
@@ -171,16 +164,14 @@ class GovernedExecutor:
             self._handle_execution_failure(change_set, str(e))
 
             # Release lease with recovery required flag
-            if 'lease' in locals():
-                try:
+            if "lease" in locals():
+                with suppress(Exception):
                     self._lease_service.release_exclusive(
                         lease_id=lease.id,
                         holder_id=actor_id,
                         terminal_outcome=False,
                         recovery_required=True,
                     )
-                except Exception:
-                    pass  # Best effort cleanup
 
             raise
 
@@ -297,6 +288,9 @@ class GovernedExecutor:
         target_path: Path,
     ) -> dict[str, str]:
         """Stage operation content."""
+        if self._media_artifact_executor and self._media_artifact_executor.supports(operation):
+            return self._media_artifact_executor.stage(operation, target_path)  # type: ignore[arg-type]
+
         if operation.kind in ("create_file", "replace_file", "apply_patch"):
             # These operations need content staging
             # For now, return placeholder
@@ -327,6 +321,9 @@ class GovernedExecutor:
         target_path: Path,
     ) -> dict[str, str]:
         """Execute atomic replacement for staged operation."""
+        if self._media_artifact_executor and self._media_artifact_executor.supports(operation):
+            return self._media_artifact_executor.commit(operation, target_path)  # type: ignore[arg-type]
+
         if operation.kind in ("create_file", "replace_file"):
             # Ensure parent directory exists
             target_path.parent.mkdir(parents=True, exist_ok=True)

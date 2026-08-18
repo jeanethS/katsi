@@ -9,264 +9,85 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
 
-from benchmarks.media.contracts import CandidateAdapter, CapabilityKind, ProbeResult
+from benchmarks.media.contracts import CandidateAdapter, ProbeResult
+
+_PROBE_SCRIPT = """
+import sys
+try:
+    import {module} as _mod
+except Exception as e:
+    print(f'ERROR: {{e}}', file=sys.stderr)
+    sys.exit(1)
+
+try:
+    import importlib.metadata
+    print(importlib.metadata.version('{module}'))
+except Exception:
+    print(getattr(_mod, '__version__', 'stdlib'))
+"""
+
+
+def _probe_availability(adapter: CandidateAdapter) -> ProbeResult:
+    """Check whether `adapter.name` can be imported as a Python module.
+
+    A single subprocess both imports the module and reports its version:
+    `importlib.metadata.version()` alone (the prior approach) only works for
+    third-party packages with installed dist-info metadata, so it always
+    fails for stdlib modules and any module without package metadata even
+    though the module itself imports fine. Importing first, then treating
+    metadata lookup as a best-effort version hint, fixes that.
+    """
+    try:
+        script = _PROBE_SCRIPT.format(module=adapter.name)
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            shell=False,
+            timeout=10,
+        )
+
+        if result.returncode != 0:
+            return ProbeResult(
+                available=False,
+                adapter=adapter,
+                error_message=result.stderr.strip(),
+                reason=f"Module import failed: {result.stderr.strip()}",
+            )
+
+        return ProbeResult(
+            available=True,
+            adapter=adapter,
+            version_detected=result.stdout.strip(),
+        )
+
+    except subprocess.TimeoutExpired:
+        return ProbeResult(
+            available=False,
+            adapter=adapter,
+            error_message="Probe timed out after 10 seconds",
+            reason="Probe operation timed out",
+        )
+    except Exception as e:
+        return ProbeResult(
+            available=False,
+            adapter=adapter,
+            error_message=str(e),
+            reason=f"Probe failed with exception: {e}",
+        )
 
 
 def probe_ocr_availability(adapter: CandidateAdapter) -> ProbeResult:
     """Check if an OCR adapter is installed and functional."""
-    try:
-        # Try importing the adapter's package
-        import_script = f"""
-import sys
-try:
-    import importlib.metadata
-    version = importlib.metadata.version('{adapter.name}')
-    print(f'{{version}}')
-except Exception as e:
-    print(f'ERROR: {{e}}', file=sys.stderr)
-    sys.exit(1)
-"""
-
-        result = subprocess.run(
-            [sys.executable, "-c", import_script],
-            capture_output=True,
-            text=True,
-            shell=False,
-            timeout=10,
-        )
-
-        if result.returncode != 0:
-            return ProbeResult(
-                available=False,
-                adapter=adapter,
-                error_message=result.stderr.strip(),
-                reason=f"Package import failed: {result.stderr.strip()}",
-            )
-
-        version_detected = result.stdout.strip()
-
-        # Try a lightweight API call if available
-        test_script = f"""
-import sys
-try:
-    import {adapter.name}
-    if hasattr({adapter.name}, '__version__'):
-        print({adapter.name}.__version__)
-    else:
-        print('version_unknown')
-except Exception as e:
-    print(f'ERROR: {{e}}', file=sys.stderr)
-    sys.exit(1)
-"""
-
-        test_result = subprocess.run(
-            [sys.executable, "-c", test_script],
-            capture_output=True,
-            text=True,
-            shell=False,
-            timeout=10,
-        )
-
-        if test_result.returncode != 0:
-            return ProbeResult(
-                available=False,
-                adapter=adapter,
-                version_detected=version_detected,
-                error_message=test_result.stderr.strip(),
-                reason=f"API test failed: {test_result.stderr.strip()}",
-            )
-
-        return ProbeResult(
-            available=True,
-            adapter=adapter,
-            version_detected=version_detected,
-        )
-
-    except subprocess.TimeoutExpired:
-        return ProbeResult(
-            available=False,
-            adapter=adapter,
-            error_message="Probe timed out after 10 seconds",
-            reason="Probe operation timed out",
-        )
-    except Exception as e:
-        return ProbeResult(
-            available=False,
-            adapter=adapter,
-            error_message=str(e),
-            reason=f"Probe failed with exception: {e}",
-        )
+    return _probe_availability(adapter)
 
 
 def probe_transcription_availability(adapter: CandidateAdapter) -> ProbeResult:
     """Check if a transcription adapter is installed and functional."""
-    try:
-        # Try importing the adapter's package
-        import_script = f"""
-import sys
-try:
-    import importlib.metadata
-    version = importlib.metadata.version('{adapter.name}')
-    print(f'{{version}}')
-except Exception as e:
-    print(f'ERROR: {{e}}', file=sys.stderr)
-    sys.exit(1)
-"""
-
-        result = subprocess.run(
-            [sys.executable, "-c", import_script],
-            capture_output=True,
-            text=True,
-            shell=False,
-            timeout=10,
-        )
-
-        if result.returncode != 0:
-            return ProbeResult(
-                available=False,
-                adapter=adapter,
-                error_message=result.stderr.strip(),
-                reason=f"Package import failed: {result.stderr.strip()}",
-            )
-
-        version_detected = result.stdout.strip()
-
-        # Try a lightweight API call if available
-        test_script = f"""
-import sys
-try:
-    import {adapter.name}
-    if hasattr({adapter.name}, '__version__'):
-        print({adapter.name}.__version__)
-    else:
-        print('version_unknown')
-except Exception as e:
-    print(f'ERROR: {{e}}', file=sys.stderr)
-    sys.exit(1)
-"""
-
-        test_result = subprocess.run(
-            [sys.executable, "-c", test_script],
-            capture_output=True,
-            text=True,
-            shell=False,
-            timeout=10,
-        )
-
-        if test_result.returncode != 0:
-            return ProbeResult(
-                available=False,
-                adapter=adapter,
-                version_detected=version_detected,
-                error_message=test_result.stderr.strip(),
-                reason=f"API test failed: {test_result.stderr.strip()}",
-            )
-
-        return ProbeResult(
-            available=True,
-            adapter=adapter,
-            version_detected=version_detected,
-        )
-
-    except subprocess.TimeoutExpired:
-        return ProbeResult(
-            available=False,
-            adapter=adapter,
-            error_message="Probe timed out after 10 seconds",
-            reason="Probe operation timed out",
-        )
-    except Exception as e:
-        return ProbeResult(
-            available=False,
-            adapter=adapter,
-            error_message=str(e),
-            reason=f"Probe failed with exception: {e}",
-        )
+    return _probe_availability(adapter)
 
 
 def probe_captioning_availability(adapter: CandidateAdapter) -> ProbeResult:
     """Check if a captioning adapter is installed and functional."""
-    try:
-        # Try importing the adapter's package
-        import_script = f"""
-import sys
-try:
-    import importlib.metadata
-    version = importlib.metadata.version('{adapter.name}')
-    print(f'{{version}}')
-except Exception as e:
-    print(f'ERROR: {{e}}', file=sys.stderr)
-    sys.exit(1)
-"""
-
-        result = subprocess.run(
-            [sys.executable, "-c", import_script],
-            capture_output=True,
-            text=True,
-            shell=False,
-            timeout=10,
-        )
-
-        if result.returncode != 0:
-            return ProbeResult(
-                available=False,
-                adapter=adapter,
-                error_message=result.stderr.strip(),
-                reason=f"Package import failed: {result.stderr.strip()}",
-            )
-
-        version_detected = result.stdout.strip()
-
-        # Try a lightweight API call if available
-        test_script = f"""
-import sys
-try:
-    import {adapter.name}
-    if hasattr({adapter.name}, '__version__'):
-        print({adapter.name}.__version__)
-    else:
-        print('version_unknown')
-except Exception as e:
-    print(f'ERROR: {{e}}', file=sys.stderr)
-    sys.exit(1)
-"""
-
-        test_result = subprocess.run(
-            [sys.executable, "-c", test_script],
-            capture_output=True,
-            text=True,
-            shell=False,
-            timeout=10,
-        )
-
-        if test_result.returncode != 0:
-            return ProbeResult(
-                available=False,
-                adapter=adapter,
-                version_detected=version_detected,
-                error_message=test_result.stderr.strip(),
-                reason=f"API test failed: {test_result.stderr.strip()}",
-            )
-
-        return ProbeResult(
-            available=True,
-            adapter=adapter,
-            version_detected=version_detected,
-        )
-
-    except subprocess.TimeoutExpired:
-        return ProbeResult(
-            available=False,
-            adapter=adapter,
-            error_message="Probe timed out after 10 seconds",
-            reason="Probe operation timed out",
-        )
-    except Exception as e:
-        return ProbeResult(
-            available=False,
-            adapter=adapter,
-            error_message=str(e),
-            reason=f"Probe failed with exception: {e}",
-        )
+    return _probe_availability(adapter)

@@ -138,7 +138,9 @@ class TestReportGeneration:
         assert report.best_by_latency == "adapter_b"  # Lowest latency
         assert report.best_by_memory == "adapter_c"  # Lowest memory
 
-    def test_generate_report_filters_incomplete_runs(self, sample_reporter, sample_runs, sample_adapters, sample_platform):
+    def test_generate_report_filters_incomplete_runs(
+        self, sample_reporter, sample_runs, sample_adapters, sample_platform
+    ):
         """Test that incomplete runs are filtered by default."""
         # Add some incomplete runs
         incomplete_runs = sample_runs + [
@@ -165,7 +167,9 @@ class TestReportGeneration:
         assert len(report.runs) == 3
         assert all(run.status == RunStatus.COMPLETED for run in report.runs)
 
-    def test_generate_report_includes_incomplete_when_requested(self, sample_reporter, sample_runs, sample_adapters, sample_platform):
+    def test_generate_report_includes_incomplete_when_requested(
+        self, sample_reporter, sample_runs, sample_adapters, sample_platform
+    ):
         """Test including incomplete runs when requested."""
         # Add an incomplete run
         all_runs = sample_runs + [
@@ -215,7 +219,9 @@ class TestReportGeneration:
         # Adapter C has lowest memory (200MB)
         assert report.best_by_memory == "adapter_c"
 
-    def test_tie_handling_in_best_selection(self, sample_reporter, sample_platform, sample_adapters):
+    def test_tie_handling_in_best_selection(
+        self, sample_reporter, sample_platform, sample_adapters
+    ):
         """Test that ties are handled deterministically."""
         # Create runs with identical performance
         tied_runs = [
@@ -250,8 +256,18 @@ class TestReportGeneration:
         assert report.best_by_latency in ["adapter_a", "adapter_b"]
         assert report.best_by_memory in ["adapter_a", "adapter_b"]
 
-    def test_report_with_runs_missing_usage(self, sample_reporter, sample_platform, sample_adapters):
-        """Test report generation when some runs lack usage data."""
+    def test_report_with_runs_missing_usage(
+        self, sample_reporter, sample_platform, sample_adapters
+    ):
+        """Test report generation when a run has no usage data.
+
+        A BenchmarkRun with status=COMPLETED always has usage (enforced by
+        the model). A run with no usage is a FAILED run instead -- that is
+        the only way "missing usage" happens in practice. This tests that
+        the reporter's best-by-latency/best-by-memory selection skips such
+        runs while best-by-accuracy still considers whichever runs actually
+        have accuracy_scores.
+        """
         runs_with_missing = [
             BenchmarkRun(
                 adapter=sample_adapters[0],
@@ -266,26 +282,25 @@ class TestReportGeneration:
             ),
             BenchmarkRun(
                 adapter=sample_adapters[1],
-                status=RunStatus.COMPLETED,
+                status=RunStatus.FAILED,
                 platform=sample_platform,
                 started_at="2024-01-01T00:00:00",
                 completed_at="2024-01-01T00:00:01",
-                usage=None,  # Missing usage data
-                accuracy_scores=[
-                    AccuracyScore(metric=AccuracyMetric.CHARACTER_ACCURACY, value=0.90),
-                ],
+                error="adapter crashed before producing usage data",
             ),
         ]
 
-        report = sample_reporter.generate_report(runs_with_missing, include_incomplete=False)
+        report = sample_reporter.generate_report(runs_with_missing, include_incomplete=True)
 
-        # Should skip runs without usage for latency/memory selection
-        assert report.best_by_latency == "adapter_a"  # Only one with usage
+        # Should skip the failed run (no usage) for latency/memory selection
+        assert report.best_by_latency == "adapter_a"  # Only completed run has usage
         assert report.best_by_memory == "adapter_a"
-        # But accuracy selection should still work
-        assert report.best_by_accuracy == "adapter_b"  # Higher accuracy
+        # Should skip the failed run (no accuracy_scores) for accuracy selection too
+        assert report.best_by_accuracy == "adapter_a"
 
-    def test_report_with_runs_missing_accuracy_scores(self, sample_reporter, sample_platform, sample_adapters):
+    def test_report_with_runs_missing_accuracy_scores(
+        self, sample_reporter, sample_platform, sample_adapters
+    ):
         """Test report generation when some runs lack accuracy scores."""
         runs_with_missing = [
             BenchmarkRun(

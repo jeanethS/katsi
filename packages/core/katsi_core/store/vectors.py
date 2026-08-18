@@ -2,12 +2,59 @@
 
 from __future__ import annotations
 
+import json
+import re
+from dataclasses import dataclass
 from pathlib import Path
+from uuid import UUID
 
 import lancedb
 import pyarrow as pa
 
+from katsi_core.media.contracts import (
+    DerivedRepresentation,
+    MediaRepresentationKind,
+    MediaRepresentationStatus,
+)
 from katsi_core.models import Chunk
+
+_TEXTUAL_MEDIA_KINDS = frozenset(
+    {
+        MediaRepresentationKind.EXTRACTED_TEXT,
+        MediaRepresentationKind.OCR_TEXT,
+        MediaRepresentationKind.IMAGE_CAPTION,
+        MediaRepresentationKind.TRANSCRIPT_SEGMENT,
+    }
+)
+_SEARCHABLE_MEDIA_STATUSES = frozenset(
+    {MediaRepresentationStatus.CURRENT, MediaRepresentationStatus.PARTIAL}
+)
+
+
+@dataclass(frozen=True)
+class MediaTextSearchResult:
+    """A text-vector hit with immutable media evidence metadata."""
+
+    representation_id: UUID
+    resource_version_id: UUID
+    kind: MediaRepresentationKind
+    locators: tuple[dict[str, object], ...]
+    coverage_fraction: float
+    text: str
+    score: float
+
+
+@dataclass(frozen=True)
+class VisualSearchResult:
+    """A visual-space hit. Scores are meaningful only within ``space``."""
+
+    representation_id: UUID
+    resource_version_id: UUID
+    space: str
+    dimension: int
+    locators: tuple[dict[str, object], ...]
+    coverage_fraction: float
+    score: float
 
 
 class VectorStore:
@@ -22,6 +69,104 @@ class VectorStore:
         self._db = lancedb.connect(str(db_path))
         self._table_name = table_name
         self._tbl = None
+        self._media_table_name = f"{table_name}_media_text"
+        self._media_tbl = None
+        self._visual_tables: dict[tuple[str, int], object] = {}
+
+    def _visual_table_name(self, space: str, dimension: int) -> str:
+        """Return a stable Lance table name isolated by space and dimension."""
+        safe_space = re.sub(r"[^a-zA-Z0-9_]", "_", space)
+        return f"{self._table_name}_visual_{safe_space}_{dimension}"
+
+    def init_visual_table(self, space: str, dimension: int) -> None:
+        """Create/open the index for exactly one compatible visual space."""
+        if dimension < 1:
+            raise ValueError("visual embedding dimension must be positive")
+        key = (space, dimension)
+        table_name = self._visual_table_name(*key)
+        schema = pa.schema(
+            [
+                ("representation_id", pa.string()),
+                ("resource_version_id", pa.string()),
+                ("locators_json", pa.string()),
+                ("coverage_fraction", pa.float32()),
+                ("vector", pa.list_(pa.float32(), dimension)),
+            ]
+        )
+        if table_name not in self._db.list_tables().tables:
+            table = self._db.create_table(table_name, schema=schema, mode="overwrite")
+        else:
+            table = self._db.open_table(table_name)
+        self._visual_tables[key] = table
+
+    @staticmethod
+    def _visual_payload(representation: DerivedRepresentation) -> tuple[str, list[float]]:
+        if representation.kind is not MediaRepresentationKind.VISUAL_EMBEDDING:
+            raise ValueError("only visual_embedding representations can enter a visual index")
+        if representation.textual_payload is None:
+            raise ValueError("visual embedding representation has no payload")
+        try:
+            payload = json.loads(representation.textual_payload)
+            space = payload["space"]
+            vector = payload["embedding"]
+        except (KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ValueError("invalid visual embedding payload") from exc
+        if not isinstance(space, str) or not space or not isinstance(vector, list) or not vector:
+            raise ValueError("invalid visual embedding payload")
+        if not all(isinstance(value, (int, float)) for value in vector):
+            raise ValueError("visual embedding must contain only numeric values")
+        return space, [float(value) for value in vector]
+
+    def upsert_visual_embeddings(self, representations: list[DerivedRepresentation]) -> None:
+        """Project cached visual vectors into their compatible-space indexes.
+
+        No table ever mixes a model space or vector dimension, preventing an
+        accidental raw-score comparison across encoders.
+        """
+        for representation in representations:
+            if representation.status not in _SEARCHABLE_MEDIA_STATUSES:
+                continue
+            space, vector = self._visual_payload(representation)
+            key = (space, len(vector))
+            if key not in self._visual_tables:
+                self.init_visual_table(*key)
+            table = self._visual_tables[key]
+            table.delete(f"representation_id = '{representation.id}'")
+            row = {
+                "representation_id": str(representation.id),
+                "resource_version_id": str(representation.resource_version_id),
+                "locators_json": json.dumps(
+                    [locator.model_dump(mode="json") for locator in representation.locators],
+                    sort_keys=True,
+                ),
+                "coverage_fraction": representation.coverage.coverage_fraction,
+                "vector": vector,
+            }
+            table.add(pa.Table.from_pylist([row], schema=table.schema))
+
+    def search_visual(
+        self, space: str, query_vector: list[float], k: int = 8
+    ) -> list[VisualSearchResult]:
+        """Search one exact visual space/dimension; incompatible input is rejected."""
+        key = (space, len(query_vector))
+        if key not in self._visual_tables:
+            table_name = self._visual_table_name(*key)
+            if table_name not in self._db.list_tables().tables:
+                return []
+            self._visual_tables[key] = self._db.open_table(table_name)
+        rows = self._visual_tables[key].search(query_vector).limit(k).to_list()
+        return [
+            VisualSearchResult(
+                representation_id=UUID(row["representation_id"]),
+                resource_version_id=UUID(row["resource_version_id"]),
+                space=space,
+                dimension=len(query_vector),
+                locators=tuple(json.loads(row["locators_json"])),
+                coverage_fraction=float(row["coverage_fraction"]),
+                score=1.0 / (1.0 + row["_distance"]),
+            )
+            for row in rows
+        ]
 
     def init_table(self, embed_dim: int) -> None:
         """Create the chunks table with the fixed schema if it does not exist."""
@@ -39,6 +184,121 @@ class VectorStore:
             self._tbl = self._db.create_table(self._table_name, schema=schema, mode="overwrite")
         else:
             self._tbl = self._db.open_table(self._table_name)
+
+    def init_media_text_table(self, embed_dim: int) -> None:
+        """Initialize the separate, compatible text projection for media evidence.
+
+        Media-derived text deliberately does not alter the legacy ``chunks``
+        schema.  It carries the representation and locator fields needed to
+        cite OCR, captions, and transcript segments precisely.
+        """
+        schema = pa.schema(
+            [
+                ("representation_id", pa.string()),
+                ("resource_version_id", pa.string()),
+                ("kind", pa.string()),
+                ("status", pa.string()),
+                ("text", pa.string()),
+                ("locators_json", pa.string()),
+                ("coverage_fraction", pa.float32()),
+                ("vector", pa.list_(pa.float32(), embed_dim)),
+            ]
+        )
+        if self._media_table_name not in self._db.list_tables().tables:
+            self._media_tbl = self._db.create_table(
+                self._media_table_name, schema=schema, mode="overwrite"
+            )
+        else:
+            self._media_tbl = self._db.open_table(self._media_table_name)
+
+    def upsert_media_text(
+        self,
+        representations: list[DerivedRepresentation],
+        vectors: list[list[float]],
+    ) -> None:
+        """Project searchable media text without dropping locator provenance."""
+        if len(representations) != len(vectors):
+            raise ValueError("len(representations) != len(vectors)")
+        if not representations:
+            return
+        if self._media_tbl is None:
+            self.init_media_text_table(len(vectors[0]))
+
+        rows: list[dict[str, object]] = []
+        for representation, vector in zip(representations, vectors, strict=True):
+            if representation.kind not in _TEXTUAL_MEDIA_KINDS:
+                raise ValueError(f"{representation.kind} is not a textual media representation")
+            if representation.status not in _SEARCHABLE_MEDIA_STATUSES:
+                continue
+            assert representation.textual_payload is not None
+            self._media_tbl.delete(f"representation_id = '{representation.id}'")
+            rows.append(
+                {
+                    "representation_id": str(representation.id),
+                    "resource_version_id": str(representation.resource_version_id),
+                    "kind": representation.kind.value,
+                    "status": representation.status.value,
+                    "text": representation.textual_payload,
+                    "locators_json": json.dumps(
+                        [locator.model_dump(mode="json") for locator in representation.locators],
+                        sort_keys=True,
+                    ),
+                    "coverage_fraction": representation.coverage.coverage_fraction,
+                    "vector": vector,
+                }
+            )
+        if rows:
+            self._media_tbl.add(pa.Table.from_pylist(rows, schema=self._media_tbl.schema))
+
+    def search_media_text(
+        self, query_vector: list[float], k: int = 8
+    ) -> list[MediaTextSearchResult]:
+        """Search media-derived text, returning its immutable citation metadata."""
+        if self._media_tbl is None:
+            if self._media_table_name not in self._db.list_tables().tables:
+                return []
+            self._media_tbl = self._db.open_table(self._media_table_name)
+        rows = self._media_tbl.search(query_vector).limit(k).to_list()
+        return [
+            MediaTextSearchResult(
+                representation_id=UUID(row["representation_id"]),
+                resource_version_id=UUID(row["resource_version_id"]),
+                kind=MediaRepresentationKind(row["kind"]),
+                locators=tuple(json.loads(row["locators_json"])),
+                coverage_fraction=float(row["coverage_fraction"]),
+                text=row["text"],
+                score=1.0 / (1.0 + row["_distance"]),
+            )
+            for row in rows
+        ]
+
+    def delete_media_by_resource_version(self, resource_version_id: UUID) -> None:
+        """Remove stale media projections while keeping authority untouched."""
+        if self._media_tbl is None and self._media_table_name in self._db.list_tables().tables:
+            self._media_tbl = self._db.open_table(self._media_table_name)
+        if self._media_tbl is not None:
+            self._media_tbl.delete(f"resource_version_id = '{resource_version_id}'")
+        for table in self._visual_tables.values():
+            table.delete(f"resource_version_id = '{resource_version_id}'")
+        for table_name in self._db.list_tables().tables:
+            if not table_name.startswith(f"{self._table_name}_visual_"):
+                continue
+            table = self._db.open_table(table_name)
+            table.delete(f"resource_version_id = '{resource_version_id}'")
+
+    def rebuild_media_projections(self, representations: list[DerivedRepresentation]) -> None:
+        """Rebuild media vectors from authoritative cached representations only."""
+        for table_name in self._db.list_tables().tables:
+            if table_name == self._media_table_name or table_name.startswith(
+                f"{self._table_name}_visual_"
+            ):
+                self._db.drop_table(table_name)
+        self._media_tbl = None
+        self._visual_tables.clear()
+        textual = [item for item in representations if item.kind in _TEXTUAL_MEDIA_KINDS]
+        if textual:
+            raise ValueError("text media rebuild requires cached text embedding vectors")
+        self.upsert_visual_embeddings(representations)
 
     def _require_table(self):
         """Open the existing table on demand.
@@ -137,7 +397,9 @@ class VectorStore:
 
     def rebuild_from_authoritative(
         self,
-        chunks: list[tuple[str, str, int, str, int]],  # (chunk_id, file_id, ordinal, text, token_count)
+        chunks: list[
+            tuple[str, str, int, str, int]
+        ],  # (chunk_id, file_id, ordinal, text, token_count)
         vectors: list[tuple[str, list[float]]],  # (chunk_id, vector)
     ) -> None:
         """Rebuild the entire vector projection from authoritative resources and cached enrichment.
@@ -174,14 +436,16 @@ class VectorStore:
             rows = []
             for chunk_id, file_id, ordinal, text, token_count in chunks:
                 if chunk_id in vector_lookup:
-                    rows.append({
-                        "id": chunk_id,
-                        "file_id": file_id,
-                        "ordinal": ordinal,
-                        "text": text,
-                        "vector": vector_lookup[chunk_id],
-                        "token_count": token_count,
-                    })
+                    rows.append(
+                        {
+                            "id": chunk_id,
+                            "file_id": file_id,
+                            "ordinal": ordinal,
+                            "text": text,
+                            "vector": vector_lookup[chunk_id],
+                            "token_count": token_count,
+                        }
+                    )
 
             # Bulk insert all chunks
             if rows:

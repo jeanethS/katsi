@@ -129,7 +129,9 @@ class RecoveryRequiredEvidence(BaseModel):
     change_set_id: UUID
     detected_at: datetime
 
-    situation_type: Literal["incomplete_apply", "incomplete_rollback", "corrupted_preimage", "unknown"]
+    situation_type: Literal[
+        "incomplete_apply", "incomplete_rollback", "corrupted_preimage", "unknown"
+    ]
     description: str = Field(min_length=1, max_length=4_000)
 
     # What was being done

@@ -12,7 +12,6 @@ Tracks:
 
 from __future__ import annotations
 
-import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -23,7 +22,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 if TYPE_CHECKING:
-    from katsi_core.workspace.brief import BriefContext
+    pass
 
 
 class MetricCategory(StrEnum):
@@ -284,9 +283,7 @@ class WorkspaceMetrics:
             metadata={"workspace_id": str(workspace_id)},
         )
 
-    def record_stale_plan_blocked(
-        self, workspace_id: UUID, plan_id: UUID, reason: str
-    ) -> None:
+    def record_stale_plan_blocked(self, workspace_id: UUID, plan_id: UUID, reason: str) -> None:
         """Record blocking of a stale proposal/plan.
 
         Args:
@@ -390,10 +387,7 @@ class WorkspaceMetrics:
         """
         with self._lock:
             return {
-                "summaries": {
-                    name: summary.to_dict()
-                    for name, summary in self._summaries.items()
-                },
+                "summaries": {name: summary.to_dict() for name, summary in self._summaries.items()},
                 "events": [event.to_dict() for event in self._events],
                 "aggregates": {
                     "enrichment_avoidance_rate": self.enrichment_avoidance_rate,

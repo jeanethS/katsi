@@ -4,19 +4,18 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
-from katsi_core.workspace.authorization import AuthorizationService, PolicyMode
+from katsi_core.workspace.authorization import AuthorizationService
 from katsi_core.workspace.change_sets import ChangeSetService
 from katsi_core.workspace.contracts import (
     ChangeSet,
     ChangeSetStatus,
     RiskClass,
 )
-from katsi_core.workspace.errors import AuthorizationDeniedError, ConflictError
+from katsi_core.workspace.errors import ConflictError
 from katsi_core.workspace.staleness import StalenessService
 from katsi_core.workspace.validation import ValidationService
 
@@ -135,9 +134,7 @@ class OwnerAPI:
             )
         )
 
-        operations = tuple(
-            operation_adapter.validate_python(op) for op in proposal.operations
-        )
+        operations = tuple(operation_adapter.validate_python(op) for op in proposal.operations)
 
         change_set = ChangeSet(
             id=uuid4(),
@@ -154,9 +151,7 @@ class OwnerAPI:
 
         return self._change_set_service.submit(change_set)
 
-    def validate_change_set(
-        self, change_set_id: UUID, validator_id: UUID
-    ) -> dict[str, object]:
+    def validate_change_set(self, change_set_id: UUID, validator_id: UUID) -> dict[str, object]:
         """
         Validate a Change Set's dependency closure.
         Returns validation result and transitions to VALIDATED if successful.
@@ -171,9 +166,7 @@ class OwnerAPI:
             )
 
         # Perform validation
-        validation_result = self._validation_service.validate_dependency_closure(
-            change_set
-        )
+        validation_result = self._validation_service.validate_dependency_closure(change_set)
 
         # Record the validation
         self._validation_service.record_validation(change_set_id, validation_result)
@@ -219,9 +212,7 @@ class OwnerAPI:
         relevant_triggers = [t for t in staleness_triggers if t.is_relevant]
 
         # Evaluate authorization
-        auth_result = self._authorization_service.evaluate_authorization(
-            change_set, reviewer_id
-        )
+        auth_result = self._authorization_service.evaluate_authorization(change_set, reviewer_id)
 
         # Get validation state freshness
         is_fresh = self._validation_service.check_state_freshness(change_set_id)
@@ -264,9 +255,7 @@ class OwnerAPI:
             raise ConflictError(f"Change Set not found: {change_set_id}")
 
         if change_set.status != ChangeSetStatus.VALIDATED:
-            raise ConflictError(
-                f"Change Set must be VALIDATED to approve: {change_set_id}"
-            )
+            raise ConflictError(f"Change Set must be VALIDATED to approve: {change_set_id}")
 
         # Revalidate before authorization
         revalidation_result = self._validation_service.revalidate_before_authorization(
@@ -282,9 +271,7 @@ class OwnerAPI:
             }
 
         # Evaluate authorization
-        auth_result = self._authorization_service.evaluate_authorization(
-            change_set, approver_id
-        )
+        auth_result = self._authorization_service.evaluate_authorization(change_set, approver_id)
 
         if not auth_result.is_authorized:
             return {
@@ -405,9 +392,7 @@ class OwnerAPI:
             raise ConflictError(f"Predecessor Change Set not found: {predecessor_id}")
 
         if predecessor.successor_id is not None:
-            raise ConflictError(
-                f"Predecessor already has a successor: {predecessor_id}"
-            )
+            raise ConflictError(f"Predecessor already has a successor: {predecessor_id}")
 
         # Create the successor Change Set
         successor = self.propose_change_set(successor_proposal)
@@ -445,9 +430,7 @@ class OwnerAPI:
         history = self._change_set_service.history(change_set_id)
 
         # Get staleness triggers
-        staleness_triggers = self._staleness_service.get_staleness_triggers(
-            change_set_id
-        )
+        staleness_triggers = self._staleness_service.get_staleness_triggers(change_set_id)
 
         # Get owner decisions
         decisions = self._get_owner_decisions(change_set_id)
@@ -508,9 +491,7 @@ class OwnerAPI:
                 ),
             )
 
-    def _get_owner_decisions(
-        self, change_set_id: UUID
-    ) -> tuple[OwnerDecision, ...]:
+    def _get_owner_decisions(self, change_set_id: UUID) -> tuple[OwnerDecision, ...]:
         """Get all owner decisions for a Change Set."""
         decisions: list[OwnerDecision] = []
 

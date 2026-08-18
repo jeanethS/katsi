@@ -15,6 +15,15 @@ from dataclasses import dataclass, field
 from katsi_core.media.contracts import MediaPipelineDefinition, MediaRepresentationKind
 from katsi_core.media.protocols import MediaPipelineProtocol
 
+_PROHIBITED_PIPELINE_TERMS = (
+    "face identity",
+    "facial recognition",
+    "voice identity",
+    "speaker identity",
+    "emotion inference",
+    "emotion recognition",
+)
+
 
 class PipelineRegistrationError(Exception):
     """Raised when a pipeline definition cannot be registered."""
@@ -35,6 +44,15 @@ def _validate_definition(definition: MediaPipelineDefinition) -> None:
     if definition.shell_enabled:
         raise PipelineRegistrationError(
             f"Pipeline '{definition.id}' must not enable shell execution"
+        )
+    if not definition.network_disabled:
+        raise PipelineRegistrationError(f"Pipeline '{definition.id}' must disable network access")
+    declared = " ".join(
+        [definition.id, definition.name, definition.description, definition.model_identity or ""]
+    ).lower()
+    if any(term in declared for term in _PROHIBITED_PIPELINE_TERMS):
+        raise PipelineRegistrationError(
+            f"Pipeline '{definition.id}' requests a prohibited identity or emotion capability"
         )
 
     if not definition.accepted_mime_patterns:

@@ -43,7 +43,7 @@ class ActionJournalService:
                     "kind": op.kind,
                     "path": op.path,
                     "byte_count": op.byte_count,
-                    **op.model_dump(exclude={"kind", "path", "byte_count"})
+                    **op.model_dump(mode="json", exclude={"kind", "path", "byte_count"}),
                 }
                 for op in operations
             ],
@@ -93,11 +93,13 @@ class ActionJournalService:
 
             plan = json.loads(row["plan_json"])
             plan["steps"] = plan.get("steps", [])
-            plan["steps"].append({
-                "description": step_description,
-                "data": step_data,
-                "timestamp": now.isoformat(),
-            })
+            plan["steps"].append(
+                {
+                    "description": step_description,
+                    "data": step_data,
+                    "timestamp": now.isoformat(),
+                }
+            )
 
             connection.execute(
                 "UPDATE action_journal SET plan_json = ?, updated_at = ? WHERE id = ?",
@@ -131,7 +133,12 @@ class ActionJournalService:
         """Update the status of an action outcome."""
         now = datetime.now(UTC)
         with self._database.connection() as connection, write_transaction(connection):
-            current_receipt = json.loads(row["recovery_json"]) if row else {}
+            row = connection.execute(
+                "SELECT * FROM action_journal WHERE id = ?", (str(outcome_id),)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Action outcome not found: {outcome_id}")
+            current_receipt = json.loads(row["recovery_json"])
             if receipt:
                 current_receipt.update(receipt)
 

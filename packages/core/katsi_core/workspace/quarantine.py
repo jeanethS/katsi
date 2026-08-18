@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -57,7 +56,7 @@ class QuarantineService:
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        quarantine_id = uuid4()
+        quarry_id = uuid4()
         quarantine_timestamp = datetime.now(UTC)
 
         # Create quarantine directory
@@ -82,7 +81,7 @@ class QuarantineService:
         # Stage and move to quarantine
         try:
             # Stage the quarantine operation
-            stage_result = self._staging_manager.stage_file_copy(file_path, quarantine_path)
+            self._staging_manager.stage_file_copy(file_path, quarantine_path)
 
             # Record quarantine in database
             with self._database.connection() as connection, write_transaction(connection):
@@ -155,7 +154,7 @@ class QuarantineService:
         # Restore using staging
         try:
             # Stage restore operation
-            stage_result = self._staging_manager.stage_file_copy(quarry_path, restore_target)
+            self._staging_manager.stage_file_copy(quarry_path, restore_target)
 
             # Atomic replace
             self._staging_manager.atomic_replace(
@@ -262,11 +261,13 @@ class QuarantineService:
                 return
 
             action_history = json.loads(row["action_history_json"])
-            action_history.append({
-                "action": "restore",
-                "timestamp": datetime.now(UTC).isoformat(),
-                "restore_path": str(restore_path),
-            })
+            action_history.append(
+                {
+                    "action": "restore",
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "restore_path": str(restore_path),
+                }
+            )
 
             connection.execute(
                 """UPDATE quarantine_records
@@ -282,13 +283,16 @@ class QuarantineService:
     def get_statistics(self) -> dict[str, int]:
         """Get statistics about quarantined files."""
         with self._database.connection() as connection:
-            total_count = connection.execute(
-                "SELECT COUNT(*) FROM quarantine_records"
-            ).fetchone()[0]
+            total_count = connection.execute("SELECT COUNT(*) FROM quarantine_records").fetchone()[
+                0
+            ]
 
-            total_size = connection.execute(
-                "SELECT SUM(quarantine_size) FROM quarantine_records"
-            ).fetchone()[0] or 0
+            total_size = (
+                connection.execute(
+                    "SELECT SUM(quarantine_size) FROM quarantine_records"
+                ).fetchone()[0]
+                or 0
+            )
 
         return {
             "total_quarantined": total_count,

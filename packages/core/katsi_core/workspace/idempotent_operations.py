@@ -16,6 +16,7 @@ from katsi_core.workspace.contracts import (
     ChangeSetId,
     Operation,
 )
+from katsi_core.workspace.errors import ConflictError
 
 
 class IdempotentOperationService:
@@ -46,9 +47,7 @@ class IdempotentOperationService:
             return execution_id, existing_result
 
         # Record operation start
-        start_record = self._record_operation_start(
-            execution_id, change_set_id, operation
-        )
+        self._record_operation_start(execution_id, change_set_id, operation)
 
         # Execute operation (placeholder for actual execution)
         try:
@@ -73,7 +72,7 @@ class IdempotentOperationService:
             row = connection.execute(
                 """SELECT * FROM idempotent_operations
                    WHERE execution_id = ?""",
-                (str(execution_id),)
+                (str(execution_id),),
             ).fetchone()
 
             if row is None:
@@ -102,18 +101,20 @@ class IdempotentOperationService:
             # Get existing steps
             row = connection.execute(
                 "SELECT steps_json FROM idempotent_operations WHERE execution_id = ?",
-                (str(execution_id),)
+                (str(execution_id),),
             ).fetchone()
 
             if row is None:
                 raise KeyError(f"Unknown operation execution: {execution_id}")
 
             steps = json.loads(row["steps_json"]) if row["steps_json"] else []
-            steps.append({
-                "description": step_description,
-                "data": step_data,
-                "timestamp": now.isoformat(),
-            })
+            steps.append(
+                {
+                    "description": step_description,
+                    "data": step_data,
+                    "timestamp": now.isoformat(),
+                }
+            )
 
             connection.execute(
                 "UPDATE idempotent_operations SET steps_json = ? WHERE execution_id = ?",
@@ -130,7 +131,7 @@ class IdempotentOperationService:
             row = connection.execute(
                 """SELECT * FROM idempotent_operations
                    WHERE execution_id = ?""",
-                (str(execution_id),)
+                (str(execution_id),),
             ).fetchone()
 
             if row is None:
@@ -138,7 +139,10 @@ class IdempotentOperationService:
 
             # Verify operation matches
             stored_operation = json.loads(row["operation_json"])
-            if stored_operation["kind"] != operation.kind or stored_operation["path"] != operation.path:
+            if (
+                stored_operation["kind"] != operation.kind
+                or stored_operation["path"] != operation.path
+            ):
                 raise ConflictError("Operation mismatch for execution ID")
 
             status = ActionOutcomeStatus(row["status"])

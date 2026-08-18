@@ -11,6 +11,7 @@ from katsi_core.clients.llm import LLMClient
 from katsi_core.config import get_settings
 from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
+from katsi_core.media.registry import RepresentationRegistry
 from katsi_core.models import ContextBundle, FileHit, FileRecord
 from katsi_core.retrieve.context import build_context
 from katsi_core.retrieve.search import search
@@ -18,21 +19,21 @@ from katsi_core.store.graph import GraphStore
 from katsi_core.store.projection_worker import ProjectionWorker
 from katsi_core.store.vectors import VectorStore
 from katsi_core.store.workspace_migrations import apply_migrations
+from katsi_core.store.workspace_repository import WorkspaceRepository
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.synth import build_synthesizer
 from katsi_core.workspace.authorization import AuthorizationService
 from katsi_core.workspace.brief import BriefService
 from katsi_core.workspace.claims import ClaimService
+from katsi_core.workspace.contracts import (
+    CapabilityOperationClass,
+    Claim,
+    ClaimStatus,
+    RiskClass,
+)
 from katsi_core.workspace.identity import IdentityService
 from katsi_core.workspace.leases import WorkLeaseService
 from katsi_core.workspace.records import WorkspaceRecordService
-from katsi_core.store.workspace_repository import WorkspaceRepository
-from katsi_core.workspace.contracts import (
-    Claim,
-    ClaimStatus,
-    CapabilityOperationClass,
-    RiskClass,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ def _services():
     with database.connection() as connection:
         apply_migrations(connection, s.workspace.sqlite.schema_version)
     _state["workspace_database"] = database
+    _state["representation_registry"] = RepresentationRegistry(database)
     _state["workspace_repository"] = WorkspaceRepository(database)
     _state["identity_service"] = IdentityService(database)
     credential = os.environ.get(s.mcp.agent_credential_env)
@@ -181,6 +183,78 @@ def get_context(query: str, max_tokens: int = 3000) -> ContextBundle:
     )
 
 
+def _authorize_media_read(svc: dict, workspace_id: str) -> None:
+    """Require an authenticated READ grant before exposing cited media evidence."""
+    from uuid import UUID
+
+    identity = svc.get("authenticated_identity")
+    if identity is None:
+        raise PermissionError("Authentication required: set KATSI_AGENT_CREDENTIAL")
+    try:
+        svc["identity_service"].authorize(
+            identity.id, UUID(workspace_id), CapabilityOperationClass.READ, None, RiskClass.LOW
+        )
+    except Exception as exc:
+        raise PermissionError("authorization denied for media read") from exc
+
+
+@mcp.tool()
+def get_media_preview(workspace_id: str, representation_id: str, max_chars: int = 480) -> dict:
+    """Return a capability-checked, bounded cited preview without media bytes."""
+    from uuid import UUID
+
+    if not 1 <= max_chars <= 4_096:
+        raise ValueError("max_chars must be between 1 and 4096")
+    svc = _services()
+    _authorize_media_read(svc, workspace_id)
+    registry = svc["representation_registry"]
+    representation = registry.get_representation(UUID(representation_id))
+    if representation is None or not registry.is_current(UUID(representation_id)):
+        raise ValueError("representation is unavailable or no longer current")
+    preview = None
+    if representation.textual_payload is not None:
+        text = " ".join(representation.textual_payload.split())
+        preview = text if len(text) <= max_chars else f"{text[: max_chars - 1].rstrip()}…"
+    return {
+        "resource_version_id": str(representation.resource_version_id),
+        "representation_id": str(representation.id),
+        "kind": representation.kind.value,
+        "status": representation.status.value,
+        "locators": [item.model_dump(mode="json") for item in representation.locators],
+        "coverage_fraction": representation.coverage.coverage_fraction,
+        "preview": preview,
+        "thumbnail_reference": representation.blob_reference
+        if representation.kind.value == "thumbnail"
+        else None,
+    }
+
+
+@mcp.tool()
+def open_media_original(workspace_id: str, resource_version_id: str) -> dict:
+    """Capability-check and resolve a cited original; never return its bytes."""
+    from uuid import UUID
+
+    svc = _services()
+    _authorize_media_read(svc, workspace_id)
+    with svc["workspace_database"].connection() as connection:
+        row = connection.execute(
+            """
+            SELECT resources.id AS resource_id, resources.current_path, resource_versions.content_hash
+            FROM resource_versions JOIN resources ON resources.id = resource_versions.resource_id
+            WHERE resource_versions.id = ? AND resources.workspace_id = ?
+            """,
+            (str(UUID(resource_version_id)), workspace_id),
+        ).fetchone()
+    if row is None:
+        raise ValueError("unknown resource version in workspace")
+    return {
+        "resource_id": row["resource_id"],
+        "resource_version_id": resource_version_id,
+        "path": row["current_path"],
+        "content_hash": row["content_hash"],
+    }
+
+
 @mcp.tool()
 def get_file_summary(file_id: str) -> FileRecord:
     """Cached summary + metadata for one file (no re-read of the file)."""
@@ -287,12 +361,15 @@ def open_workspace(root_path: str) -> dict:
 
     # Try to find existing workspace by root
     database = svc["workspace_database"]
-    existing = database.connection().execute(
-        "SELECT * FROM workspaces WHERE root_path = ?", (str(root),)
-    ).fetchone()
+    existing = (
+        database.connection()
+        .execute("SELECT * FROM workspaces WHERE root_path = ?", (str(root),))
+        .fetchone()
+    )
 
     if existing:
         from katsi_core.workspace.contracts import Workspace
+
         workspace = Workspace(
             id=existing["id"],
             root_path=existing["root_path"],
@@ -340,9 +417,7 @@ def inspect_workspace(workspace_id: str) -> dict:
         raise ValueError(f"workspace not found: {workspace_id}")
 
     # Get recent events
-    recent_events = list(
-        svc["workspace_repository"].recent_events(UUID(workspace_id), limit=10)
-    )
+    recent_events = list(svc["workspace_repository"].recent_events(UUID(workspace_id), limit=10))
 
     return {
         "workspace_id": str(workspace.id),
@@ -441,13 +516,13 @@ def get_workspace_brief(workspace_id: str, byte_budget: int = 100000) -> dict:
         ],
         "leases": [
             {
-                "id": str(l.id),
-                "holder_id": str(l.holder_id),
-                "task_description": l.task_description,
-                "resource_scope": l.resource_scope,
-                "expires_at": l.expires_at.isoformat(),
+                "id": str(lease.id),
+                "holder_id": str(lease.holder_id),
+                "task_description": lease.task_description,
+                "resource_scope": lease.resource_scope,
+                "expires_at": lease.expires_at.isoformat(),
             }
-            for l in brief.leases
+            for lease in brief.leases
         ],
         "recent_events": [
             {
@@ -461,7 +536,9 @@ def get_workspace_brief(workspace_id: str, byte_budget: int = 100000) -> dict:
         ],
         "budget_bytes": brief.budget_bytes,
         "bytes_used": brief.bytes_used,
-        "omitted": [{"section": o.section, "count": o.count, "reason": o.reason} for o in brief.omitted],
+        "omitted": [
+            {"section": o.section, "count": o.count, "reason": o.reason} for o in brief.omitted
+        ],
         "provisional": [p.value for p in brief.provisional],
         "projection_lag": brief.projection_lag,
     }
@@ -473,6 +550,7 @@ def publish_claim(
     text: str,
     scope_paths: list[str] | None = None,
     confidence: float = 0.8,
+    media_evidence: list[dict[str, str]] | None = None,
 ) -> dict:
     """Publish a new Claim with capability checking.
 
@@ -487,8 +565,8 @@ def publish_claim(
 
     Returns the published Claim with its ID and status.
     """
-    from uuid import UUID, uuid4
     from datetime import UTC, datetime
+    from uuid import UUID, uuid4
 
     svc = _services()
 
@@ -521,7 +599,27 @@ def publish_claim(
         created_at=datetime.now(UTC),
     )
 
-    published = svc["claim_service"].publish(claim)
+    from katsi_core.workspace.contracts import ClaimEvidence, ClaimEvidenceKind
+
+    evidence = []
+    for item in media_evidence or []:
+        required = {"representation_id", "resource_version_id", "locator"}
+        if not required <= item.keys():
+            raise ValueError(
+                "media evidence requires representation_id, resource_version_id, and locator"
+            )
+        # Locator is serialized at the boundary so the append-only, portable
+        # Claim evidence schema stays compatible with existing workspaces.
+        evidence.append(
+            ClaimEvidence(
+                id=uuid4(),
+                claim_id=claim.id,
+                kind=ClaimEvidenceKind.AGENT,
+                reference={key: str(value) for key, value in item.items()},
+                created_at=datetime.now(UTC),
+            )
+        )
+    published = svc["claim_service"].publish(claim, tuple(evidence))
     return {
         "claim_id": str(published.id),
         "workspace_id": str(published.workspace_id),
@@ -571,7 +669,8 @@ def inspect_decisions(workspace_id: str, status: str | None = None) -> list[dict
     Returns verified and open decisions for the workspace.
     """
     from uuid import UUID
-    from katsi_core.workspace.contracts import WorkspaceRecordKind, WorkspaceRecordStatus
+
+    from katsi_core.workspace.contracts import WorkspaceRecordKind
 
     svc = _services()
     records = svc["record_service"].list_records(UUID(workspace_id))
@@ -602,13 +701,15 @@ def inspect_blockers(workspace_id: str) -> list[dict]:
     Returns all active (open) blockers for the workspace.
     """
     from uuid import UUID
+
     from katsi_core.workspace.contracts import WorkspaceRecordKind, WorkspaceRecordStatus
 
     svc = _services()
     records = svc["record_service"].list_records(UUID(workspace_id))
 
     blockers = [
-        r for r in records
+        r
+        for r in records
         if r.kind == WorkspaceRecordKind.BLOCKER and r.status == WorkspaceRecordStatus.OPEN
     ]
 
@@ -632,13 +733,16 @@ def inspect_open_work(workspace_id: str) -> list[dict]:
     Returns active open work items and their status.
     """
     from uuid import UUID
+
     from katsi_core.workspace.contracts import OpenWorkStatus
 
     svc = _services()
     work_items = svc["record_service"].list_open_work(UUID(workspace_id))
 
     # Filter for active work (open or blocked)
-    active_work = [w for w in work_items if w.status in (OpenWorkStatus.OPEN, OpenWorkStatus.BLOCKED)]
+    active_work = [
+        w for w in work_items if w.status in (OpenWorkStatus.OPEN, OpenWorkStatus.BLOCKED)
+    ]
 
     return [
         {
@@ -797,16 +901,16 @@ def inspect_active_leases(workspace_id: str) -> list[dict]:
 
     return [
         {
-            "lease_id": str(l.id),
-            "holder_id": str(l.holder_id),
-            "task_description": l.task_description,
-            "resource_scope": l.resource_scope,
-            "kind": l.kind,
-            "status": l.status,
-            "acquired_at": l.acquired_at.isoformat(),
-            "expires_at": l.expires_at.isoformat(),
+            "lease_id": str(lease.id),
+            "holder_id": str(lease.holder_id),
+            "task_description": lease.task_description,
+            "resource_scope": lease.resource_scope,
+            "kind": lease.kind,
+            "status": lease.status,
+            "acquired_at": lease.acquired_at.isoformat(),
+            "expires_at": lease.expires_at.isoformat(),
         }
-        for l in leases
+        for lease in leases
     ]
 
 

@@ -19,10 +19,7 @@ from katsi_core.workspace.contracts import (
     ChangeSetTransition,
     ChangeSetWithMetadata,
     Operation,
-    PostconditionAssertion,
-    ResourceVersionId,
     RiskClass,
-    RollbackInformation,
     ValidationEvidence,
 )
 from katsi_core.workspace.errors import ConflictError, InvalidTransitionError
@@ -106,7 +103,7 @@ class ChangeSetService:
                 "SELECT operation_json FROM change_set_operations WHERE change_set_id = ? ORDER BY ordinal",
                 (str(change_set_id),),
             ).fetchall()
-        from katsi_core.workspace.contracts import ResourceDependency, RiskClass
+        from katsi_core.workspace.contracts import ResourceDependency
 
         return ChangeSet(
             id=UUID(row["id"]),
@@ -261,16 +258,14 @@ class ChangeSetService:
             return None
 
         # Extract validation-specific evidence from the transition evidence
-        checks_passed = tuple(
-            k for k, v in validation_transition.evidence.items() if v == "passed"
-        )
-        checks_failed = tuple(
-            k for k, v in validation_transition.evidence.items() if v == "failed"
-        )
+        checks_passed = tuple(k for k, v in validation_transition.evidence.items() if v == "passed")
+        checks_failed = tuple(k for k, v in validation_transition.evidence.items() if v == "failed")
         resource_conflicts = tuple(
             k for k, v in validation_transition.evidence.items() if k.startswith("conflict:")
         )
-        dependency_satisfied = validation_transition.evidence.get("dependency_satisfied", "true") == "true"
+        dependency_satisfied = (
+            validation_transition.evidence.get("dependency_satisfied", "true") == "true"
+        )
 
         return ValidationEvidence(
             change_set_id=change_set_id,
@@ -281,7 +276,8 @@ class ChangeSetService:
             resource_conflicts=resource_conflicts,
             dependency_satisfied=dependency_satisfied,
             risk_assessment={
-                k: v for k, v in validation_transition.evidence.items()
+                k: v
+                for k, v in validation_transition.evidence.items()
                 if k not in {"checks_passed", "checks_failed", "dependency_satisfied"}
                 and not k.startswith("conflict:")
             },
@@ -316,8 +312,10 @@ class ChangeSetService:
             risk_approval=risk_approval,
             constraints=constraints,
             authorization_notes={
-                k: v for k, v in authorization_transition.evidence.items()
-                if k not in {"risk_approval", "capability_grant_id"} and not k.startswith("constraint:")
+                k: v
+                for k, v in authorization_transition.evidence.items()
+                if k not in {"risk_approval", "capability_grant_id"}
+                and not k.startswith("constraint:")
             },
         )
 

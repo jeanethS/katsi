@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,13 +10,9 @@ from uuid import UUID, uuid4
 
 from katsi_core.workspace.contracts import (
     ChangeSet,
-    ChangeSetStatus,
-    ResourceDependency,
     ResourceId,
     ResourceVersionId,
 )
-from katsi_core.workspace.errors import ConflictError
-from katsi_core.workspace.rollback import Preimage, RollbackStep
 from katsi_core.workspace.verification import (
     ChangeSetVerification,
     VerificationEvidence,
@@ -101,7 +96,7 @@ class VerificationService:
 
             except VerifierTimeoutError:
                 timeout_count += 1
-            except Exception as e:
+            except Exception:
                 failed_count += 1
 
         # Determine verification status
@@ -217,9 +212,11 @@ class VerificationService:
 
         for verifier in verifiers:
             # Check risk level applicability
-            if verifier.applicability.risk_levels:
-                if change_set.risk.value not in verifier.applicability.risk_levels:
-                    continue
+            if (
+                verifier.applicability.risk_levels
+                and change_set.risk.value not in verifier.applicability.risk_levels
+            ):
+                continue
 
             # Check operation kind applicability
             if verifier.applicability.operation_kinds:

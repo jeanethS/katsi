@@ -11,12 +11,12 @@ that lets a caller fabricate a score.
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Literal
-from pydantic import BaseModel, Field, field_validator
+from enum import StrEnum
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-class CapabilityKind(str, Enum):
+class CapabilityKind(StrEnum):
     """Media capability categories."""
 
     OCR = "ocr"
@@ -24,7 +24,7 @@ class CapabilityKind(str, Enum):
     CAPTIONING = "captioning"
 
 
-class HardwareClass(str, Enum):
+class HardwareClass(StrEnum):
     """Hardware tiers for benchmark stratification."""
 
     CPU_ONLY = "cpu_only"
@@ -33,7 +33,7 @@ class HardwareClass(str, Enum):
     NEURAL_ENGINE = "neural_engine"
 
 
-class RunStatus(str, Enum):
+class RunStatus(StrEnum):
     """Benchmark execution lifecycle states."""
 
     PENDING = "pending"
@@ -43,7 +43,7 @@ class RunStatus(str, Enum):
     SKIPPED = "skipped"
 
 
-class AccuracyMetric(str, Enum):
+class AccuracyMetric(StrEnum):
     """Supported accuracy measures by capability."""
 
     # OCR metrics
@@ -93,12 +93,11 @@ class ProbeResult(BaseModel):
         description="Why the adapter is unavailable (required if available=False)",
     )
 
-    @field_validator("reason")
-    @classmethod
-    def reason_required_if_unavailable(cls, v: str | None, info) -> str | None:
-        if info.data.get("available") is False and not v:
+    @model_validator(mode="after")
+    def reason_required_if_unavailable(self) -> ProbeResult:
+        if self.available is False and not self.reason:
             raise ValueError("reason is required when available=False")
-        return v
+        return self
 
 
 class ResourceUsage(BaseModel):
@@ -138,22 +137,20 @@ class BenchmarkRun(BaseModel):
     error: str | None = None
     accuracy_scores: list[AccuracyScore] = Field(default_factory=list)
 
-    @field_validator("usage", "error")
-    @classmethod
-    def completed_requires_usage(cls, v, info):
-        if info.data.get("status") == RunStatus.COMPLETED:
-            if info.field_name == "usage" and v is None:
+    @model_validator(mode="after")
+    def completed_requires_usage(self) -> BenchmarkRun:
+        if self.status == RunStatus.COMPLETED:
+            if self.usage is None:
                 raise ValueError("usage is required when status=COMPLETED")
-            if info.field_name == "error" and v is not None:
+            if self.error is not None:
                 raise ValueError("error must be None when status=COMPLETED")
-        return v
+        return self
 
-    @field_validator("error")
-    @classmethod
-    def failed_requires_error(cls, v: str | None, info):
-        if info.data.get("status") in (RunStatus.FAILED, RunStatus.SKIPPED) and not v:
-            raise ValueError(f"error is required when status={info.data.get('status')}")
-        return v
+    @model_validator(mode="after")
+    def failed_requires_error(self) -> BenchmarkRun:
+        if self.status in (RunStatus.FAILED, RunStatus.SKIPPED) and not self.error:
+            raise ValueError(f"error is required when status={self.status}")
+        return self
 
 
 class BenchmarkReport(BaseModel):

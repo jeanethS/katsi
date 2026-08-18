@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -23,9 +22,9 @@ from katsi_core.workspace.contracts import (
     ResourceStatus,
     RiskClass,
 )
-from katsi_core.workspace.errors import ConflictError, StaleStateError
+from katsi_core.workspace.errors import InvalidTransitionError, StaleStateError
 from katsi_core.workspace.identity import IdentityService
-from katsi_core.workspace.validation import ValidationService, ValidationResult
+from katsi_core.workspace.validation import ValidationService
 
 # Test constants
 HASH_A = "a" * 64
@@ -51,14 +50,12 @@ def _create_agents(database: WorkspaceSQLite, count: int = 3) -> list:
     identities = IdentityService(database)
     agents = []
     for i in range(count):
-        agent = identities.register(f"Agent{i+1}", "test-client")
+        agent = identities.register(f"Agent{i + 1}", "test-client")
         agents.append(agent)
     return agents
 
 
-def _create_resource(
-    repository: WorkspaceRepository, workspace, path: str, content_hash: str
-):
+def _create_resource(repository: WorkspaceRepository, workspace, path: str, content_hash: str):
     """Create a resource in the workspace for dependency testing."""
     from katsi_core.workspace.contracts import WorkspaceEventKind
 
@@ -71,19 +68,35 @@ def _create_resource(
         # Insert resource
         connection.execute(
             """INSERT INTO resources VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (str(resource_id), str(workspace.id), path, ResourceStatus.CURRENT.value, 0,
-             datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat()),
+            (
+                str(resource_id),
+                str(workspace.id),
+                path,
+                ResourceStatus.CURRENT.value,
+                0,
+                datetime.now(UTC).isoformat(),
+                datetime.now(UTC).isoformat(),
+            ),
         )
         # Insert resource version
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(version_id), str(resource_id), content_hash, 100,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(version_id),
+                str(resource_id),
+                content_hash,
+                100,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
         # Record workspace event
         repository.append_event(
-            workspace.id, version, WorkspaceEventKind.RESOURCE_CREATED,
-            resource_id=resource_id, detail={"path": path}
+            workspace.id,
+            version,
+            WorkspaceEventKind.RESOURCE_CREATED,
+            resource_id=resource_id,
+            detail={"path": path},
         )
 
     return resource_id, version_id
@@ -100,7 +113,9 @@ def _submit_proposal(
 ) -> ChangeSet:
     """Submit a Change Set proposal for testing."""
     if not operations:
-        operations = (CreateFileOperation(path="test.md", byte_count=1, result_content_hash=HASH_A),)
+        operations = (
+            CreateFileOperation(path="test.md", byte_count=1, result_content_hash=HASH_A),
+        )
 
     proposal = ChangeSet(
         id=uuid4(),
@@ -126,7 +141,7 @@ def test_agent_b_proposal_blocked_by_agent_c_same_file_change(tmp_path: Path) ->
     """
     database, repository, workspace = _create_workspace_database(tmp_path)
     agents = _create_agents(database, 3)
-    agent_b, agent_c = agents[1], agents[2]
+    agent_b, _agent_c = agents[1], agents[2]
 
     change_set_service = ChangeSetService(database)
     validation_service = ValidationService(database)
@@ -141,16 +156,20 @@ def test_agent_b_proposal_blocked_by_agent_c_same_file_change(tmp_path: Path) ->
         expected_content_hash=HASH_A,
     )
     proposal_b = _submit_proposal(
-        change_set_service, workspace, agent_b,
+        change_set_service,
+        workspace,
+        agent_b,
         title="Agent B feature",
         idempotency_key="agent-b-feature",
         dependencies=(dependency,),
-        operations=(ReplaceFileOperation(
-            path="src/feature.py",
-            byte_count=50,
-            expected_content_hash=HASH_A,
-            result_content_hash=HASH_B,
-        ),),
+        operations=(
+            ReplaceFileOperation(
+                path="src/feature.py",
+                byte_count=50,
+                expected_content_hash=HASH_A,
+                result_content_hash=HASH_B,
+            ),
+        ),
     )
 
     # Agent B's proposal validates successfully initially
@@ -163,8 +182,14 @@ def test_agent_b_proposal_blocked_by_agent_c_same_file_change(tmp_path: Path) ->
         new_version_id = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_version_id), str(resource_id), HASH_NEW, 120,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_version_id),
+                str(resource_id),
+                HASH_NEW,
+                120,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Revalidate Agent B's proposal - should now fail
@@ -195,7 +220,7 @@ def test_agent_b_proposal_valid_with_agent_c_different_file_change(tmp_path: Pat
     """
     database, repository, workspace = _create_workspace_database(tmp_path)
     agents = _create_agents(database, 3)
-    agent_b, agent_c = agents[1], agents[2]
+    agent_b, _agent_c = agents[1], agents[2]
 
     change_set_service = ChangeSetService(database)
     validation_service = ValidationService(database)
@@ -211,11 +236,15 @@ def test_agent_b_proposal_valid_with_agent_c_different_file_change(tmp_path: Pat
         expected_content_hash=HASH_A,
     )
     proposal_b = _submit_proposal(
-        change_set_service, workspace, agent_b,
+        change_set_service,
+        workspace,
+        agent_b,
         title="Agent B feature",
         idempotency_key="agent-b-feature",
         dependencies=(dependency,),
-        operations=(CreateFileOperation(path="src/feature.py", byte_count=1, result_content_hash=HASH_C),),
+        operations=(
+            CreateFileOperation(path="src/feature.py", byte_count=1, result_content_hash=HASH_C),
+        ),
     )
 
     # Agent B's proposal validates successfully
@@ -227,8 +256,14 @@ def test_agent_b_proposal_valid_with_agent_c_different_file_change(tmp_path: Pat
         new_utils_version = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_utils_version), str(utils_resource), HASH_NEW, 150,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_utils_version),
+                str(utils_resource),
+                HASH_NEW,
+                150,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Revalidate Agent B's proposal - should still succeed
@@ -264,11 +299,15 @@ def test_exact_invalidation_evidence_quality(tmp_path: Path) -> None:
         expected_content_hash=HASH_A,
     )
     proposal = _submit_proposal(
-        change_set_service, workspace, agent,
+        change_set_service,
+        workspace,
+        agent,
         title="Config-dependent feature",
         idempotency_key="config-feature",
         dependencies=(dependency,),
-        operations=(CreateFileOperation(path="feature.py", byte_count=1, result_content_hash=HASH_C),),
+        operations=(
+            CreateFileOperation(path="feature.py", byte_count=1, result_content_hash=HASH_C),
+        ),
     )
 
     # Initial validation succeeds
@@ -280,8 +319,14 @@ def test_exact_invalidation_evidence_quality(tmp_path: Path) -> None:
         new_version = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_version), str(resource_id), HASH_NEW, 200,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_version),
+                str(resource_id),
+                HASH_NEW,
+                200,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Get detailed invalidation evidence
@@ -324,50 +369,76 @@ def test_independent_proposals_parallel_proceed(tmp_path: Path) -> None:
     validation_service = ValidationService(database)
 
     # Create independent resources for each agent's scope
-    frontend_resource, frontend_version = _create_resource(repository, workspace, "frontend/app.js", HASH_A)
-    backend_resource, backend_version = _create_resource(repository, workspace, "backend/api.py", HASH_B)
+    frontend_resource, frontend_version = _create_resource(
+        repository, workspace, "frontend/app.js", HASH_A
+    )
+    backend_resource, backend_version = _create_resource(
+        repository, workspace, "backend/api.py", HASH_B
+    )
     docs_resource, docs_version = _create_resource(repository, workspace, "docs/readme.md", HASH_C)
 
     # Each agent creates a proposal in their independent scope
     proposal_a = _submit_proposal(
-        change_set_service, workspace, agent_a,
+        change_set_service,
+        workspace,
+        agent_a,
         title="Frontend feature",
         idempotency_key="frontend-feature",
-        dependencies=(ResourceDependency(
-            resource_id=frontend_resource,
-            expected_version_id=frontend_version,
-            expected_content_hash=HASH_A,
-        ),),
-        operations=(CreateFileOperation(path="frontend/new.js", byte_count=50, result_content_hash=HASH_NEW),),
+        dependencies=(
+            ResourceDependency(
+                resource_id=frontend_resource,
+                expected_version_id=frontend_version,
+                expected_content_hash=HASH_A,
+            ),
+        ),
+        operations=(
+            CreateFileOperation(
+                path="frontend/new.js", byte_count=50, result_content_hash=HASH_NEW
+            ),
+        ),
     )
 
     proposal_b = _submit_proposal(
-        change_set_service, workspace, agent_b,
+        change_set_service,
+        workspace,
+        agent_b,
         title="Backend feature",
         idempotency_key="backend-feature",
-        dependencies=(ResourceDependency(
-            resource_id=backend_resource,
-            expected_version_id=backend_version,
-            expected_content_hash=HASH_B,
-        ),),
-        operations=(CreateFileOperation(path="backend/endpoint.py", byte_count=60, result_content_hash=HASH_NEW),),
+        dependencies=(
+            ResourceDependency(
+                resource_id=backend_resource,
+                expected_version_id=backend_version,
+                expected_content_hash=HASH_B,
+            ),
+        ),
+        operations=(
+            CreateFileOperation(
+                path="backend/endpoint.py", byte_count=60, result_content_hash=HASH_NEW
+            ),
+        ),
     )
 
     proposal_c = _submit_proposal(
-        change_set_service, workspace, agent_c,
+        change_set_service,
+        workspace,
+        agent_c,
         title="Docs update",
         idempotency_key="docs-update",
-        dependencies=(ResourceDependency(
-            resource_id=docs_resource,
-            expected_version_id=docs_version,
-            expected_content_hash=HASH_C,
-        ),),
-        operations=(ReplaceFileOperation(
-            path="docs/guide.md",
-            byte_count=80,
-            expected_content_hash=HASH_C,
-            result_content_hash=HASH_NEW,
-        ),),
+        dependencies=(
+            ResourceDependency(
+                resource_id=docs_resource,
+                expected_version_id=docs_version,
+                expected_content_hash=HASH_C,
+            ),
+        ),
+        operations=(
+            ReplaceFileOperation(
+                path="docs/guide.md",
+                byte_count=80,
+                expected_content_hash=HASH_C,
+                result_content_hash=HASH_NEW,
+            ),
+        ),
     )
 
     # All proposals should validate successfully independently
@@ -398,15 +469,21 @@ def test_various_dependency_scenarios_hash_based(tmp_path: Path) -> None:
 
     # Proposal with hash dependency only
     proposal = _submit_proposal(
-        change_set_service, workspace, agent,
+        change_set_service,
+        workspace,
+        agent,
         title="Hash-dependent proposal",
         idempotency_key="hash-dep-test",
-        dependencies=(ResourceDependency(
-            resource_id=resource_id,
-            expected_content_hash=HASH_A,
-            # No expected_version_id - pure hash dependency
-        ),),
-        operations=(CreateFileOperation(path="parser.py", byte_count=1, result_content_hash=HASH_B),),
+        dependencies=(
+            ResourceDependency(
+                resource_id=resource_id,
+                expected_content_hash=HASH_A,
+                # No expected_version_id - pure hash dependency
+            ),
+        ),
+        operations=(
+            CreateFileOperation(path="parser.py", byte_count=1, result_content_hash=HASH_B),
+        ),
     )
 
     # Initial validation succeeds
@@ -418,8 +495,14 @@ def test_various_dependency_scenarios_hash_based(tmp_path: Path) -> None:
         new_version = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_version), str(resource_id), HASH_NEW, 300,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_version),
+                str(resource_id),
+                HASH_NEW,
+                300,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Should detect hash mismatch even without version dependency
@@ -443,15 +526,21 @@ def test_various_dependency_scenarios_version_based(tmp_path: Path) -> None:
 
     # Proposal with version ID dependency only
     proposal = _submit_proposal(
-        change_set_service, workspace, agent,
+        change_set_service,
+        workspace,
+        agent,
         title="Version-dependent proposal",
         idempotency_key="version-dep-test",
-        dependencies=(ResourceDependency(
-            resource_id=resource_id,
-            expected_version_id=version_id,
-            # No hash dependency - pure version dependency
-        ),),
-        operations=(CreateFileOperation(path="migration.py", byte_count=1, result_content_hash=HASH_B),),
+        dependencies=(
+            ResourceDependency(
+                resource_id=resource_id,
+                expected_version_id=version_id,
+                # No hash dependency - pure version dependency
+            ),
+        ),
+        operations=(
+            CreateFileOperation(path="migration.py", byte_count=1, result_content_hash=HASH_B),
+        ),
     )
 
     # Initial validation succeeds
@@ -463,8 +552,14 @@ def test_various_dependency_scenarios_version_based(tmp_path: Path) -> None:
         new_version = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_version), str(resource_id), HASH_NEW, 400,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_version),
+                str(resource_id),
+                HASH_NEW,
+                400,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Version-based dependency should still be valid (old version still exists)
@@ -511,14 +606,20 @@ def test_various_dependency_scenarios_absence_assertion(tmp_path: Path) -> None:
 
     # Proposal expecting the deleted resource to remain absent
     proposal = _submit_proposal(
-        change_set_service, workspace, agent,
+        change_set_service,
+        workspace,
+        agent,
         title="Absence assertion proposal",
         idempotency_key="absence-test",
-        dependencies=(ResourceDependency(
-            resource_id=existing_resource_id,
-            expected_absent=True,
-        ),),
-        operations=(CreateFileOperation(path="new_file.py", byte_count=1, result_content_hash=HASH_A),),
+        dependencies=(
+            ResourceDependency(
+                resource_id=existing_resource_id,
+                expected_absent=True,
+            ),
+        ),
+        operations=(
+            CreateFileOperation(path="new_file.py", byte_count=1, result_content_hash=HASH_A),
+        ),
     )
 
     # Initial validation succeeds (resource doesn't exist - was deleted)
@@ -534,8 +635,14 @@ def test_various_dependency_scenarios_absence_assertion(tmp_path: Path) -> None:
         version_id = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(version_id), str(existing_resource_id), HASH_B, 500,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(version_id),
+                str(existing_resource_id),
+                HASH_B,
+                500,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Validation should fail due to unexpected presence
@@ -553,7 +660,7 @@ def test_race_condition_handling_during_validation(tmp_path: Path) -> None:
     """
     database, repository, workspace = _create_workspace_database(tmp_path)
     agents = _create_agents(database, 4)
-    agent_b, agent_c, agent_d = agents[1], agents[2], agents[3]
+    agent_b, _agent_c, _agent_d = agents[1], agents[2], agents[3]
 
     change_set_service = ChangeSetService(database)
     validation_service = ValidationService(database)
@@ -567,11 +674,15 @@ def test_race_condition_handling_during_validation(tmp_path: Path) -> None:
         expected_content_hash=HASH_A,
     )
     proposal_b = _submit_proposal(
-        change_set_service, workspace, agent_b,
+        change_set_service,
+        workspace,
+        agent_b,
         title="Race condition test",
         idempotency_key="race-test",
         dependencies=(dependency,),
-        operations=(CreateFileOperation(path="output.py", byte_count=1, result_content_hash=HASH_B),),
+        operations=(
+            CreateFileOperation(path="output.py", byte_count=1, result_content_hash=HASH_B),
+        ),
     )
 
     # Simulate concurrent validation attempts during state changes
@@ -583,8 +694,14 @@ def test_race_condition_handling_during_validation(tmp_path: Path) -> None:
         new_version = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_version), str(resource_id), HASH_NEW, 600,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_version),
+                str(resource_id),
+                HASH_NEW,
+                600,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Agent D tries to validate Agent B's proposal (should fail)
@@ -596,8 +713,8 @@ def test_race_condition_handling_during_validation(tmp_path: Path) -> None:
     assert not owner_validation.is_valid
 
     # Both validations should report the same conflict
-    assert (concurrent_validation.hash_mismatches == owner_validation.hash_mismatches)
-    assert (concurrent_validation.violated_dependencies == owner_validation.violated_dependencies)
+    assert concurrent_validation.hash_mismatches == owner_validation.hash_mismatches
+    assert concurrent_validation.violated_dependencies == owner_validation.violated_dependencies
 
 
 def test_revalidation_before_authorization_freshness(tmp_path: Path) -> None:
@@ -617,11 +734,15 @@ def test_revalidation_before_authorization_freshness(tmp_path: Path) -> None:
         expected_content_hash=HASH_A,
     )
     proposal = _submit_proposal(
-        change_set_service, workspace, agent,
+        change_set_service,
+        workspace,
+        agent,
         title="Revalidation test",
         idempotency_key="reval-test",
         dependencies=(dependency,),
-        operations=(CreateFileOperation(path="client.py", byte_count=1, result_content_hash=HASH_B),),
+        operations=(
+            CreateFileOperation(path="client.py", byte_count=1, result_content_hash=HASH_B),
+        ),
     )
 
     # Submit and validate
@@ -637,8 +758,14 @@ def test_revalidation_before_authorization_freshness(tmp_path: Path) -> None:
         new_version = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_version), str(resource_id), HASH_NEW, 700,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_version),
+                str(resource_id),
+                HASH_NEW,
+                700,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Revalidation should detect the change
@@ -665,7 +792,9 @@ def test_operation_level_revalidation(tmp_path: Path) -> None:
         expected_content_hash=HASH_A,
     )
     proposal = _submit_proposal(
-        change_set_service, workspace, agent,
+        change_set_service,
+        workspace,
+        agent,
         title="Multi-operation test",
         idempotency_key="multi-op-test",
         dependencies=(dependency,),
@@ -689,8 +818,14 @@ def test_operation_level_revalidation(tmp_path: Path) -> None:
         new_version = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_version), str(resource_id), HASH_NEW, 800,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_version),
+                str(resource_id),
+                HASH_NEW,
+                800,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Revalidation should now fail for the first operation
@@ -714,15 +849,25 @@ def test_complex_multi_dependency_conflict_matrix(tmp_path: Path) -> None:
 
     # Proposal with multiple dependencies
     proposal = _submit_proposal(
-        change_set_service, workspace, agent,
+        change_set_service,
+        workspace,
+        agent,
         title="Multi-dependency test",
         idempotency_key="multi-dep-test",
         dependencies=(
-            ResourceDependency(resource_id=resource_a, expected_version_id=version_a, expected_content_hash=HASH_A),
-            ResourceDependency(resource_id=resource_b, expected_version_id=version_b, expected_content_hash=HASH_B),
-            ResourceDependency(resource_id=resource_c, expected_version_id=version_c, expected_content_hash=HASH_C),
+            ResourceDependency(
+                resource_id=resource_a, expected_version_id=version_a, expected_content_hash=HASH_A
+            ),
+            ResourceDependency(
+                resource_id=resource_b, expected_version_id=version_b, expected_content_hash=HASH_B
+            ),
+            ResourceDependency(
+                resource_id=resource_c, expected_version_id=version_c, expected_content_hash=HASH_C
+            ),
         ),
-        operations=(CreateFileOperation(path="orchestrator.py", byte_count=1, result_content_hash=HASH_NEW),),
+        operations=(
+            CreateFileOperation(path="orchestrator.py", byte_count=1, result_content_hash=HASH_NEW),
+        ),
     )
 
     # Initial validation succeeds
@@ -734,14 +879,26 @@ def test_complex_multi_dependency_conflict_matrix(tmp_path: Path) -> None:
         new_version_b = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_version_b), str(resource_b), HASH_NEW, 900,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_version_b),
+                str(resource_b),
+                HASH_NEW,
+                900,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
         new_version_c = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_version_c), str(resource_c), HASH_NEW, 950,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_version_c),
+                str(resource_c),
+                HASH_NEW,
+                950,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Should detect both conflicts
@@ -774,11 +931,15 @@ def test_validation_state_tracking_across_transitions(tmp_path: Path) -> None:
         expected_content_hash=HASH_A,
     )
     proposal = _submit_proposal(
-        change_set_service, workspace, agent,
+        change_set_service,
+        workspace,
+        agent,
         title="State tracking test",
         idempotency_key="state-tracking",
         dependencies=(dependency,),
-        operations=(CreateFileOperation(path="client.py", byte_count=1, result_content_hash=HASH_B),),
+        operations=(
+            CreateFileOperation(path="client.py", byte_count=1, result_content_hash=HASH_B),
+        ),
     )
 
     # Record initial validation
@@ -793,8 +954,14 @@ def test_validation_state_tracking_across_transitions(tmp_path: Path) -> None:
         new_version = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_version), str(resource_id), HASH_NEW, 1000,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_version),
+                str(resource_id),
+                HASH_NEW,
+                1000,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Revalidation should detect state changed since initial validation
@@ -809,7 +976,7 @@ def test_validation_state_tracking_across_transitions(tmp_path: Path) -> None:
     assert stale_proposal.status == ChangeSetStatus.STALE  # type: ignore[union-attr]
 
     # Should not be able to transition from STALE state
-    with pytest.raises(Exception):  # InvalidTransitionError
+    with pytest.raises(InvalidTransitionError):
         change_set_service.transition(proposal.id, ChangeSetStatus.AUTHORIZED, agent.id)
 
 
@@ -837,7 +1004,9 @@ def test_concurrent_change_coverage_summary(tmp_path: Path) -> None:
 
     # Agent A and Agent B both depend on shared resource
     proposal_a = _submit_proposal(
-        change_set_service, workspace, agents[0],
+        change_set_service,
+        workspace,
+        agents[0],
         title="Agent A shared work",
         idempotency_key="agent-a-shared",
         dependencies=(
@@ -852,11 +1021,17 @@ def test_concurrent_change_coverage_summary(tmp_path: Path) -> None:
                 expected_content_hash=HASH_B,
             ),
         ),
-        operations=(CreateFileOperation(path="agent_a_feature.py", byte_count=1, result_content_hash=HASH_NEW),),
+        operations=(
+            CreateFileOperation(
+                path="agent_a_feature.py", byte_count=1, result_content_hash=HASH_NEW
+            ),
+        ),
     )
 
     proposal_b = _submit_proposal(
-        change_set_service, workspace, agents[1],
+        change_set_service,
+        workspace,
+        agents[1],
         title="Agent B shared work",
         idempotency_key="agent-b-shared",
         dependencies=(
@@ -871,20 +1046,32 @@ def test_concurrent_change_coverage_summary(tmp_path: Path) -> None:
                 expected_content_hash=HASH_C,
             ),
         ),
-        operations=(CreateFileOperation(path="agent_b_feature.py", byte_count=1, result_content_hash=HASH_NEW),),
+        operations=(
+            CreateFileOperation(
+                path="agent_b_feature.py", byte_count=1, result_content_hash=HASH_NEW
+            ),
+        ),
     )
 
     # Agent C works independently
     proposal_c = _submit_proposal(
-        change_set_service, workspace, agents[2],
+        change_set_service,
+        workspace,
+        agents[2],
         title="Agent C independent work",
         idempotency_key="agent-c-independent",
-        dependencies=(ResourceDependency(
-            resource_id=resource_b,  # Different from shared
-            expected_version_id=version_b,
-            expected_content_hash=HASH_C,
-        ),),
-        operations=(CreateFileOperation(path="agent_c_feature.py", byte_count=1, result_content_hash=HASH_NEW),),
+        dependencies=(
+            ResourceDependency(
+                resource_id=resource_b,  # Different from shared
+                expected_version_id=version_b,
+                expected_content_hash=HASH_C,
+            ),
+        ),
+        operations=(
+            CreateFileOperation(
+                path="agent_c_feature.py", byte_count=1, result_content_hash=HASH_NEW
+            ),
+        ),
     )
 
     # All proposals should initially validate
@@ -897,8 +1084,14 @@ def test_concurrent_change_coverage_summary(tmp_path: Path) -> None:
         new_shared_version = uuid4()
         connection.execute(
             """INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)""",
-            (str(new_shared_version), str(shared_resource), HASH_NEW, 1100,
-             datetime.now(UTC).isoformat(), str(uuid4())),
+            (
+                str(new_shared_version),
+                str(shared_resource),
+                HASH_NEW,
+                1100,
+                datetime.now(UTC).isoformat(),
+                str(uuid4()),
+            ),
         )
 
     # Both A and B should now fail validation

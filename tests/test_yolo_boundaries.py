@@ -12,32 +12,27 @@ These tests prove what YOLO CANNOT do, ensuring safety boundaries are enforced:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from uuid import uuid4
+
 import pytest
-from datetime import UTC, datetime, timedelta
-from uuid import UUID, uuid4
 
 from katsi_core.config import SQLiteSettings
-from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.store.workspace_migrations import apply_migrations
+from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.store.workspace_transactions import write_transaction
 from katsi_core.workspace import (
-    AgentIdentity,
-    AgentIdentityId,
     ApplyPatchOperation,
     CapabilityOperationClass,
     ChangeSet,
-    ChangeSetStatus,
-    CopyFileOperation,
     CreateDirectoryOperation,
     CreateFileOperation,
-    MoveFileOperation,
     QuarantineFileOperation,
     ReplaceDerivedArtifactOperation,
     ReplaceFileOperation,
     ResourceDependency,
     RestoreQuarantinedFileOperation,
     RiskClass,
-    WorkspaceId,
     YoloModeStatus,
     YoloService,
     YoloSuspensionReason,
@@ -67,24 +62,47 @@ def workspace_setup(database):
         conn.execute(
             """INSERT INTO workspaces (id, root_path, display_name, status, state_version, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (str(workspace_id), "/tmp/workspace", "TestWorkspace", "active", 0,
-             datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat())
+            (
+                str(workspace_id),
+                "/tmp/workspace",
+                "TestWorkspace",
+                "active",
+                0,
+                datetime.now(UTC).isoformat(),
+                datetime.now(UTC).isoformat(),
+            ),
         )
 
         # Insert owner identity
         conn.execute(
             """INSERT INTO agent_identities (id, display_name, client_name, model_name, process_description, active, created_at, revoked_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (str(owner_id), "Owner", "test-client", "test-model", None, 1,
-             datetime.now(UTC).isoformat(), None)
+            (
+                str(owner_id),
+                "Owner",
+                "test-client",
+                "test-model",
+                None,
+                1,
+                datetime.now(UTC).isoformat(),
+                None,
+            ),
         )
 
         # Insert agent identity
         conn.execute(
             """INSERT INTO agent_identities (id, display_name, client_name, model_name, process_description, active, created_at, revoked_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (str(agent_id), "Test Agent", "test-client", "test-model", None, 1,
-             datetime.now(UTC).isoformat(), None)
+            (
+                str(agent_id),
+                "Test Agent",
+                "test-client",
+                "test-model",
+                None,
+                1,
+                datetime.now(UTC).isoformat(),
+                None,
+            ),
         )
 
     return database, workspace_id, owner_id, agent_id
@@ -127,9 +145,17 @@ class TestAuthorityRestrictions:
             conn.execute(
                 """INSERT INTO capability_grants
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (str(grant_id), str(agent_id), str(workspace_id),
-                 '["change_set"]', "[]", "low",
-                 datetime.now(UTC).isoformat(), None, None)
+                (
+                    str(grant_id),
+                    str(agent_id),
+                    str(workspace_id),
+                    '["change_set"]',
+                    "[]",
+                    "low",
+                    datetime.now(UTC).isoformat(),
+                    None,
+                    None,
+                ),
             )
 
         # Activate YOLO with different scope
@@ -151,6 +177,7 @@ class TestAuthorityRestrictions:
 
         assert grants is not None
         import json
+
         original_scope = json.loads(grants["resource_scope_json"])
         assert original_scope == [], "Original grant scope should not be modified by YOLO"
 
@@ -312,7 +339,9 @@ class TestScopeRestrictions:
                 workspace_id=workspace_id,
                 owner_identity_id=owner_id,
                 agent_identity_id=agent_id,
-                operation_classes=frozenset([CapabilityOperationClass.CHANGE_SET, CapabilityOperationClass.CLAIM]),
+                operation_classes=frozenset(
+                    [CapabilityOperationClass.CHANGE_SET, CapabilityOperationClass.CLAIM]
+                ),
                 resource_scope=("src/", "tests/"),
                 maximum_risk=RiskClass.MEDIUM,
             )
@@ -413,7 +442,7 @@ class TestSafeguardPreservation:
         )
 
         # YOLO doesn't prevent conflict detection
-        result = yolo_service.can_auto_authorize(
+        yolo_service.can_auto_authorize(
             workspace_id=workspace_id,
             agent_identity_id=agent_id,
             change_set=change_set,
@@ -476,7 +505,10 @@ class TestSafeguardPreservation:
         )
         assert not result_suspended.would_auto_authorize
         # When suspended, it's treated as not active
-        assert "No active YOLO mode" in result_suspended.block_reason or "SUSPENDED" in result_suspended.block_reason
+        assert (
+            "No active YOLO mode" in result_suspended.block_reason
+            or "SUSPENDED" in result_suspended.block_reason
+        )
 
 
 class TestDataProtection:
@@ -663,7 +695,9 @@ class TestOriginalModificationRestrictions:
         )
 
         assert not result.would_auto_authorize
-        assert "Owner-authored original modifications require explicit approval" in result.block_reason
+        assert (
+            "Owner-authored original modifications require explicit approval" in result.block_reason
+        )
 
     def test_yolo_cannot_create_files_as_originals_when_restricted(self, workspace_setup):
         """YOLO mode cannot create original files when restricted."""
@@ -932,7 +966,16 @@ class TestAutomaticSuspension:
             conn.execute(
                 """INSERT INTO change_sets (id, workspace_id, author_id, title, idempotency_key, risk, status, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (str(change_set_id), str(workspace_id), str(agent_id), "Test change", "test-key", "low", "pending", datetime.now(UTC).isoformat())
+                (
+                    str(change_set_id),
+                    str(workspace_id),
+                    str(agent_id),
+                    "Test change",
+                    "test-key",
+                    "low",
+                    "pending",
+                    datetime.now(UTC).isoformat(),
+                ),
             )
 
         # Simulate invariant failure
@@ -965,7 +1008,16 @@ class TestAutomaticSuspension:
             conn.execute(
                 """INSERT INTO change_sets (id, workspace_id, author_id, title, idempotency_key, risk, status, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (str(change_set_id), str(workspace_id), str(agent_id), "Test change", "test-key", "low", "pending", datetime.now(UTC).isoformat())
+                (
+                    str(change_set_id),
+                    str(workspace_id),
+                    str(agent_id),
+                    "Test change",
+                    "test-key",
+                    "low",
+                    "pending",
+                    datetime.now(UTC).isoformat(),
+                ),
             )
 
         # Simulate verification failure
@@ -1024,7 +1076,10 @@ class TestAutomaticSuspension:
 
         assert not result.would_auto_authorize
         # When suspended, it's treated as not active
-        assert "No active YOLO mode" in result.block_reason or "suspended" in result.block_reason.lower()
+        assert (
+            "No active YOLO mode" in result.block_reason
+            or "suspended" in result.block_reason.lower()
+        )
 
         # Verify no automatic reactivation mechanism exists
         # Owner must explicitly reactivate (not implemented in basic YOLO)
@@ -1051,7 +1106,16 @@ class TestAutomaticSuspension:
             conn.execute(
                 """INSERT INTO change_sets (id, workspace_id, author_id, title, idempotency_key, risk, status, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (str(change_set_id), str(workspace_id), str(agent_id), "Test change", "test-key", "low", "pending", datetime.now(UTC).isoformat())
+                (
+                    str(change_set_id),
+                    str(workspace_id),
+                    str(agent_id),
+                    "Test change",
+                    "test-key",
+                    "low",
+                    "pending",
+                    datetime.now(UTC).isoformat(),
+                ),
             )
 
         # Create multiple suspension events
@@ -1121,8 +1185,10 @@ class TestComprehensiveBoundaryScenarios:
         # Should be blocked (either scope or original modification policy)
         assert not result.would_auto_authorize
         # The first boundary violation found in the check order will be reported
-        assert ("outside YOLO resource scope" in result.block_reason or
-                "not allowed under YOLO policy" in result.block_reason)
+        assert (
+            "outside YOLO resource scope" in result.block_reason
+            or "not allowed under YOLO policy" in result.block_reason
+        )
 
     def test_yolo_boundary_enforcement_order(self, workspace_setup):
         """Verify YOLO enforces boundaries in correct priority order."""
@@ -1153,9 +1219,7 @@ class TestComprehensiveBoundaryScenarios:
             title="High risk",
             idempotency_key="high-risk-key",
             dependencies=(),
-            operations=(
-                CreateDirectoryOperation(path="src/test/", byte_count=0),
-            ),
+            operations=(CreateDirectoryOperation(path="src/test/", byte_count=0),),
             risk=RiskClass.HIGH,
             created_at=datetime.now(UTC),
         )

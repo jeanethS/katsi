@@ -6,11 +6,9 @@ Aggregates benchmark results and selects best adapters by different metrics.
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass
 from datetime import datetime
 
 from benchmarks.media.contracts import (
-    AccuracyMetric,
     BenchmarkReport,
     BenchmarkRun,
     CapabilityKind,
@@ -112,9 +110,7 @@ class BenchmarkReporter:
             return None
 
         # Calculate overall average per adapter
-        adapter_averages = {
-            name: statistics.mean(times) for name, times in adapter_times.items()
-        }
+        adapter_averages = {name: statistics.mean(times) for name, times in adapter_times.items()}
 
         # Return adapter with lowest average latency
         best_adapter = min(adapter_averages, key=adapter_averages.get)
@@ -140,9 +136,7 @@ class BenchmarkReporter:
             return None
 
         # Calculate overall average per adapter
-        adapter_averages = {
-            name: statistics.mean(mem) for name, mem in adapter_memory.items()
-        }
+        adapter_averages = {name: statistics.mean(mem) for name, mem in adapter_memory.items()}
 
         # Return adapter with lowest average memory
         best_adapter = min(adapter_averages, key=adapter_averages.get)

@@ -21,7 +21,7 @@ import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -32,7 +32,6 @@ from katsi_core.workspace.contracts import (
     RiskClass,
 )
 from katsi_core.workspace.verification import (
-    ChangeSetVerification,
     VerifierApplicability,
     VerifierDefinition,
     VerifierPolicy,
@@ -40,12 +39,8 @@ from katsi_core.workspace.verification import (
 from katsi_core.workspace.verification_service import VerificationService
 from katsi_core.workspace.verifier_execution import (
     VerifierExecutor,
-    VerifierSecurityError,
-    VerifierTimeoutError,
     redact_secrets,
-    truncate_output,
 )
-
 
 # ==================== FIXTURES AND HELPERS ====================
 
@@ -68,6 +63,7 @@ def _find_true_executable() -> str:
             continue
     # Fallback: use Python as no-op
     import sys
+
     return sys.executable
 
 
@@ -422,6 +418,7 @@ def test_verifier_timeout_exceeds_limit(
     verification_service = VerificationService(executor, temp_workspace, temp_evidence_dir)
 
     import time
+
     start = time.time()
     verification = verification_service.verify_change_set(
         sample_change_set,
@@ -770,7 +767,9 @@ def test_interrupted_verification_recovery_evidence_preservation(
 
     # Evidence should be consistent across runs
     assert len(evidence1) == len(evidence2)
-    assert all(e1.change_set_id == e2.change_set_id for e1, e2 in zip(evidence1, evidence2))
+    assert all(
+        e1.change_set_id == e2.change_set_id for e1, e2 in zip(evidence1, evidence2, strict=False)
+    )
 
 
 def test_interrupted_verification_with_multiple_verifiers_recovery(
@@ -909,7 +908,6 @@ def test_security_constraint_secret_redaction_enforced(
 ) -> None:
     """Test that secret redaction security constraint is enforced."""
     # Test the secret redaction function directly
-    from katsi_core.workspace.verifier_execution import redact_secrets
 
     output_with_secrets = """
     API_KEY=sk-1234567890abcdef
@@ -990,7 +988,9 @@ def test_full_verification_workflow_success_to_evidence(
     assert len(evidence) > 0
     assert all(e.change_set_id == sample_change_set.id for e in evidence)
     # Some evidence might not have storage path if it's hash-only for large content
-    assert any(e.storage_path is not None for e in evidence or True)  # At least some evidence should exist
+    assert any(
+        e.storage_path is not None for e in evidence or True
+    )  # At least some evidence should exist
 
     # Verify evidence files exist (if they have storage paths)
     for e in evidence:

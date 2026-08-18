@@ -88,7 +88,9 @@ def _representation(
         updated_at=now,
         textual_payload="content" if status != MediaRepresentationStatus.FAILED else None,
         locators=(
-            WholeResourceLocator(resource_version_id=resource_version_id, representation_id=uuid4()),
+            WholeResourceLocator(
+                resource_version_id=resource_version_id, representation_id=uuid4()
+            ),
         )
         if status != MediaRepresentationStatus.FAILED
         else (),
@@ -125,19 +127,28 @@ def _fingerprint(settings=None, **overrides):
 def test_planner_orders_independent_root_stages_in_one_wave():
     planner = PipelineDAGPlanner(
         [
-            PipelineNodeSpec(stage=PipelineStage.EXTRACT_METADATA, output_kind=MediaRepresentationKind.METADATA),
-            PipelineNodeSpec(stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT),
+            PipelineNodeSpec(
+                stage=PipelineStage.EXTRACT_METADATA, output_kind=MediaRepresentationKind.METADATA
+            ),
+            PipelineNodeSpec(
+                stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT
+            ),
         ]
     )
     waves = planner.plan()
     assert len(waves) == 1
-    assert {n.stage for n in waves[0]} == {PipelineStage.EXTRACT_METADATA, PipelineStage.EXTRACT_TEXT}
+    assert {n.stage for n in waves[0]} == {
+        PipelineStage.EXTRACT_METADATA,
+        PipelineStage.EXTRACT_TEXT,
+    }
 
 
 def test_planner_orders_dependent_stages_into_separate_waves():
     planner = PipelineDAGPlanner(
         [
-            PipelineNodeSpec(stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT),
+            PipelineNodeSpec(
+                stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT
+            ),
             PipelineNodeSpec(
                 stage=PipelineStage.EMBED_TEXT,
                 output_kind=MediaRepresentationKind.TEXT_EMBEDDING,
@@ -155,7 +166,9 @@ def test_planner_branches_are_independent_of_each_other():
     """OCR and caption both depend on metadata but not on each other -- same wave."""
     planner = PipelineDAGPlanner(
         [
-            PipelineNodeSpec(stage=PipelineStage.EXTRACT_METADATA, output_kind=MediaRepresentationKind.METADATA),
+            PipelineNodeSpec(
+                stage=PipelineStage.EXTRACT_METADATA, output_kind=MediaRepresentationKind.METADATA
+            ),
             PipelineNodeSpec(
                 stage=PipelineStage.OCR,
                 output_kind=MediaRepresentationKind.OCR_TEXT,
@@ -209,7 +222,9 @@ def test_downstream_of_returns_dependent_nodes():
     )
     planner = PipelineDAGPlanner(
         [
-            PipelineNodeSpec(stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT),
+            PipelineNodeSpec(
+                stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT
+            ),
             embed,
         ]
     )
@@ -283,7 +298,9 @@ def test_stage_runner_cache_hit_skips_work(cache, resource_id):
     cache._registry.register_representation(existing, make_current=True)
 
     runner = StageRunner(cache)
-    node = PipelineNodeSpec(stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT)
+    node = PipelineNodeSpec(
+        stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT
+    )
 
     calls = []
 
@@ -300,7 +317,9 @@ def test_stage_runner_cache_hit_skips_work(cache, resource_id):
 def test_stage_runner_retries_transient_failure_then_succeeds(cache, resource_id):
     fingerprint = _fingerprint()
     runner = StageRunner(cache, max_retries=2)
-    node = PipelineNodeSpec(stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT)
+    node = PipelineNodeSpec(
+        stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT
+    )
 
     attempts = {"count": 0}
 
@@ -320,7 +339,9 @@ def test_stage_runner_retries_transient_failure_then_succeeds(cache, resource_id
 def test_stage_runner_exhausts_retries_and_reports_failure(cache, resource_id):
     fingerprint = _fingerprint()
     runner = StageRunner(cache, max_retries=1)
-    node = PipelineNodeSpec(stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT)
+    node = PipelineNodeSpec(
+        stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT
+    )
 
     def work():
         raise RuntimeError("permanent failure")
@@ -335,7 +356,9 @@ def test_stage_runner_exhausts_retries_and_reports_failure(cache, resource_id):
 def test_stage_runner_respects_cancellation_before_work(cache, resource_id):
     fingerprint = _fingerprint()
     runner = StageRunner(cache)
-    node = PipelineNodeSpec(stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT)
+    node = PipelineNodeSpec(
+        stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT
+    )
     token = CancellationToken()
     token.cancel()
 
@@ -359,7 +382,9 @@ def test_sibling_stages_survive_independent_failures(cache, resource_id):
     )
 
     runner = StageRunner(cache, max_retries=0)
-    failing_node = PipelineNodeSpec(stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT)
+    failing_node = PipelineNodeSpec(
+        stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT
+    )
     succeeding_node = PipelineNodeSpec(
         stage=PipelineStage.EXTRACT_METADATA, output_kind=MediaRepresentationKind.METADATA
     )
@@ -395,8 +420,12 @@ def test_sibling_stages_survive_independent_failures(cache, resource_id):
 
 
 def test_aggregate_coverage_all_success_is_complete():
-    node_a = PipelineNodeSpec(stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT)
-    node_b = PipelineNodeSpec(stage=PipelineStage.EXTRACT_METADATA, output_kind=MediaRepresentationKind.METADATA)
+    node_a = PipelineNodeSpec(
+        stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT
+    )
+    node_b = PipelineNodeSpec(
+        stage=PipelineStage.EXTRACT_METADATA, output_kind=MediaRepresentationKind.METADATA
+    )
     from katsi_core.media.planner import StageOutcome
 
     outcomes = [
@@ -409,17 +438,25 @@ def test_aggregate_coverage_all_success_is_complete():
 
 
 def test_aggregate_coverage_partial_never_reports_full_understanding():
-    node_a = PipelineNodeSpec(stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT)
+    node_a = PipelineNodeSpec(
+        stage=PipelineStage.EXTRACT_TEXT, output_kind=MediaRepresentationKind.EXTRACTED_TEXT
+    )
     node_b = PipelineNodeSpec(stage=PipelineStage.OCR, output_kind=MediaRepresentationKind.OCR_TEXT)
-    node_c = PipelineNodeSpec(stage=PipelineStage.CAPTION, output_kind=MediaRepresentationKind.IMAGE_CAPTION)
-    node_d = PipelineNodeSpec(stage=PipelineStage.TRANSCRIBE, output_kind=MediaRepresentationKind.TRANSCRIPT_SEGMENT)
+    node_c = PipelineNodeSpec(
+        stage=PipelineStage.CAPTION, output_kind=MediaRepresentationKind.IMAGE_CAPTION
+    )
+    node_d = PipelineNodeSpec(
+        stage=PipelineStage.TRANSCRIBE, output_kind=MediaRepresentationKind.TRANSCRIPT_SEGMENT
+    )
     from katsi_core.media.planner import StageOutcome
 
     outcomes = [
         StageOutcome(node=node_a, status=StageOutcomeStatus.SUCCESS),
         StageOutcome(node=node_b, status=StageOutcomeStatus.SUCCESS),
         StageOutcome(node=node_c, status=StageOutcomeStatus.SUCCESS),
-        StageOutcome(node=node_d, status=StageOutcomeStatus.FAILED, error="transcription unavailable"),
+        StageOutcome(
+            node=node_d, status=StageOutcomeStatus.FAILED, error="transcription unavailable"
+        ),
     ]
     coverage = aggregate_coverage(outcomes)
     assert coverage.is_complete is False
@@ -455,8 +492,9 @@ def test_concurrency_limiter_enforces_workspace_cap_independently_of_global():
     limiter = ConcurrencyLimiter(limits)
 
     with limiter.acquire("workspace-a", JobResourceClass.CPU):
-        with pytest.raises(ConcurrencyLimitError), limiter.acquire(
-            "workspace-a", JobResourceClass.CPU, blocking=False
+        with (
+            pytest.raises(ConcurrencyLimitError),
+            limiter.acquire("workspace-a", JobResourceClass.CPU, blocking=False),
         ):
             pass
         # A different workspace is unaffected by workspace-a's cap.

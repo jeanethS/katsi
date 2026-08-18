@@ -638,8 +638,11 @@ def test_caption_keyframe_uses_adapter_when_present(tmp_path):
             )
 
     result = caption_keyframe(
-        _FakeCaptionAdapter(), keyframe, b"jpeg-bytes",
-        source_content_hash="a" * 32, working_directory=tmp_path,
+        _FakeCaptionAdapter(),
+        keyframe,
+        b"jpeg-bytes",
+        source_content_hash="a" * 32,
+        working_directory=tmp_path,
     )
     assert result is not None
     assert result.textual_payload == "a caption"
@@ -652,9 +655,16 @@ def test_caption_keyframe_adapter_failure_degrades_to_none(tmp_path):
         def caption(self, *args, **kwargs):
             raise RuntimeError("model unavailable")
 
-    assert caption_keyframe(
-        _RaisingAdapter(), keyframe, b"x", source_content_hash="a" * 32, working_directory=tmp_path
-    ) is None
+    assert (
+        caption_keyframe(
+            _RaisingAdapter(),
+            keyframe,
+            b"x",
+            source_content_hash="a" * 32,
+            working_directory=tmp_path,
+        )
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -679,7 +689,9 @@ def test_build_scene_representations_combines_keyframe_and_transcript():
     ]
 
     reps = build_scene_representations(
-        scenes, keyframes, transcript,
+        scenes,
+        keyframes,
+        transcript,
         resource_version_id=resource_version_id,
         source_content_hash="a" * 32,
         settings=_sampling_settings(),
@@ -704,7 +716,9 @@ def test_build_scene_representations_missing_keyframe_is_partial_not_dropped():
     resource_version_id = uuid4()
     scenes = (ScenePlan(start_ms=0, end_ms=5_000, keyframe_timestamp_ms=2_500),)
     reps = build_scene_representations(
-        scenes, {}, [],
+        scenes,
+        {},
+        [],
         resource_version_id=resource_version_id,
         source_content_hash="a" * 32,
         settings=_sampling_settings(),
@@ -717,7 +731,9 @@ def test_build_scene_representations_missing_keyframe_is_partial_not_dropped():
 
 def test_build_scene_representations_no_scenes_yields_no_representations():
     reps = build_scene_representations(
-        (), {}, [],
+        (),
+        {},
+        [],
         resource_version_id=uuid4(),
         source_content_hash="a" * 32,
         settings=_sampling_settings(),
@@ -758,7 +774,9 @@ def test_end_to_end_speech_plus_slides_video_scenario():
     ]
 
     reps = build_scene_representations(
-        scenes, keyframes, transcript,
+        scenes,
+        keyframes,
+        transcript,
         resource_version_id=resource_version_id,
         source_content_hash="a" * 32,
         settings=_sampling_settings(),

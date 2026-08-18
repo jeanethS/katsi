@@ -1,7 +1,7 @@
 """Tests for katsi_core.ingest.chunk."""
 
-from katsi_core.ingest.chunk import chunk, estimate_tokens
 from katsi_core.config import ChunkingThresholds
+from katsi_core.ingest.chunk import chunk, estimate_tokens
 
 
 def test_chunk_empty_returns_empty_list() -> None:
@@ -109,7 +109,9 @@ def test_no_content_loss_with_whitespace_run() -> None:
 
     # Check that we have substantial content (not just tiny fragments)
     total_length = sum(len(c.text) for c in result)
-    assert total_length > len(text) * 0.8, f"Too much content lost: {total_length} vs original {len(text)}"
+    assert total_length > len(text) * 0.8, (
+        f"Too much content lost: {total_length} vs original {len(text)}"
+    )
 
 
 def test_prefers_paragraph_boundaries() -> None:
@@ -139,7 +141,9 @@ def test_prefers_paragraph_boundaries() -> None:
     total_para_breaks = sum(c.text.count("\n\n") for c in result)
     original_para_breaks = text.count("\n\n")
     # Should have approximately the same number of paragraph breaks
-    assert total_para_breaks >= original_para_breaks * 0.8, f"Lost too many paragraph breaks: {total_para_breaks} vs {original_para_breaks}"
+    assert total_para_breaks >= original_para_breaks * 0.8, (
+        f"Lost too many paragraph breaks: {total_para_breaks} vs {original_para_breaks}"
+    )
 
 
 def test_size_bound_respected() -> None:
@@ -168,7 +172,9 @@ def test_termination_on_pathological_input() -> None:
     # Create pathological input: no whitespace at all
     no_whitespace = "a" * 10000
 
-    result = chunk("test", no_whitespace, settings=ChunkingThresholds(target_tokens=512, overlap=64))
+    result = chunk(
+        "test", no_whitespace, settings=ChunkingThresholds(target_tokens=512, overlap=64)
+    )
 
     # Should terminate and produce chunks
     assert len(result) >= 1
