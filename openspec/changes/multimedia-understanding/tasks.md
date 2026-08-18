@@ -128,7 +128,7 @@
 ## 14. Dogfood, Benchmarks, and Documentation
 
 - [x] 14.1 Build a small licensed fixture corpus covering screenshots, diagrams, scans, speech, multi-speaker audio, slides, silent video, and speech-plus-visual video.
-- [ ] 14.2 Benchmark selected local adapters for accuracy, locator quality, latency, peak memory, disk use, and hardware fallback.
+- [x] 14.2 Benchmark selected local adapters for accuracy, locator quality, latency, peak memory, disk use, and hardware fallback.
 - [x] 14.3 Measure representation reuse, partial coverage, per-modality retrieval quality, score calibration, and context cost.
 - [x] 14.4 Dogfood a cross-modal Claim that cites an image region, PDF page, audio interval, and video keyframe from the Katsi workspace.
 - [x] 14.5 Update README, configuration examples, optional dependency instructions, privacy documentation, MCP result contracts, and media troubleshooting guide.
