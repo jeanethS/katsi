@@ -5,8 +5,10 @@ from __future__ import annotations
 import fnmatch
 import json
 import logging
+import os
 from pathlib import Path
 from pathlib import Path as PathLib
+from threading import Event
 from uuid import UUID
 
 import typer
@@ -19,6 +21,7 @@ from katsi_core.clients.llm import LLMClient
 from katsi_core.config import get_settings
 from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
+from katsi_core.media.registry import RepresentationRegistry
 from katsi_core.retrieve.context import build_context
 from katsi_core.retrieve.search import search
 from katsi_core.store.graph import GraphStore
@@ -27,14 +30,26 @@ from katsi_core.store.workspace_migrations import apply_migrations
 from katsi_core.store.workspace_repository import WorkspaceRepository
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 from katsi_core.synth import SynthConfigError, build_synthesizer
+from katsi_core.workspace.authorization import AuthorizationService
+from katsi_core.workspace.brief import BriefService
+from katsi_core.workspace.claims import ClaimService
 from katsi_core.workspace.contracts import (
     CapabilityGrant,
     CapabilityOperationClass,
+    Claim,
+    ClaimStatus,
+    OpenWorkStatus,
     PortableProjectState,
     RiskClass,
+    WorkspaceRecordKind,
+    WorkspaceRecordStatus,
 )
 from katsi_core.workspace.identity import IdentityService
+from katsi_core.workspace.leases import WorkLeaseService
+from katsi_core.workspace.observer import WatchdogObserver
 from katsi_core.workspace.portable_state import PortableStateStore as PortableStateService
+from katsi_core.workspace.reconcile import WorkspaceReconciler
+from katsi_core.workspace.records import WorkspaceRecordService
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +75,27 @@ def _services():
     with database.connection() as connection:
         apply_migrations(connection, s.workspace.sqlite.schema_version)
     _state["workspace_database"] = database
+    _state["representation_registry"] = RepresentationRegistry(database)
     _state["workspace_repository"] = WorkspaceRepository(database)
     _state["identity_service"] = IdentityService(database)
+    credential = os.environ.get(s.mcp.agent_credential_env)
+    if credential:
+        _state["authenticated_identity"] = _state["identity_service"].authenticate(credential)
+    _state["authorization_service"] = AuthorizationService(database)
+    _state["claim_service"] = ClaimService(
+        database, _state["identity_service"], _state["authorization_service"]
+    )
+    _state["lease_service"] = WorkLeaseService(database, _state["identity_service"], s.lease)
+    _state["record_service"] = WorkspaceRecordService(database, _state["identity_service"])
+    _state["brief_service"] = BriefService(
+        _state["workspace_repository"],
+        database,
+        _state["record_service"],
+        _state["claim_service"],
+        _state["record_service"],
+        _state["lease_service"],
+        s.brief,
+    )
     _state["portable_state_service"] = PortableStateService(
         s.workspace.portable_state.relative_path
     )
@@ -107,6 +141,47 @@ def _walk_files(root: Path, include: list[str], exclude: list[str]) -> list[Path
     return out
 
 
+def _index_tree(svc: dict, path: Path) -> dict[str, int]:
+    """Index matching files, preserving the pipeline's content-hash cache."""
+    settings = svc["settings"]
+    files = _walk_files(path, settings.ingest.include_globs, settings.ingest.exclude_globs)
+    counts = {"indexed": 0, "skipped": 0, "error": 0, "stale": 0}
+    pipeline = svc["pipeline"]
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("[cyan]indexing", total=len(files) or None)
+        for file_path in files:
+            progress.update(task, description=str(file_path.name)[:40])
+            try:
+                record = pipeline.index_file(file_path)
+            except Exception as exc:
+                logger.warning("index %s failed: %r", file_path, exc)
+                counts["error"] += 1
+            else:
+                if record.status.value == "indexed":
+                    counts["indexed"] += 1
+                elif record.status.value == "error":
+                    counts["error"] += 1
+                elif record.status.value == "stale":
+                    counts["stale"] += 1
+            progress.update(task, advance=1)
+    return counts
+
+
+def _print_index_summary(counts: dict[str, int]) -> None:
+    table = Table(title="Index summary")
+    table.add_column("status")
+    table.add_column("count", justify="right")
+    for status, count in counts.items():
+        table.add_row(status, str(count))
+    console.print(table)
+
+
 @app.command()
 def index(
     path: Path = typer.Argument(..., help="File or directory to index."),  # noqa: B008
@@ -119,40 +194,77 @@ def index(
         raise typer.Exit(code=1) from None
     files = _walk_files(path, s.ingest.include_globs, s.ingest.exclude_globs)
     console.print(f"[bold]indexing[/] {len(files)} file(s) under {path}")
-    pipeline = svc["pipeline"]
-    counts = {"indexed": 0, "skipped": 0, "error": 0, "stale": 0}
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("[cyan]indexing", total=len(files) or None)
-        for f in files:
-            progress.update(task, description=str(f.name)[:40])
-            try:
-                rec = pipeline.index_file(f)
-            except Exception as e:
-                logger.warning("index %s failed: %r", f, e)
-                counts["error"] += 1
-            else:
-                if rec.status.value == "indexed":
-                    # Distinguish "freshly indexed" vs "skipped (unchanged)".
-                    # The pipeline returns INDEXED for both — we don't know which,
-                    # so count as "indexed". (T4 could be extended to track this.)
-                    counts["indexed"] += 1
-                elif rec.status.value == "error":
-                    counts["error"] += 1
-                elif rec.status.value == "stale":
-                    counts["stale"] += 1
-            progress.update(task, advance=1)
-    table = Table(title="Index summary")
-    table.add_column("status")
-    table.add_column("count", justify="right")
-    for k, v in counts.items():
-        table.add_row(k, str(v))
-    console.print(table)
+    _print_index_summary(_index_tree(svc, path))
+
+
+@app.command(name="start")
+def start_cmd(
+    path: Path = typer.Argument(Path("."), help="Project folder to open and ingest."),  # noqa: B008
+    watch: bool = typer.Option(
+        False, "--watch", help="Keep reconciling and ingesting external changes."
+    ),  # noqa: B008
+    display_name: str | None = typer.Option(None, "--name", help="Workspace display name."),  # noqa: B008
+) -> None:
+    """Open a project, reconcile its files, and ingest configured content."""
+    svc = _services()
+    root = path.resolve()
+    if not root.is_dir():
+        console.print(f"[red]error:[/] project folder not found: {path}")
+        raise typer.Exit(code=1) from None
+    try:
+        database = svc["workspace_database"]
+        with database.connection() as connection:
+            existing = connection.execute(
+                "SELECT id FROM workspaces WHERE root_path = ?", (str(root),)
+            ).fetchone()
+        if existing is None:
+            workspace = svc["workspace_repository"].register_workspace(
+                root, display_name or f"workspace-{root.name}"
+            )
+            action = "created"
+        else:
+            workspace = svc["workspace_repository"].get_workspace(UUID(existing["id"]))
+            assert workspace is not None
+            action = "opened"
+
+        reconciler = WorkspaceReconciler(
+            svc["workspace_repository"],
+            svc["settings"].ingest,
+            svc["settings"].workspace.observer,
+            svc["claim_service"],
+        )
+        reconciler.on_startup(workspace.id)
+        console.print(f"[green]workspace {action}:[/] {workspace.display_name} ({workspace.id})")
+        _print_index_summary(_index_tree(svc, root))
+        console.print("[dim]Ready: use `katsi search`, `katsi ask`, or `katsi workspace-brief`.[/]")
+
+        if not watch:
+            return
+
+        observer = WatchdogObserver()
+
+        def on_event(event: object) -> None:
+            reconciler.handle_event(workspace.id, event)
+            candidate = getattr(event, "destination_path", None) or getattr(event, "path", None)
+            if (
+                candidate is not None
+                and candidate.is_file()
+                and _matches_any(str(candidate), svc["settings"].ingest.include_globs)
+                and not _matches_any(str(candidate), svc["settings"].ingest.exclude_globs)
+            ):
+                svc["pipeline"].index_file(candidate)
+
+        observer.start(root, on_event)
+        console.print("[green]watching for external changes[/] — press Ctrl-C to stop")
+        try:
+            Event().wait()
+        except KeyboardInterrupt:
+            console.print("\n[dim]watch stopped[/]")
+        finally:
+            observer.stop()
+    except Exception as exc:
+        console.print(f"[red]start failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
 
 
 @app.command()
@@ -292,6 +404,334 @@ def ask(
 
 
 # --- Owner commands for workspace coordination ---
+
+
+def _print_json(payload: object) -> None:
+    console.print_json(json.dumps(payload, default=str))
+
+
+def _authenticated_identity(svc: dict) -> object:
+    identity = svc.get("authenticated_identity")
+    if identity is None:
+        raise PermissionError("Authentication required: set KATSI_AGENT_CREDENTIAL")
+    return identity
+
+
+def _authorize_media_read(svc: dict, workspace_id: str) -> None:
+    identity = _authenticated_identity(svc)
+    try:
+        svc["identity_service"].authorize(
+            identity.id,
+            UUID(workspace_id),
+            CapabilityOperationClass.READ,
+            None,
+            RiskClass.LOW,
+        )
+    except Exception as exc:
+        raise PermissionError("authorization denied for media read") from exc
+
+
+@app.command(name="media-preview")
+def media_preview_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace UUID containing the media."),  # noqa: B008
+    representation_id: str = typer.Argument(..., help="Derived representation UUID."),  # noqa: B008
+    max_chars: int = typer.Option(480, "--max-chars", min=1, max=4_096),  # noqa: B008
+) -> None:
+    """Show a bounded cited media preview without returning media bytes."""
+    svc = _services()
+    try:
+        _authorize_media_read(svc, workspace_id)
+        registry = svc["representation_registry"]
+        representation = registry.get_representation(UUID(representation_id))
+        if representation is None or not registry.is_current(UUID(representation_id)):
+            raise ValueError("representation is unavailable or no longer current")
+        preview = None
+        if representation.textual_payload is not None:
+            text = " ".join(representation.textual_payload.split())
+            preview = text if len(text) <= max_chars else f"{text[: max_chars - 1].rstrip()}…"
+        _print_json(
+            {
+                "resource_version_id": str(representation.resource_version_id),
+                "representation_id": str(representation.id),
+                "kind": representation.kind.value,
+                "status": representation.status.value,
+                "locators": [
+                    locator.model_dump(mode="json") for locator in representation.locators
+                ],
+                "coverage_fraction": representation.coverage.coverage_fraction,
+                "preview": preview,
+                "thumbnail_reference": (
+                    representation.blob_reference
+                    if representation.kind.value == "thumbnail"
+                    else None
+                ),
+            }
+        )
+    except Exception as exc:
+        console.print(f"[red]media preview failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command(name="media-original")
+def media_original_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace UUID containing the media."),  # noqa: B008
+    resource_version_id: str = typer.Argument(..., help="Resource-version UUID to resolve."),  # noqa: B008
+) -> None:
+    """Resolve a cited media original without returning its bytes."""
+    svc = _services()
+    try:
+        _authorize_media_read(svc, workspace_id)
+        with svc["workspace_database"].connection() as connection:
+            row = connection.execute(
+                """
+                SELECT resources.id AS resource_id, resources.current_path, resource_versions.content_hash
+                FROM resource_versions JOIN resources ON resources.id = resource_versions.resource_id
+                WHERE resource_versions.id = ? AND resources.workspace_id = ?
+                """,
+                (str(UUID(resource_version_id)), workspace_id),
+            ).fetchone()
+        if row is None:
+            raise ValueError("unknown resource version in workspace")
+        _print_json(
+            {
+                "resource_id": row["resource_id"],
+                "resource_version_id": resource_version_id,
+                "path": row["current_path"],
+                "content_hash": row["content_hash"],
+            }
+        )
+    except Exception as exc:
+        console.print(f"[red]media original lookup failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command(name="inspect-workspace")
+def inspect_workspace_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace UUID to inspect."),  # noqa: B008
+) -> None:
+    """Display workspace metadata and its ten most recent events."""
+    svc = _services()
+    try:
+        workspace = svc["workspace_repository"].get_workspace(UUID(workspace_id))
+        if workspace is None:
+            raise ValueError(f"workspace not found: {workspace_id}")
+        events = svc["workspace_repository"].recent_events(UUID(workspace_id), limit=10)
+        _print_json(
+            {
+                **workspace.model_dump(mode="json"),
+                "recent_events": [event.model_dump(mode="json") for event in events],
+            }
+        )
+    except Exception as exc:
+        console.print(f"[red]workspace inspection failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command(name="workspace-brief")
+def workspace_brief_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace UUID to summarize."),  # noqa: B008
+    byte_budget: int = typer.Option(100_000, "--byte-budget", help="Maximum brief size in bytes."),  # noqa: B008
+) -> None:
+    """Return the budget-bounded authoritative workspace brief."""
+    svc = _services()
+    try:
+        brief = svc["brief_service"].assemble(UUID(workspace_id), byte_budget=byte_budget)
+        _print_json(brief.model_dump(mode="json"))
+    except Exception as exc:
+        console.print(f"[red]workspace brief failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command(name="publish-claim")
+def publish_claim_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace UUID."),  # noqa: B008
+    text: str = typer.Argument(..., help="Claim text."),  # noqa: B008
+    scope: str = typer.Option("", "--scope", help="Comma-separated workspace-relative paths."),  # noqa: B008
+    confidence: float = typer.Option(0.8, "--confidence", min=0, max=1),  # noqa: B008
+) -> None:
+    """Publish a capability-checked proposed claim."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    svc = _services()
+    try:
+        identity = _authenticated_identity(svc)
+        workspace = UUID(workspace_id)
+        svc["identity_service"].authorize(
+            identity.id, workspace, CapabilityOperationClass.CLAIM, None, RiskClass.LOW
+        )
+        claim = Claim(
+            id=uuid4(),
+            workspace_id=workspace,
+            author_id=identity.id,
+            text=text,
+            scope_paths=tuple(path.strip() for path in scope.split(",") if path.strip()),
+            confidence=confidence,
+            status=ClaimStatus.PROPOSED,
+            created_at=datetime.now(UTC),
+        )
+        _print_json(svc["claim_service"].publish(claim).model_dump(mode="json"))
+    except Exception as exc:
+        console.print(f"[red]claim publication failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command(name="list-claims")
+def list_claims_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace UUID."),  # noqa: B008
+    status: str | None = typer.Option(None, "--status", help="Optional claim status filter."),  # noqa: B008
+) -> None:
+    """List claims for a workspace."""
+    svc = _services()
+    try:
+        claims = svc["claim_service"].list_for_workspace(UUID(workspace_id))
+        if status is not None:
+            claims = [claim for claim in claims if claim.status.value == status]
+        _print_json([claim.model_dump(mode="json") for claim in claims])
+    except Exception as exc:
+        console.print(f"[red]claim listing failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+def _list_workspace_records(
+    workspace_id: str, kind: WorkspaceRecordKind, status: str | None
+) -> list[dict]:
+    svc = _services()
+    records = svc["record_service"].list_records(UUID(workspace_id))
+    return [
+        record.model_dump(mode="json")
+        for record in records
+        if record.kind == kind and (status is None or record.status.value == status)
+    ]
+
+
+@app.command(name="inspect-decisions")
+def inspect_decisions_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace UUID."),  # noqa: B008
+    status: str | None = typer.Option(None, "--status", help="Optional decision status filter."),  # noqa: B008
+) -> None:
+    """List decisions recorded for a workspace."""
+    try:
+        _print_json(_list_workspace_records(workspace_id, WorkspaceRecordKind.DECISION, status))
+    except Exception as exc:
+        console.print(f"[red]decision inspection failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command(name="inspect-blockers")
+def inspect_blockers_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace UUID."),  # noqa: B008
+) -> None:
+    """List open blockers for a workspace."""
+    try:
+        _print_json(
+            _list_workspace_records(
+                workspace_id, WorkspaceRecordKind.BLOCKER, WorkspaceRecordStatus.OPEN.value
+            )
+        )
+    except Exception as exc:
+        console.print(f"[red]blocker inspection failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command(name="inspect-open-work")
+def inspect_open_work_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace UUID."),  # noqa: B008
+) -> None:
+    """List open and blocked work items for a workspace."""
+    svc = _services()
+    try:
+        work = svc["record_service"].list_open_work(UUID(workspace_id))
+        _print_json(
+            [
+                item.model_dump(mode="json")
+                for item in work
+                if item.status in {OpenWorkStatus.OPEN, OpenWorkStatus.BLOCKED}
+            ]
+        )
+    except Exception as exc:
+        console.print(f"[red]open work inspection failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command(name="acquire-lease")
+def acquire_lease_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace UUID."),  # noqa: B008
+    task: str = typer.Argument(..., help="Work being leased."),  # noqa: B008
+    scope: str = typer.Option("", "--scope", help="Comma-separated workspace-relative paths."),  # noqa: B008
+) -> None:
+    """Acquire an advisory work lease for the authenticated identity."""
+    svc = _services()
+    try:
+        identity = _authenticated_identity(svc)
+        workspace = UUID(workspace_id)
+        svc["identity_service"].authorize(
+            identity.id, workspace, CapabilityOperationClass.LEASE, None, RiskClass.LOW
+        )
+        lease = svc["lease_service"].acquire(
+            workspace,
+            identity.id,
+            task,
+            tuple(path.strip() for path in scope.split(",") if path.strip()),
+        )
+        _print_json(lease.model_dump(mode="json"))
+    except Exception as exc:
+        console.print(f"[red]lease acquisition failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command(name="renew-lease")
+def renew_lease_cmd(
+    lease_id: str = typer.Argument(..., help="Lease UUID."),  # noqa: B008
+    expected_expires_at: str = typer.Argument(..., help="Current ISO-8601 expiration."),  # noqa: B008
+) -> None:
+    """Renew an active work lease using its current expiration value."""
+    from datetime import datetime
+
+    svc = _services()
+    try:
+        identity = _authenticated_identity(svc)
+        lease = svc["lease_service"].renew(
+            UUID(lease_id), identity.id, datetime.fromisoformat(expected_expires_at)
+        )
+        _print_json(lease.model_dump(mode="json"))
+    except Exception as exc:
+        console.print(f"[red]lease renewal failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command(name="release-lease")
+def release_lease_cmd(
+    lease_id: str = typer.Argument(..., help="Lease UUID."),  # noqa: B008
+) -> None:
+    """Release an active work lease held by the authenticated identity."""
+    svc = _services()
+    try:
+        identity = _authenticated_identity(svc)
+        _print_json(
+            svc["lease_service"].release(UUID(lease_id), identity.id).model_dump(mode="json")
+        )
+    except Exception as exc:
+        console.print(f"[red]lease release failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command(name="inspect-active-leases")
+def inspect_active_leases_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace UUID."),  # noqa: B008
+) -> None:
+    """List active advisory work leases for a workspace."""
+    svc = _services()
+    try:
+        _print_json(
+            [
+                lease.model_dump(mode="json")
+                for lease in svc["lease_service"].active_for_workspace(UUID(workspace_id))
+            ]
+        )
+    except Exception as exc:
+        console.print(f"[red]lease inspection failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
 
 
 @app.command(name="workspace")

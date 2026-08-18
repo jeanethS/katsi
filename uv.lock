@@ -391,6 +391,9 @@ wheels = [
 name = "katsi"
 version = "0.1.0"
 source = { editable = "." }
+dependencies = [
+    { name = "katsi-cli" },
+]
 
 [package.optional-dependencies]
 pdf = [
@@ -405,7 +408,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "markitdown", extras = ["pdf"], marker = "extra == 'pdf'", specifier = ">=0.1.6" }]
+requires-dist = [
+    { name = "katsi-cli", editable = "packages/cli" },
+    { name = "markitdown", extras = ["pdf"], marker = "extra == 'pdf'", specifier = ">=0.1.6" },
+]
 provides-extras = ["pdf"]
 
 [package.metadata.requires-dev]

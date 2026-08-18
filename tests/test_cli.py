@@ -9,6 +9,12 @@ from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
 from katsi_core.store.graph import GraphStore
 from katsi_core.store.vectors import VectorStore
+from katsi_core.store.workspace_migrations import apply_migrations
+from katsi_core.store.workspace_repository import WorkspaceRepository
+from katsi_core.store.workspace_sqlite import WorkspaceSQLite
+from katsi_core.workspace.authorization import AuthorizationService
+from katsi_core.workspace.claims import ClaimService
+from katsi_core.workspace.identity import IdentityService
 
 
 class _FakeEmbed:
@@ -61,6 +67,11 @@ def cli_runner(tmp_path):
     pipeline = IngestPipeline(
         s, graph=graph, vectors=vectors, embed=embed, llm=llm, records=records
     )
+    database = WorkspaceSQLite(tmp_path / "katsi_data" / "workspace.sqlite3", s.workspace.sqlite)
+    with database.connection() as connection:
+        apply_migrations(connection, s.workspace.sqlite.schema_version)
+    identities = IdentityService(database)
+    claims = ClaimService(database, identities, AuthorizationService(database))
 
     cli_main._state.clear()
     cli_main._state.update(
@@ -72,6 +83,10 @@ def cli_runner(tmp_path):
             "vectors": vectors,
             "records": records,
             "pipeline": pipeline,
+            "workspace_database": database,
+            "workspace_repository": WorkspaceRepository(database),
+            "identity_service": identities,
+            "claim_service": claims,
         }
     )
     from typer.testing import CliRunner
@@ -129,6 +144,20 @@ def test_index_missing_path_errors(cli_runner, tmp_path):
     assert res.exit_code != 0
 
 
+def test_start_registers_and_ingests_a_project(cli_runner, tmp_path):
+    runner, cli_main, embed, llm, _, _ = cli_runner
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "README.md").write_text("# Project\n\nMentions Acme.")
+
+    res = runner.invoke(cli_main.app, ["start", str(project)])
+
+    assert res.exit_code == 0, res.output
+    assert "workspace created" in res.output
+    assert embed.calls == 1
+    assert llm.calls == 1
+
+
 def test_ask_local_with_disabled_answer_tool_passes(cli_runner, tmp_path):
     """The --local flag should not crash. The CLI gracefully prints a 'disabled' note."""
     runner, cli_main, _, _, _, s = cli_runner
@@ -153,11 +182,29 @@ def test_ask_mode_return_only_smoke(cli_runner, tmp_path):
     assert "mode=return_only" in res.output
 
 
-def test_help_lists_all_four_commands(cli_runner):
+def test_help_lists_all_cli_commands(cli_runner):
     runner, cli_main, _, _, _, _ = cli_runner
     res = runner.invoke(cli_main.app, ["--help"])
     assert res.exit_code == 0, res.output
-    assert "index" in res.output
-    assert "status" in res.output
-    assert "search" in res.output
-    assert "ask" in res.output
+    for command in (
+        "index",
+        "status",
+        "start",
+        "search",
+        "ask",
+        "media-preview",
+        "media-original",
+        "workspace",
+        "inspect-workspace",
+        "workspace-brief",
+        "publish-claim",
+        "list-claims",
+        "inspect-decisions",
+        "inspect-blockers",
+        "inspect-open-work",
+        "acquire-lease",
+        "renew-lease",
+        "release-lease",
+        "inspect-active-leases",
+    ):
+        assert command in res.output

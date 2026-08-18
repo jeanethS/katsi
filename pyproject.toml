@@ -15,6 +15,12 @@ classifiers = [
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+dependencies = [
+    "katsi-cli",
+]
+
+[project.scripts]
+katsi = "katsi_cli.main:main"
 
 [project.urls]
 Homepage = "https://github.com/jeanethS/katsi"
