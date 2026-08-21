@@ -446,6 +446,21 @@ _ALLOWED_SEGMENT_KINDS = {"speech", "silence", "music", "unrecognized", "unsuppo
 
 
 @dataclass(frozen=True, slots=True)
+class WordTimingData:
+    """One word-level timing inside a speech segment (7.3).
+
+    Rides inside its parent transcript segment; never its own
+    representation, graph node, or embedding -- a single word is not
+    independently meaningful to retrieve.
+    """
+
+    start_ms: int
+    end_ms: int
+    text: str
+    confidence: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TranscriptSegmentData:
     """One strictly-parsed timestamped transcription segment (7.3/7.6)."""
 
@@ -456,6 +471,8 @@ class TranscriptSegmentData:
     segment_kind: str  # one of _ALLOWED_SEGMENT_KINDS
     language: str | None = None
     speaker_label: str | None = None
+    # Last field so existing positional construction stays valid.
+    words: tuple[WordTimingData, ...] = ()
 
 
 def build_transcribe_definition(
@@ -464,7 +481,16 @@ def build_transcribe_definition(
     timeout_seconds: float = 120.0,
     max_output_bytes: int = 20_000_000,
 ) -> MediaPipelineDefinition:
-    """Owner-configured definition for local speech transcription."""
+    """Owner-configured definition for local speech transcription.
+
+    The configured executable is an owner-supplied wrapper, not the stock
+    whisper CLI: the strict contract requires ``segments`` and
+    ``coverage_fraction``, which stock whisper does not emit. With
+    ``--word-timestamps`` the wrapper must additionally emit an optional
+    per-segment ``words`` array of ``{start_ms, end_ms, text, confidence?}``,
+    each word's range falling within its parent segment, time-ordered and
+    non-overlapping. Speech segments only.
+    """
     return MediaPipelineDefinition(
         id="audio_transcribe_whisper_v1",
         name="Local speech transcription",
@@ -475,7 +501,7 @@ def build_transcribe_definition(
         representation_kinds_produced=[MediaRepresentationKind.TRANSCRIPT_SEGMENT],
         producer_type=MediaProducerType.MODEL_BACKED,
         executable_path=executable_path,
-        fixed_args=["{input_path}", "--output_dir", "{working_directory}"],
+        fixed_args=["{input_path}", "--output_dir", "{working_directory}", "--word-timestamps"],
         allowed_env_vars=[],
         working_directory=".",
         shell_enabled=False,
@@ -504,6 +530,59 @@ def _parse_transcription_batch(raw: str) -> dict[str, Any]:
     if not is_valid:
         raise ValueError(f"Transcription output failed validation: {error}")
     return parsed
+
+
+def _parse_word_timings(
+    raw_segment: dict[str, Any], *, segment_start_ms: int, segment_end_ms: int, segment_kind: str
+) -> tuple[WordTimingData, ...]:
+    """Strictly parse optional word-level timings for one segment.
+
+    The array is optional so transcription wrappers written against the
+    pre-word contract keep working: they simply produce no words.
+    """
+    raw_words = raw_segment.get("words")
+    if raw_words is None:
+        return ()
+    if not isinstance(raw_words, list):
+        raise ValueError("Segment words must be a JSON array")
+    # 7.6 parity with text: non-speech segments never carry fabricated words.
+    if segment_kind != "speech" and raw_words:
+        raise ValueError(f"Non-speech segment_kind={segment_kind!r} must not carry words")
+
+    words: list[WordTimingData] = []
+    previous_end_ms = segment_start_ms
+    for raw_word in raw_words:
+        if not isinstance(raw_word, dict):
+            raise ValueError("Each word must be a JSON object")
+
+        start_ms = int(raw_word["start_ms"])
+        end_ms = int(raw_word["end_ms"])
+        if end_ms <= start_ms:
+            raise ValueError(f"Word end_ms ({end_ms}) must exceed start_ms ({start_ms})")
+        if start_ms < segment_start_ms or end_ms > segment_end_ms:
+            raise ValueError(
+                f"Word range ({start_ms}, {end_ms}) must fall within its segment "
+                f"({segment_start_ms}, {segment_end_ms})"
+            )
+        if start_ms < previous_end_ms:
+            raise ValueError("Words must be time-ordered and non-overlapping")
+        previous_end_ms = end_ms
+
+        text = raw_word["text"]
+        if not isinstance(text, str):
+            raise ValueError("Word text must be a string")
+
+        confidence = raw_word.get("confidence")
+        if confidence is not None:
+            confidence = float(confidence)
+            if not (0.0 <= confidence <= 1.0):
+                raise ValueError("Word confidence must be within [0.0, 1.0]")
+
+        words.append(
+            WordTimingData(start_ms=start_ms, end_ms=end_ms, text=text, confidence=confidence)
+        )
+
+    return tuple(words)
 
 
 class AudioTranscriptionPipeline(MediaPipelineProtocol):
@@ -644,6 +723,13 @@ def parse_transcript_segments(batch: dict[str, Any]) -> tuple[list[TranscriptSeg
             if not (0.0 <= confidence <= 1.0):
                 raise ValueError("confidence must be within [0.0, 1.0]")
 
+        words = _parse_word_timings(
+            raw_segment,
+            segment_start_ms=start_ms,
+            segment_end_ms=end_ms,
+            segment_kind=segment_kind,
+        )
+
         segments.append(
             TranscriptSegmentData(
                 start_ms=start_ms,
@@ -652,6 +738,7 @@ def parse_transcript_segments(batch: dict[str, Any]) -> tuple[list[TranscriptSeg
                 confidence=confidence,
                 segment_kind=segment_kind,
                 language=raw_segment.get("language"),
+                words=words,
             )
         )
 

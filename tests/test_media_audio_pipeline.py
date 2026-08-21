@@ -28,6 +28,7 @@ from katsi_core.media.audio_pipeline import (
     AudioSpeakerSegmentationPipeline,
     AudioTranscriptionPipeline,
     TranscriptSegmentData,
+    WordTimingData,
     apply_speaker_labels,
     assemble_transcript_chunks,
     build_decode_definition,
@@ -339,6 +340,153 @@ class TestTranscriptSegmentParsing:
             "segments": [{"start_ms": 0, "end_ms": 100, "segment_kind": "silence", "text": "oops"}],
         }
         with pytest.raises(ValueError, match="must not carry text"):
+            parse_transcript_segments(batch)
+
+    def test_parses_word_timings_within_segment(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 1000,
+                    "end_ms": 3000,
+                    "segment_kind": "speech",
+                    "text": "hello world",
+                    "words": [
+                        {"start_ms": 1000, "end_ms": 1500, "text": "hello", "confidence": 0.9},
+                        {"start_ms": 1600, "end_ms": 2400, "text": "world"},
+                    ],
+                }
+            ],
+        }
+
+        segments, _ = parse_transcript_segments(batch)
+
+        assert [w.text for w in segments[0].words] == ["hello", "world"]
+        assert isinstance(segments[0].words[0], WordTimingData)
+        assert segments[0].words[0].start_ms == 1000
+        assert segments[0].words[0].confidence == 0.9
+        assert segments[0].words[1].confidence is None
+
+    def test_segment_without_words_key_parses_with_empty_words(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {"start_ms": 0, "end_ms": 1000, "segment_kind": "speech", "text": "hi"}
+            ],
+        }
+
+        segments, _ = parse_transcript_segments(batch)
+
+        assert segments[0].words == ()
+
+    def test_word_outside_parent_segment_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 1000,
+                    "end_ms": 2000,
+                    "segment_kind": "speech",
+                    "text": "hi",
+                    "words": [{"start_ms": 1000, "end_ms": 2500, "text": "hi"}],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="within its segment"):
+            parse_transcript_segments(batch)
+
+    def test_out_of_order_words_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 0,
+                    "end_ms": 3000,
+                    "segment_kind": "speech",
+                    "text": "a b",
+                    "words": [
+                        {"start_ms": 1500, "end_ms": 2000, "text": "b"},
+                        {"start_ms": 100, "end_ms": 500, "text": "a"},
+                    ],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="time-ordered"):
+            parse_transcript_segments(batch)
+
+    def test_overlapping_words_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 0,
+                    "end_ms": 3000,
+                    "segment_kind": "speech",
+                    "text": "a b",
+                    "words": [
+                        {"start_ms": 100, "end_ms": 1200, "text": "a"},
+                        {"start_ms": 1000, "end_ms": 2000, "text": "b"},
+                    ],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="time-ordered"):
+            parse_transcript_segments(batch)
+
+    def test_zero_length_word_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 0,
+                    "end_ms": 3000,
+                    "segment_kind": "speech",
+                    "text": "a",
+                    "words": [{"start_ms": 100, "end_ms": 100, "text": "a"}],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="must exceed"):
+            parse_transcript_segments(batch)
+
+    def test_non_speech_segment_with_words_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 0,
+                    "end_ms": 1000,
+                    "segment_kind": "silence",
+                    "text": "",
+                    "words": [{"start_ms": 0, "end_ms": 500, "text": "ghost"}],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="must not carry words"):
+            parse_transcript_segments(batch)
+
+    def test_word_confidence_out_of_range_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 0,
+                    "end_ms": 3000,
+                    "segment_kind": "speech",
+                    "text": "a",
+                    "words": [
+                        {"start_ms": 100, "end_ms": 500, "text": "a", "confidence": 1.5}
+                    ],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="confidence"):
             parse_transcript_segments(batch)
 
     def test_invalid_time_range_rejected(self):
