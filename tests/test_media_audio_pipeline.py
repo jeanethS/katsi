@@ -27,6 +27,7 @@ from katsi_core.media.audio_pipeline import (
     AudioMetadataPipeline,
     AudioSpeakerSegmentationPipeline,
     AudioTranscriptionPipeline,
+    SilenceSpanData,
     TranscriptSegmentData,
     WordTimingData,
     apply_speaker_labels,
@@ -35,6 +36,7 @@ from katsi_core.media.audio_pipeline import (
     build_segment_representations,
     build_transcribe_definition,
     parse_speaker_segments,
+    parse_silence_spans,
     parse_transcript_segments,
     parse_wav_metadata,
 )
@@ -288,6 +290,124 @@ class TestAudioDecodePipeline:
 # ---------------------------------------------------------------------------
 # 7.3 / 7.6 Transcription: strict segments, coverage, no fabrication
 # ---------------------------------------------------------------------------
+
+
+class TestSilenceSpanParsing:
+    """Silence measurement (7.2b).
+
+    Fixtures below use output captured from a real ``ffmpeg`` 8.1.2 run
+    (``silencedetect=noise=-35dB:d=0.25``), including its actual
+    ``[Parsed_silencedetect_0 @ ...]`` prefix -- not an invented one.
+    """
+
+    def test_parses_paired_silence_spans(self):
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0xbfec3c900] silence_start: 1.999955\n"
+            "[Parsed_silencedetect_0 @ 0xbfec3c900] silence_end: 5.000068 | "
+            "silence_duration: 3.000113\n"
+        )
+
+        spans = parse_silence_spans(stderr, track_duration_ms=9_000)
+
+        assert spans == [SilenceSpanData(start_ms=2000, end_ms=5000)]
+
+    def test_parses_integer_formatted_times(self):
+        # ffmpeg drops the decimal part when a time lands on a whole second.
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0xc6ec3c900] silence_start: 0\n"
+            "[Parsed_silencedetect_0 @ 0xc6ec3c900] silence_end: 2 | silence_duration: 2\n"
+        )
+
+        spans = parse_silence_spans(stderr, track_duration_ms=2_000)
+
+        assert spans == [SilenceSpanData(start_ms=0, end_ms=2000)]
+
+    def test_silence_duration_on_end_line_is_not_mistaken_for_a_time(self):
+        # silence_duration shares the silence_end line; it must never be
+        # read as a start or an end.
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 1\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 4 | silence_duration: 3\n"
+        )
+
+        spans = parse_silence_spans(stderr, track_duration_ms=10_000)
+
+        assert spans == [SilenceSpanData(start_ms=1000, end_ms=4000)]
+
+    def test_multiple_spans_parse_in_order(self):
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 1.5\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 3.25 | silence_duration: 1.75\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 10.0\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 12.5 | silence_duration: 2.5\n"
+        )
+
+        spans = parse_silence_spans(stderr, track_duration_ms=20_000)
+
+        assert [(s.start_ms, s.end_ms) for s in spans] == [(1500, 3250), (10_000, 12_500)]
+
+    def test_trailing_silence_closes_at_track_duration(self):
+        # Current ffmpeg closes a trailing span itself; older builds do not.
+        stderr = "[Parsed_silencedetect_0 @ 0x1] silence_start: 8.0\n"
+
+        spans = parse_silence_spans(stderr, track_duration_ms=10_000)
+
+        assert spans == [SilenceSpanData(start_ms=8000, end_ms=10_000)]
+
+    def test_no_silence_produces_no_spans(self):
+        stderr = (
+            "size=N/A time=00:00:09.00 bitrate=N/A speed= 900x\n"
+            "video:0KiB audio:0KiB subtitle:0KiB\n"
+        )
+
+        assert parse_silence_spans(stderr, track_duration_ms=9_000) == []
+
+    def test_ignores_unrelated_ffmpeg_stderr_noise(self):
+        stderr = (
+            "ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers\n"
+            "  Duration: 00:00:20.00, start: 0.000000, bitrate: 256 kb/s\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 1.0\n"
+            "size=N/A time=00:00:02.00 bitrate=N/A speed= 200x\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 2.0 | silence_duration: 1.0\n"
+        )
+
+        spans = parse_silence_spans(stderr, track_duration_ms=20_000)
+
+        assert spans == [SilenceSpanData(start_ms=1000, end_ms=2000)]
+
+    def test_silence_end_without_start_raises(self):
+        stderr = "[Parsed_silencedetect_0 @ 0x1] silence_end: 2.0 | silence_duration: 1.0\n"
+
+        with pytest.raises(ValueError, match="silence_end without"):
+            parse_silence_spans(stderr, track_duration_ms=5_000)
+
+    def test_second_silence_start_while_span_open_raises(self):
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 1.0\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 2.0\n"
+        )
+
+        with pytest.raises(ValueError, match="still open"):
+            parse_silence_spans(stderr, track_duration_ms=5_000)
+
+    def test_trailing_silence_beyond_track_duration_raises(self):
+        stderr = "[Parsed_silencedetect_0 @ 0x1] silence_start: 12.0\n"
+
+        with pytest.raises(ValueError, match="exceeds track duration"):
+            parse_silence_spans(stderr, track_duration_ms=10_000)
+
+    def test_zero_length_span_rejected(self):
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 2.0\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 2.0 | silence_duration: 0.0\n"
+        )
+
+        with pytest.raises(ValueError, match="must exceed"):
+            parse_silence_spans(stderr, track_duration_ms=5_000)
+
+    def test_non_positive_track_duration_rejected(self):
+        with pytest.raises(ValueError, match="must be positive"):
+            parse_silence_spans("", track_duration_ms=0)
 
 
 class TestTranscriptSegmentParsing:

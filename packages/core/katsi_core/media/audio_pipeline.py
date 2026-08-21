@@ -438,6 +438,84 @@ class AudioDecodePipeline(MediaPipelineProtocol):
 
 
 # =============================================================================
+# 7.2b Measured silence spans (deterministic, ffmpeg silencedetect)
+# =============================================================================
+
+
+# Real ffmpeg output (verified against ffmpeg 8.1.2) looks like:
+#   [Parsed_silencedetect_0 @ 0x814c3c900] silence_start: 1.999955
+#   [Parsed_silencedetect_0 @ 0x814c3c900] silence_end: 5 | silence_duration: 3.000045
+# Start and end are always on separate lines, and a time may be formatted as a
+# bare integer, hence the optional decimal part.
+_SILENCE_START_PATTERN = re.compile(r"\bsilence_start:\s*(-?\d+(?:\.\d+)?)")
+_SILENCE_END_PATTERN = re.compile(r"\bsilence_end:\s*(-?\d+(?:\.\d+)?)")
+
+
+@dataclass(frozen=True, slots=True)
+class SilenceSpanData:
+    """One measured span of silence in a normalized audio track (7.2b).
+
+    Deterministic: produced by ffmpeg's silencedetect filter, never by a
+    model. Carries no text -- silence is positionally useful, not
+    semantically retrievable.
+    """
+
+    start_ms: int
+    end_ms: int
+
+
+def _seconds_to_ms(raw: str) -> int:
+    return int(round(float(raw) * 1000))
+
+
+def parse_silence_spans(stderr: str, *, track_duration_ms: int) -> list[SilenceSpanData]:
+    """Strictly parse ffmpeg silencedetect stderr into measured spans.
+
+    A trailing ``silence_start`` with no matching ``silence_end`` means the
+    track ended while still silent. Current ffmpeg closes such a span itself
+    at EOF, but older builds do not, so that span closes at
+    ``track_duration_ms`` rather than being dropped: trailing dead air is
+    exactly what a caller wants to find. Never fabricates -- any structurally
+    impossible pairing raises rather than being silently repaired.
+    """
+    if track_duration_ms <= 0:
+        raise ValueError("track_duration_ms must be positive")
+
+    spans: list[SilenceSpanData] = []
+    open_start_ms: int | None = None
+
+    for line in stderr.splitlines():
+        start_match = _SILENCE_START_PATTERN.search(line)
+        if start_match:
+            if open_start_ms is not None:
+                raise ValueError("Received silence_start while a previous span was still open")
+            open_start_ms = _seconds_to_ms(start_match.group(1))
+            continue
+
+        end_match = _SILENCE_END_PATTERN.search(line)
+        if end_match:
+            if open_start_ms is None:
+                raise ValueError("Received silence_end without a preceding silence_start")
+            end_ms = _seconds_to_ms(end_match.group(1))
+            if end_ms <= open_start_ms:
+                raise ValueError(
+                    f"Silence end_ms ({end_ms}) must exceed start_ms ({open_start_ms})"
+                )
+            spans.append(SilenceSpanData(start_ms=open_start_ms, end_ms=end_ms))
+            open_start_ms = None
+
+    if open_start_ms is not None:
+        if open_start_ms >= track_duration_ms:
+            raise ValueError(
+                f"Trailing silence_start ({open_start_ms}) exceeds track duration "
+                f"({track_duration_ms})"
+            )
+        spans.append(SilenceSpanData(start_ms=open_start_ms, end_ms=track_duration_ms))
+
+    return spans
+
+
+# =============================================================================
 # 7.3 Configured local speech transcription: strict segments + coverage
 # =============================================================================
 
