@@ -11,6 +11,7 @@ from katsi_core.clients.llm import LLMClient
 from katsi_core.config import get_settings
 from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
+from katsi_core.media.contracts import MediaRepresentationKind
 from katsi_core.media.registry import RepresentationRegistry
 from katsi_core.models import ContextBundle, FileHit, FileRecord
 from katsi_core.retrieve.context import build_context
@@ -80,7 +81,7 @@ def _services():
         _state["claim_service"],
         _state["record_service"],
         _state["lease_service"],
-        s.brief,
+        s.workspace.brief,
     )
     _state["pipeline"] = IngestPipeline(
         s,
@@ -253,6 +254,75 @@ def open_media_original(workspace_id: str, resource_version_id: str) -> dict:
         "path": row["current_path"],
         "content_hash": row["content_hash"],
     }
+
+
+@mcp.tool()
+def list_media_representations(
+    workspace_id: str,
+    path: str,
+    kinds: list[str] | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Enumerate a cited path's currently-visible representations; never bytes."""
+    from uuid import UUID
+
+    if not 1 <= limit <= 500:
+        raise ValueError("limit must be between 1 and 500")
+    if kinds is not None:
+        known = {kind.value for kind in MediaRepresentationKind}
+        for kind in kinds:
+            if kind not in known:
+                raise ValueError(f"unknown representation kind: {kind}")
+
+    svc = _services()
+    _authorize_media_read(svc, workspace_id)
+    with svc["workspace_database"].connection() as connection:
+        row = connection.execute(
+            """
+            SELECT resource_versions.id AS resource_version_id
+            FROM resource_versions JOIN resources ON resources.id = resource_versions.resource_id
+            WHERE resources.workspace_id = ? AND resources.current_path = ?
+            ORDER BY resource_versions.observed_at DESC
+            LIMIT 1
+            """,
+            (workspace_id, path),
+        ).fetchone()
+    if row is None:
+        raise ValueError("unknown path in workspace")
+
+    registry = svc["representation_registry"]
+    # is_current, not status alone: a superseded generation must never be
+    # offered as usable, or get_media_preview would reject what this returned.
+    representations = [
+        item
+        for item in registry.get_representations_by_resource(UUID(row["resource_version_id"]))
+        if registry.is_current(item.id)
+    ]
+    if kinds is not None:
+        representations = [item for item in representations if item.kind.value in kinds]
+
+    def _earliest_start_ms(representation) -> int:
+        starts = [
+            locator.start_ms
+            for locator in representation.locators
+            if getattr(locator, "start_ms", None) is not None
+        ]
+        return min(starts) if starts else -1
+
+    # Deterministic: a reindex must not reshuffle downstream shot selection.
+    representations.sort(key=lambda item: (item.kind.value, _earliest_start_ms(item), str(item.id)))
+
+    return [
+        {
+            "representation_id": str(item.id),
+            "resource_version_id": str(item.resource_version_id),
+            "kind": item.kind.value,
+            "status": item.status.value,
+            "locators": [locator.model_dump(mode="json") for locator in item.locators],
+            "coverage_fraction": item.coverage.coverage_fraction,
+        }
+        for item in representations[:limit]
+    ]
 
 
 @mcp.tool()
