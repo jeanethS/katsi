@@ -38,6 +38,7 @@ from katsi_core.media.image_metadata import (
     extract_image_metadata,
 )
 from katsi_core.media.image_pipeline import (
+    parse_visual_regions,
     ImageCaptionPipeline,
     ImageOcrPipeline,
     ImageThumbnailPipeline,
@@ -46,6 +47,7 @@ from katsi_core.media.image_pipeline import (
     build_caption_pipeline_definition,
     build_embedding_pipeline_definition,
     build_ocr_pipeline_definition,
+    build_sips_heic_thumbnail_pipeline_definition,
     build_thumbnail_pipeline_definition,
 )
 
@@ -58,6 +60,25 @@ def _write(tmp_path: Path, name: str, data: bytes) -> Path:
     path = tmp_path / name
     path.write_bytes(data)
     return path
+
+
+def test_sips_heic_thumbnail_definition_is_bounded_and_fixed() -> None:
+    definition = build_sips_heic_thumbnail_pipeline_definition("/usr/bin/sips")
+
+    assert definition.accepted_mime_patterns == ["image/heic"]
+    assert definition.executable_path == "/usr/bin/sips"
+    assert definition.fixed_args == [
+        "-s",
+        "format",
+        "png",
+        "-Z",
+        "512",
+        "{input_path}",
+        "--out",
+        "{output_path}",
+    ]
+    assert definition.shell_enabled is False
+    assert definition.network_disabled is True
 
 
 def _content_hash(data: bytes) -> str:
@@ -866,3 +887,76 @@ class TestRepresentationIndependence:
         )
 
         assert rep.status == MediaRepresentationStatus.CURRENT
+
+
+class TestVisualRegionParsing:
+    ALLOWED = {"train", "person", "food"}
+
+    def test_parses_labelled_regions(self):
+        payload = {
+            "regions": [
+                {"label": "train", "bounding_box": [0.1, 0.2, 0.4, 0.5], "confidence": 0.9},
+                {"label": "person", "bounding_box": [0.6, 0.1, 0.2, 0.3]},
+            ]
+        }
+
+        regions = parse_visual_regions(payload, allowed_labels=self.ALLOWED)
+
+        assert [r.label for r in regions] == ["train", "person"]
+        assert regions[0].bbox == (0.1, 0.2, 0.4, 0.5)
+        assert regions[0].confidence == 0.9
+        assert regions[1].confidence is None
+
+    def test_empty_regions_is_valid(self):
+        assert parse_visual_regions({"regions": []}, allowed_labels=self.ALLOWED) == []
+
+    def test_missing_regions_key_raises(self):
+        with pytest.raises(ValueError, match="regions"):
+            parse_visual_regions({}, allowed_labels=self.ALLOWED)
+
+    def test_undeclared_label_raises(self):
+        payload = {"regions": [{"label": "spaceship", "bounding_box": [0.1, 0.1, 0.2, 0.2]}]}
+
+        with pytest.raises(ValueError, match="spaceship"):
+            parse_visual_regions(payload, allowed_labels=self.ALLOWED)
+
+    def test_malformed_region_raises_rather_than_skipping(self):
+        # Unlike _parse_ocr_regions, a bad entry is fatal: the regions are
+        # the entire result, so silently dropping one loses the answer.
+        payload = {"regions": [{"label": "train", "bounding_box": [0.1, 0.2]}]}
+
+        with pytest.raises(ValueError, match="four numbers"):
+            parse_visual_regions(payload, allowed_labels=self.ALLOWED)
+
+    def test_non_object_region_raises(self):
+        with pytest.raises(ValueError, match="JSON object"):
+            parse_visual_regions({"regions": ["train"]}, allowed_labels=self.ALLOWED)
+
+    def test_confidence_out_of_range_raises(self):
+        payload = {
+            "regions": [{"label": "train", "bounding_box": [0.1, 0.1, 0.2, 0.2], "confidence": 1.4}]
+        }
+
+        with pytest.raises(ValueError, match="confidence"):
+            parse_visual_regions(payload, allowed_labels=self.ALLOWED)
+
+    def test_low_confidence_detections_are_dropped(self):
+        payload = {
+            "regions": [
+                {"label": "train", "bounding_box": [0.1, 0.1, 0.2, 0.2], "confidence": 0.9},
+                {"label": "person", "bounding_box": [0.5, 0.5, 0.2, 0.2], "confidence": 0.05},
+            ]
+        }
+
+        regions = parse_visual_regions(payload, allowed_labels=self.ALLOWED, min_confidence=0.3)
+
+        assert [r.label for r in regions] == ["train"]
+
+    def test_out_of_range_box_is_not_clamped(self):
+        # Left to ImageRegionLocator's validator in the expander; the parser
+        # must not quietly repair it here either.
+        payload = {"regions": [{"label": "train", "bounding_box": [0.9, 0.1, 0.5, 0.2]}]}
+
+        regions = parse_visual_regions(payload, allowed_labels=self.ALLOWED)
+
+        assert regions[0].bbox == (0.9, 0.1, 0.5, 0.2)

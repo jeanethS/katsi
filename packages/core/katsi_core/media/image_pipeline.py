@@ -116,6 +116,39 @@ def build_thumbnail_pipeline_definition(
     )
 
 
+def build_sips_heic_thumbnail_pipeline_definition(
+    executable_path: str | None = None,
+    *,
+    max_dimension: int = 512,
+    timeout_seconds: float = 30.0,
+    max_output_bytes: int = 20_000_000,
+) -> MediaPipelineDefinition:
+    """Build the owner-configured macOS ``sips`` HEIC thumbnail adapter."""
+    definition = build_thumbnail_pipeline_definition(
+        executable_path,
+        id="sips_heic_thumbnail_v1",
+        fixed_args=[
+            "-s",
+            "format",
+            "png",
+            "-Z",
+            str(max_dimension),
+            "{input_path}",
+            "--out",
+            "{output_path}",
+        ],
+        max_dimension=max_dimension,
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=max_output_bytes,
+    )
+    return definition.model_copy(
+        update={
+            "name": "HEIC PNG Thumbnail (macOS sips)",
+            "accepted_mime_patterns": ["image/heic"],
+        }
+    )
+
+
 class ImageThumbnailPipeline(MediaPipelineProtocol):
     """Bounded subprocess adapter producing a private PNG thumbnail.
 
@@ -305,6 +338,66 @@ def _parse_ocr_regions(raw_regions: list[Any]) -> list[_OcrRegion]:
             continue
         conf_value = float(confidence) if isinstance(confidence, (int, float)) else None
         regions.append(_OcrRegion(text=text, bbox=bbox_tuple, confidence=conf_value))
+    return regions
+
+
+@dataclass(frozen=True, slots=True)
+class _VisualRegion:
+    """One labelled detection inside a sampled frame."""
+
+    label: str
+    bbox: tuple[float, float, float, float]
+    confidence: float | None
+
+
+def parse_visual_regions(
+    payload: dict[str, Any],
+    *,
+    allowed_labels: set[str],
+    min_confidence: float = 0.3,
+) -> list[_VisualRegion]:
+    """Strictly parse a detector's ``regions`` array.
+
+    Unlike :func:`_parse_ocr_regions`, a malformed entry raises rather than
+    being skipped: OCR has a whole-image result worth preserving, whereas
+    here the regions *are* the entire result, so dropping one loses the
+    answer. Boxes are never clamped -- :class:`ImageRegionLocator` validates
+    them, and a detector emitting out-of-range boxes is misconfigured.
+    """
+    raw_regions = payload.get("regions")
+    if not isinstance(raw_regions, list):
+        raise ValueError("Detector output must carry a `regions` array")
+
+    regions: list[_VisualRegion] = []
+    for entry in raw_regions:
+        if not isinstance(entry, dict):
+            raise ValueError("Each region must be a JSON object")
+
+        label = entry.get("label")
+        if not isinstance(label, str) or not label:
+            raise ValueError("Region label must be a non-empty string")
+        if label not in allowed_labels:
+            raise ValueError(f"Region label is not in the declared label set: {label!r}")
+
+        bbox = entry.get("bounding_box")
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            raise ValueError(f"Region bounding_box must be four numbers, got {bbox!r}")
+        try:
+            bbox_tuple = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Region bounding_box must be four numbers, got {bbox!r}") from exc
+
+        confidence = entry.get("confidence")
+        if confidence is not None:
+            confidence = float(confidence)
+            if not (0.0 <= confidence <= 1.0):
+                raise ValueError("Region confidence must be within [0.0, 1.0]")
+            # Filtering by a declared threshold, not repairing bad output.
+            if confidence < min_confidence:
+                continue
+
+        regions.append(_VisualRegion(label=label, bbox=bbox_tuple, confidence=confidence))
+
     return regions
 
 
