@@ -79,6 +79,13 @@ class GraphStore:
             "CREATE NODE TABLE IF NOT EXISTS SilenceSpan("
             "id STRING, start_ms INT64, end_ms INT64, PRIMARY KEY(id))"
         )
+        # Label on the node so a consumer can filter by label in Kuzu without
+        # a second lookup, following the MediaPage.number precedent.
+        self._conn.execute(
+            "CREATE NODE TABLE IF NOT EXISTS VisualRegion("
+            "id STRING, label STRING, x DOUBLE, y DOUBLE, width DOUBLE, height DOUBLE, "
+            "PRIMARY KEY(id))"
+        )
         self._conn.execute(
             "CREATE NODE TABLE IF NOT EXISTS ClaimEvidenceNode(id STRING, PRIMARY KEY(id))"
         )
@@ -99,6 +106,9 @@ class GraphStore:
         )
         self._conn.execute(
             "CREATE REL TABLE IF NOT EXISTS HAS_SILENCE_SPAN(FROM MediaResourceVersion TO SilenceSpan)"
+        )
+        self._conn.execute(
+            "CREATE REL TABLE IF NOT EXISTS HAS_VISUAL_REGION(FROM MediaResourceVersion TO VisualRegion)"
         )
         self._conn.execute(
             "CREATE REL TABLE IF NOT EXISTS EVIDENCES(FROM MediaRepresentation TO ClaimEvidenceNode)"
@@ -480,6 +490,26 @@ class GraphStore:
                 self._connect_media_node(resource_id, "MediaScene", str(item.id), "HAS_SCENE")
             elif locator_type == "video_frame":
                 self._connect_media_node(resource_id, "MediaKeyframe", str(item.id), "HAS_KEYFRAME")
+            # Dispatched on kind, not on locator_type: OCR representations
+            # also carry image_region locators and must keep their own edge.
+            elif item.kind is MediaRepresentationKind.VISUAL_REGION:
+                x, y, width, height = locator_data["bounding_box"]
+                self._conn.execute(
+                    "MERGE (v:VisualRegion {id: $id}) "
+                    "SET v.label = $label, v.x = $x, v.y = $y, "
+                    "v.width = $width, v.height = $height",
+                    {
+                        "id": str(item.id),
+                        "label": item.textual_payload or "",
+                        "x": x,
+                        "y": y,
+                        "width": width,
+                        "height": height,
+                    },
+                )
+                self._connect_media_node(
+                    resource_id, "VisualRegion", str(item.id), "HAS_VISUAL_REGION"
+                )
             # Dispatched on kind, not on locator_type: transcript segments
             # also carry time_range locators, so a locator_type branch here
             # would silently steal them from HAS_TRANSCRIPT_SEGMENT.

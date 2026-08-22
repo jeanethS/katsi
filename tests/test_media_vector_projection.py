@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+
+import pytest
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from katsi_core.media.contracts import (
     DerivedRepresentation,
+    ImageRegionLocator,
     MediaCoverage,
     MediaProducerType,
     MediaRepresentationKind,
@@ -244,5 +247,108 @@ def test_silence_span_does_not_create_a_transcript_edge(tmp_path):
         "MATCH (r:MediaResourceVersion {id: $id})-[:HAS_TRANSCRIPT_SEGMENT]->(t:TranscriptSegment) "
         "RETURN count(t)",
         {"id": str(representation.resource_version_id)},
+    ).get_next()[0]
+    assert count == 0
+
+
+def _visual_region_representation(*, label: str = "train", bbox=(0.1, 0.2, 0.4, 0.5)):
+    resource_id, representation_id = uuid4(), uuid4()
+    now = datetime.now(UTC)
+    return DerivedRepresentation(
+        id=representation_id,
+        resource_version_id=resource_id,
+        kind=MediaRepresentationKind.VISUAL_REGION,
+        media_type="application/json",
+        status=MediaRepresentationStatus.CURRENT,
+        created_at=now,
+        updated_at=now,
+        textual_payload=label,
+        locators=(
+            ImageRegionLocator(
+                resource_version_id=resource_id,
+                representation_id=representation_id,
+                bounding_box=bbox,
+            ),
+        ),
+        coverage=MediaCoverage(is_complete=False, coverage_fraction=0.2),
+        producer=ProducerProvenance(
+            producer_type=MediaProducerType.MODEL_BACKED,
+            adapter_name="image_detect_regions",
+            adapter_version="1",
+        ),
+        pipeline_fingerprint=PipelineFingerprint(
+            source_content_hash="a" * 64,
+            representation_kind=MediaRepresentationKind.VISUAL_REGION,
+            stage=PipelineStage.DETECT_REGIONS,
+            adapter_name="image_detect_regions",
+            adapter_version="1",
+            sampling_fingerprint="b" * 64,
+        ),
+    )
+
+
+def _ocr_representation():
+    """OCR also carries image_region locators -- the trap this guards."""
+    resource_id, representation_id = uuid4(), uuid4()
+    now = datetime.now(UTC)
+    return DerivedRepresentation(
+        id=representation_id,
+        resource_version_id=resource_id,
+        kind=MediaRepresentationKind.OCR_TEXT,
+        media_type="text/plain",
+        status=MediaRepresentationStatus.CURRENT,
+        created_at=now,
+        updated_at=now,
+        textual_payload="PLATFORM 3",
+        locators=(
+            ImageRegionLocator(
+                resource_version_id=resource_id,
+                representation_id=representation_id,
+                bounding_box=(0.5, 0.5, 0.2, 0.1),
+            ),
+        ),
+        coverage=MediaCoverage(is_complete=False, coverage_fraction=0.1),
+        producer=ProducerProvenance(
+            producer_type=MediaProducerType.DETERMINISTIC,
+            adapter_name="image_ocr",
+            adapter_version="1",
+        ),
+        pipeline_fingerprint=PipelineFingerprint(
+            source_content_hash="c" * 64,
+            representation_kind=MediaRepresentationKind.OCR_TEXT,
+            stage=PipelineStage.OCR,
+            adapter_name="image_ocr",
+            adapter_version="1",
+            sampling_fingerprint="d" * 64,
+        ),
+    )
+
+
+def test_visual_region_projects_with_label_and_box(tmp_path):
+    graph = GraphStore(tmp_path / "graph")
+    representation = _visual_region_representation(label="train", bbox=(0.1, 0.2, 0.4, 0.5))
+
+    graph.project_media_representations([representation])
+
+    row = graph._conn.execute(
+        "MATCH (r:MediaResourceVersion {id: $id})-[:HAS_VISUAL_REGION]->(v:VisualRegion) "
+        "RETURN v.label, v.x, v.y, v.width, v.height",
+        {"id": str(representation.resource_version_id)},
+    ).get_next()
+    assert row[0] == "train"
+    assert row[1:] == pytest.approx([0.1, 0.2, 0.4, 0.5])
+
+
+def test_ocr_is_not_captured_as_a_visual_region(tmp_path):
+    """Regression guard: OCR also carries image_region locators."""
+    graph = GraphStore(tmp_path / "graph")
+    ocr = _ocr_representation()
+
+    graph.project_media_representations([ocr, _visual_region_representation()])
+
+    count = graph._conn.execute(
+        "MATCH (r:MediaResourceVersion {id: $id})-[:HAS_VISUAL_REGION]->(v:VisualRegion) "
+        "RETURN count(v)",
+        {"id": str(ocr.resource_version_id)},
     ).get_next()[0]
     assert count == 0
