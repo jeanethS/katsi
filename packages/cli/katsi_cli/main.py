@@ -22,6 +22,7 @@ from katsi_core.config import get_settings
 from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
 from katsi_core.media.registry import RepresentationRegistry
+from katsi_core.media.reprocess import MediaReprocessor, ReprocessCounts
 from katsi_core.retrieve.context import build_context
 from katsi_core.retrieve.search import search
 from katsi_core.store.graph import GraphStore
@@ -182,9 +183,42 @@ def _print_index_summary(counts: dict[str, int]) -> None:
     console.print(table)
 
 
+def _reprocess_media(svc: dict, path: Path) -> ReprocessCounts:
+    """Reprocess current tracked media under PATH without changing source state."""
+    requested = path.resolve()
+    reprocessor = MediaReprocessor(svc["representation_registry"], svc["settings"].media)
+    total = ReprocessCounts()
+    with svc["workspace_database"].connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT rv.id, rv.content_hash, r.current_path, w.root_path
+            FROM resource_versions AS rv
+            JOIN resources AS r ON r.id = rv.resource_id
+            JOIN workspaces AS w ON w.id = r.workspace_id
+            WHERE r.status = 'current'
+              AND rv.observed_at = (
+                  SELECT MAX(observed_at) FROM resource_versions WHERE resource_id = r.id
+              )
+            """
+        ).fetchall()
+    for row in rows:
+        file_path = (Path(row["root_path"]) / row["current_path"]).resolve()
+        if not file_path.is_relative_to(requested) or not file_path.is_file():
+            continue
+        outcome = reprocessor.process(file_path, UUID(row["id"]), row["content_hash"])
+        for name in total.__dataclass_fields__:
+            setattr(total, name, getattr(total, name) + getattr(outcome, name))
+    return total
+
+
 @app.command()
 def index(
     path: Path = typer.Argument(..., help="File or directory to index."),  # noqa: B008
+    reprocess_media: bool = typer.Option(
+        False,
+        "--reprocess-media",
+        help="Run configured local media pipelines for current tracked resources.",
+    ),
 ) -> None:
     """Index PATH recursively, honoring include/exclude globs from config."""
     svc = _services()
@@ -195,6 +229,9 @@ def index(
     files = _walk_files(path, s.ingest.include_globs, s.ingest.exclude_globs)
     console.print(f"[bold]indexing[/] {len(files)} file(s) under {path}")
     _print_index_summary(_index_tree(svc, path))
+    if reprocess_media:
+        outcomes = _reprocess_media(svc, path)
+        _print_index_summary(dict(vars(outcomes)))
 
 
 @app.command(name="start")

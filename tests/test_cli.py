@@ -7,6 +7,7 @@ import pytest
 from katsi_core.config import Settings
 from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
+from katsi_core.media.registry import RepresentationRegistry
 from katsi_core.store.graph import GraphStore
 from katsi_core.store.vectors import VectorStore
 from katsi_core.store.workspace_migrations import apply_migrations
@@ -84,6 +85,7 @@ def cli_runner(tmp_path):
             "records": records,
             "pipeline": pipeline,
             "workspace_database": database,
+            "representation_registry": RepresentationRegistry(database),
             "workspace_repository": WorkspaceRepository(database),
             "identity_service": identities,
             "claim_service": claims,
@@ -107,6 +109,18 @@ def test_index_processes_md_file(cli_runner, tmp_path):
     md_path.write_text("# Hello\n\nmentions Acme.")
     res = runner.invoke(cli_main.app, ["index", str(md_path)])
     assert res.exit_code == 0, res.output
+    assert embed.calls == 1
+    assert llm.calls == 1
+
+
+def test_index_reprocess_flag_preserves_normal_indexing(cli_runner, tmp_path):
+    runner, cli_main, embed, llm, _, _ = cli_runner
+    md_path = tmp_path / "doc.md"
+    md_path.write_text("# Hello\n\nmentions Acme.")
+
+    result = runner.invoke(cli_main.app, ["index", "--reprocess-media", str(md_path)])
+
+    assert result.exit_code == 0, result.output
     assert embed.calls == 1
     assert llm.calls == 1
 

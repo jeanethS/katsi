@@ -24,7 +24,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from katsi_core.config import MediaSamplingSettings
+from katsi_core.media.settings import MediaSamplingSettings
 from katsi_core.workspace.contracts import (
     ContentHash,
     ImmutableModel,
@@ -590,6 +590,10 @@ class MediaPipelineDefinition(BaseModel):
     """
 
     id: str = Field(min_length=1, description="Pipeline identifier")
+    adapter_binding: str | None = Field(
+        default=None,
+        description="Fixed local adapter binding selected from Katsi's allowlist",
+    )
     name: str = Field(min_length=1, max_length=256, description="Human-readable name")
     description: str = Field(
         default="", max_length=2000, description="Purpose and behavior description"
@@ -748,6 +752,13 @@ class MediaProcessingConfig(BaseModel):
     enable_cross_modal_retrieval: bool = Field(
         default=False, description="Enable cross-modal text-to-visual retrieval"
     )
+
+
+# ``config`` loads while this module is imported through workspace contracts.
+# Rebuild its forward reference only after this model exists.
+from katsi_core.config import Settings  # noqa: E402
+
+Settings.model_rebuild(_types_namespace={"MediaProcessingConfig": MediaProcessingConfig})
 
 
 # =============================================================================

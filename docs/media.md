@@ -17,6 +17,28 @@ silently reusing incompatible cached output.
 Keep media pipelines local. Remote upload, face identity, voice identity, and
 emotion inference are not initial capabilities.
 
+## Reprocess existing media
+
+Normal `katsi index PATH` does not run semantic media work. To process current,
+already tracked resources without deleting their source, text index, or prior
+representations, use:
+
+```bash
+uv run katsi index --reprocess-media /path/to/workspace
+```
+
+Add `[katsi.media]` with the relevant family enabled and owner-authored
+`[[katsi.media.pipelines]]` entries. Each entry needs an `adapter_binding`,
+its executable path, fixed arguments, limits, and optional availability probe.
+The currently supported bindings are `video_metadata_ffprobe`,
+`video_scene_detect_ffmpeg`, `audio_decode_ffmpeg`, and
+`audio_silence_detect_ffmpeg`. No executable, model, or wrapper is selected or
+downloaded by Katsi; unsupported or absent adapters are reported unavailable.
+
+Reprocessing reuses compatible content/fingerprint results. Changed executable
+policy or sampling produces a new historical generation; it never removes the
+original file or old representation.
+
 ## Privacy
 
 Original bytes and derived blobs are private. OCR, captions, transcripts,
