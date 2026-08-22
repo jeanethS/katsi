@@ -25,6 +25,7 @@ from katsi_core.media.contracts import (
     ProducerProvenance,
     RepresentationError,
     ResourceVersionId,
+    TimeRangeLocator,
     WholeResourceLocator,
 )
 from katsi_core.media.registry import (
@@ -769,3 +770,176 @@ def test_source_version_provenance_cache_reuse(registry, sample_producer, sample
     assert cached_b is not None and cached_b.id == rep_b.id
     assert cached_a.resource_version_id == version_a
     assert cached_b.resource_version_id == version_b
+
+
+def _scene_representation(resource_version_id, producer, fingerprint, *, start_ms, end_ms):
+    """One scene-kind representation carrying a single time locator."""
+    return DerivedRepresentation(
+        id=uuid4(),
+        resource_version_id=resource_version_id,
+        kind=MediaRepresentationKind.SCENE,
+        media_type="application/json",
+        status=MediaRepresentationStatus.CURRENT,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        textual_payload="",
+        locators=(
+            TimeRangeLocator(
+                resource_version_id=resource_version_id,
+                representation_id=uuid4(),
+                start_ms=start_ms,
+                end_ms=end_ms,
+            ),
+        ),
+        coverage=MediaCoverage(is_complete=False, coverage_fraction=0.1),
+        producer=producer,
+        pipeline_fingerprint=fingerprint,
+    )
+
+
+def test_single_registration_still_supersedes_same_kind(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
+    """The one-per-kind contract is unchanged for callers that register singly."""
+    first = _scene_representation(
+        sample_resource_id, sample_producer, sample_fingerprint, start_ms=0, end_ms=1000
+    )
+    second = _scene_representation(
+        sample_resource_id, sample_producer, sample_fingerprint, start_ms=1000, end_ms=2000
+    )
+
+    registry.register_representation(first)
+    registry.register_representation(second)
+
+    assert registry.is_current(first.id) is False
+    assert registry.is_current(second.id) is True
+
+
+def test_batch_keeps_every_member_current(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
+    """N scenes of one generation stay visible together."""
+    scenes = [
+        _scene_representation(
+            sample_resource_id,
+            sample_producer,
+            sample_fingerprint,
+            start_ms=i * 1000,
+            end_ms=(i + 1) * 1000,
+        )
+        for i in range(5)
+    ]
+
+    registry.register_representation_batch(scenes)
+
+    assert all(registry.is_current(scene.id) for scene in scenes)
+    listed = registry.get_representations_by_resource(
+        sample_resource_id, status=MediaRepresentationStatus.CURRENT
+    )
+    assert {r.id for r in listed} == {scene.id for scene in scenes}
+
+
+def test_batch_supersedes_only_the_previous_generation(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
+    """A re-run retires the whole prior generation, not individual members."""
+    first_generation = [
+        _scene_representation(
+            sample_resource_id, sample_producer, sample_fingerprint, start_ms=0, end_ms=1000
+        ),
+        _scene_representation(
+            sample_resource_id, sample_producer, sample_fingerprint, start_ms=1000, end_ms=2000
+        ),
+    ]
+    registry.register_representation_batch(first_generation)
+
+    second_generation = [
+        _scene_representation(
+            sample_resource_id, sample_producer, sample_fingerprint, start_ms=0, end_ms=1500
+        ),
+        _scene_representation(
+            sample_resource_id, sample_producer, sample_fingerprint, start_ms=1500, end_ms=3000
+        ),
+        _scene_representation(
+            sample_resource_id, sample_producer, sample_fingerprint, start_ms=3000, end_ms=4000
+        ),
+    ]
+    registry.register_representation_batch(second_generation)
+
+    assert all(not registry.is_current(scene.id) for scene in first_generation)
+    assert all(registry.is_current(scene.id) for scene in second_generation)
+
+
+def test_batch_does_not_disturb_another_kind(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
+    """Registering scenes must not retire the resource's transcript segments."""
+    transcript = DerivedRepresentation(
+        id=uuid4(),
+        resource_version_id=sample_resource_id,
+        kind=MediaRepresentationKind.TRANSCRIPT_SEGMENT,
+        media_type="text/plain",
+        status=MediaRepresentationStatus.CURRENT,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        textual_payload="hello",
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=sample_resource_id, representation_id=uuid4()
+            ),
+        ),
+        coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
+        producer=sample_producer,
+        pipeline_fingerprint=sample_fingerprint,
+    )
+    registry.register_representation(transcript)
+
+    registry.register_representation_batch(
+        [
+            _scene_representation(
+                sample_resource_id, sample_producer, sample_fingerprint, start_ms=0, end_ms=1000
+            )
+        ]
+    )
+
+    assert registry.is_current(transcript.id) is True
+
+
+def test_empty_batch_is_a_noop(registry, sample_resource_id):
+    registry.register_representation_batch([])
+
+    assert (
+        registry.get_representations_by_resource(
+            sample_resource_id, status=MediaRepresentationStatus.CURRENT
+        )
+        == []
+    )
+
+
+def test_batch_spanning_two_kinds_is_rejected(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
+    scene = _scene_representation(
+        sample_resource_id, sample_producer, sample_fingerprint, start_ms=0, end_ms=1000
+    )
+    other = _scene_representation(
+        sample_resource_id, sample_producer, sample_fingerprint, start_ms=1000, end_ms=2000
+    ).model_copy(update={"kind": MediaRepresentationKind.KEYFRAME})
+
+    with pytest.raises(ValueError, match="single representation kind"):
+        registry.register_representation_batch([scene, other])
+
+
+def test_batch_spanning_two_resources_is_rejected(
+    registry, sample_resource_id, sample_producer, sample_fingerprint
+):
+    scene = _scene_representation(
+        sample_resource_id, sample_producer, sample_fingerprint, start_ms=0, end_ms=1000
+    )
+    other_resource = ResourceVersionId(str(uuid4()))
+    stray = _scene_representation(
+        other_resource, sample_producer, sample_fingerprint, start_ms=0, end_ms=1000
+    )
+
+    with pytest.raises(ValueError, match="single resource_version_id"):
+        registry.register_representation_batch([scene, stray])
