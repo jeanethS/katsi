@@ -54,6 +54,7 @@ class MediaRepresentationKind(StrEnum):
     THUMBNAIL = "thumbnail"
     KEYFRAME = "keyframe"
     SCENE = "scene"
+    SILENCE_SPAN = "silence_span"
 
     # Semantic representations
     VISUAL_EMBEDDING = "visual_embedding"
@@ -117,6 +118,7 @@ class PipelineStage(StrEnum):
     EMBED_VISUAL = "embed_visual"
     EMBED_TEXT = "embed_text"
     SEGMENT_SPEAKERS = "segment_speakers"
+    DETECT_SILENCE = "detect_silence"
 
 
 class EmbeddingSpaceFingerprint(StrEnum):
