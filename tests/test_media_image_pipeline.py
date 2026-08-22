@@ -19,6 +19,7 @@ from uuid import uuid4
 import blake3
 import pytest
 
+from katsi_core.config import MediaSamplingSettings
 from katsi_core.media.blob_store import BlobStore
 from katsi_core.media.contracts import (
     DerivedRepresentation,
@@ -34,11 +35,14 @@ from katsi_core.media.contracts import (
     WholeResourceLocator,
 )
 from katsi_core.media.execution import PipelineExecutionOrchestrator
+from katsi_core.media.fingerprint import build_pipeline_fingerprint
 from katsi_core.media.image_metadata import (
     build_image_metadata_representation,
     extract_image_metadata,
 )
 from katsi_core.media.image_pipeline import (
+    VisualRegionDetectionPipeline,
+    build_region_detect_definition,
     _VisualRegion,
     build_visual_region_representations,
     parse_visual_regions,
@@ -1021,3 +1025,141 @@ class TestVisualRegionRepresentations:
             build_visual_region_representations(
                 regions, uuid4(), self._fingerprint(), self._provenance()
             )
+
+
+class TestVisualRegionDetectionPipeline:
+    LABELS = ("train", "person")
+
+    def _fake_definition(self, tmp_path, payload_json: str, *, exit_code: int = 0):
+        # The payload goes via a sidecar file, never inline in the script:
+        # execution._substitute_args runs str.format() over every fixed_args
+        # element, so a literal JSON brace would be read as a placeholder.
+        payload_path = tmp_path / "payload.json"
+        payload_path.write_text(payload_json)
+        script = (
+            "import sys, shutil\n"
+            "shutil.copyfile(sys.argv[1], sys.argv[3])\n"
+            "sys.exit(" + str(exit_code) + ")\n"
+        )
+        return build_region_detect_definition(labels=self.LABELS).model_copy(
+            update={
+                "executable_path": sys.executable,
+                "fixed_args": [
+                    "-c",
+                    script,
+                    str(payload_path),
+                    "{input_path}",
+                    "{output_path}",
+                ],
+            }
+        )
+
+    def _fingerprint(self, source_content_hash):
+        return build_pipeline_fingerprint(
+            source_content_hash=source_content_hash,
+            representation_kind=MediaRepresentationKind.VISUAL_REGION,
+            stage=PipelineStage.DETECT_REGIONS,
+            adapter_name="image_detect_regions",
+            adapter_version="1.0.0",
+            settings=MediaSamplingSettings(),
+        )
+
+    def test_process_returns_single_batch_representation(self, tmp_path):
+        resource_version_id, source_content_hash = uuid4(), "a" * 64
+        input_path = tmp_path / "keyframe.png"
+        input_path.write_bytes(b"not really a png")
+        payload = json.dumps(
+            {"regions": [{"label": "train", "bounding_box": [0.1, 0.2, 0.4, 0.5], "confidence": 0.9}]}
+        )
+
+        adapter = VisualRegionDetectionPipeline(self._fake_definition(tmp_path, payload), labels=self.LABELS)
+        representation = adapter.process(
+            input_path,
+            resource_version_id,
+            source_content_hash,
+            self._fingerprint(source_content_hash),
+            tmp_path,
+        )
+
+        assert isinstance(representation, DerivedRepresentation)
+        assert representation.kind == MediaRepresentationKind.VISUAL_REGION
+        batch = json.loads(representation.textual_payload)
+        assert batch["regions"] == [
+            {"label": "train", "bounding_box": [0.1, 0.2, 0.4, 0.5], "confidence": 0.9}
+        ]
+
+    def test_undeclared_label_from_detector_raises(self, tmp_path):
+        resource_version_id, source_content_hash = uuid4(), "a" * 64
+        input_path = tmp_path / "keyframe.png"
+        input_path.write_bytes(b"x")
+        payload = json.dumps(
+            {"regions": [{"label": "spaceship", "bounding_box": [0.1, 0.1, 0.2, 0.2]}]}
+        )
+
+        adapter = VisualRegionDetectionPipeline(self._fake_definition(tmp_path, payload), labels=self.LABELS)
+
+        with pytest.raises(ValueError, match="spaceship"):
+            adapter.process(
+                input_path,
+                resource_version_id,
+                source_content_hash,
+                self._fingerprint(source_content_hash),
+                tmp_path,
+            )
+
+    def test_nonzero_exit_raises(self, tmp_path):
+        resource_version_id, source_content_hash = uuid4(), "a" * 64
+        input_path = tmp_path / "keyframe.png"
+        input_path.write_bytes(b"x")
+
+        adapter = VisualRegionDetectionPipeline(
+            self._fake_definition(tmp_path, json.dumps({"regions": []}), exit_code=1),
+            labels=self.LABELS,
+        )
+
+        with pytest.raises(RuntimeError, match="Region detection failed"):
+            adapter.process(
+                input_path,
+                resource_version_id,
+                source_content_hash,
+                self._fingerprint(source_content_hash),
+                tmp_path,
+            )
+
+    def test_empty_detection_is_not_a_failure(self, tmp_path):
+        resource_version_id, source_content_hash = uuid4(), "a" * 64
+        input_path = tmp_path / "keyframe.png"
+        input_path.write_bytes(b"x")
+
+        adapter = VisualRegionDetectionPipeline(
+            self._fake_definition(tmp_path, json.dumps({"regions": []})), labels=self.LABELS
+        )
+        representation = adapter.process(
+            input_path,
+            resource_version_id,
+            source_content_hash,
+            self._fingerprint(source_content_hash),
+            tmp_path,
+        )
+
+        assert json.loads(representation.textual_payload)["regions"] == []
+
+    def test_definition_declares_labels_and_is_offline(self):
+        definition = build_region_detect_definition(labels=self.LABELS)
+
+        assert definition.producer_type == MediaProducerType.MODEL_BACKED
+        assert definition.network_disabled is True
+        assert definition.stage == PipelineStage.DETECT_REGIONS
+        assert definition.input_kinds == [MediaRepresentationKind.KEYFRAME]
+        assert "train,person" in " ".join(definition.fixed_args)
+
+    def test_definition_requires_at_least_one_label(self):
+        with pytest.raises(ValueError, match="at least one label"):
+            build_region_detect_definition(labels=())
+
+    def test_pipeline_requires_at_least_one_label(self):
+        # Labels are explicit, so customising fixed_args cannot silently
+        # open the closed label set.
+        definition = build_region_detect_definition(labels=self.LABELS)
+        with pytest.raises(ValueError, match="at least one label"):
+            VisualRegionDetectionPipeline(definition, labels=())
