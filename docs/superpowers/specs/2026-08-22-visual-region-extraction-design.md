@@ -124,9 +124,9 @@ than repairing, consistent with every other parser in this module:
   five positional arguments and caches one representation per fingerprint, so it
   cannot return a list.
 - `build_visual_region_representations(regions, resource_version_id,
-  pipeline_fingerprint, adapter, *, keyframe_representation_id)` expands the
-  batch into N representations, each with one `ImageRegionLocator`, the label as
-  `textual_payload`, and `confidence` set from the detection.
+  pipeline_fingerprint, adapter)` expands the batch into N representations, each
+  with one `ImageRegionLocator`, the label as `textual_payload`, and
+  `confidence` set from the detection.
 
 Registration uses `register_representation_batch`, so re-running detection
 retires the previous generation once and admits the new one whole.
