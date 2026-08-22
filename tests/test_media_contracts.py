@@ -69,6 +69,7 @@ def test_media_representation_kind_enum_is_complete() -> None:
         "keyframe",
         "scene",
         "silence_span",
+        "visual_region",
         "visual_embedding",
         "text_embedding",
         "proxy_media",

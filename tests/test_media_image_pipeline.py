@@ -23,6 +23,7 @@ from katsi_core.media.blob_store import BlobStore
 from katsi_core.media.contracts import (
     DerivedRepresentation,
     ImageRegionLocator,
+    MediaCoverage,
     MediaPrivacyClass,
     MediaProducerType,
     MediaRepresentationKind,
@@ -38,6 +39,8 @@ from katsi_core.media.image_metadata import (
     extract_image_metadata,
 )
 from katsi_core.media.image_pipeline import (
+    _VisualRegion,
+    build_visual_region_representations,
     parse_visual_regions,
     ImageCaptionPipeline,
     ImageOcrPipeline,
@@ -960,3 +963,61 @@ class TestVisualRegionParsing:
         regions = parse_visual_regions(payload, allowed_labels=self.ALLOWED)
 
         assert regions[0].bbox == (0.9, 0.1, 0.5, 0.2)
+
+
+class TestVisualRegionRepresentations:
+    def _provenance(self):
+        return ProducerProvenance(
+            producer_type=MediaProducerType.MODEL_BACKED,
+            adapter_name="image_detect_regions",
+            adapter_version="1.0.0",
+        )
+
+    def _fingerprint(self):
+        return PipelineFingerprint(
+            source_content_hash="a" * 64,
+            representation_kind=MediaRepresentationKind.VISUAL_REGION,
+            stage=PipelineStage.DETECT_REGIONS,
+            adapter_name="image_detect_regions",
+            adapter_version="1.0.0",
+            sampling_fingerprint="b" * 64,
+        )
+
+    def test_one_representation_per_region(self):
+        resource_version_id = uuid4()
+        regions = [
+            _VisualRegion(label="train", bbox=(0.1, 0.2, 0.4, 0.5), confidence=0.9),
+            _VisualRegion(label="person", bbox=(0.6, 0.1, 0.2, 0.3), confidence=None),
+        ]
+
+        representations = build_visual_region_representations(
+            regions, resource_version_id, self._fingerprint(), self._provenance()
+        )
+
+        assert len(representations) == 2
+        first = representations[0]
+        assert first.kind == MediaRepresentationKind.VISUAL_REGION
+        assert first.textual_payload == "train"
+        assert first.confidence == 0.9
+        assert len(first.locators) == 1
+        assert first.locators[0].locator_type == "image_region"
+        assert first.locators[0].bounding_box == (0.1, 0.2, 0.4, 0.5)
+        assert first.coverage.is_complete is False
+
+    def test_no_regions_produces_no_representations(self):
+        assert (
+            build_visual_region_representations(
+                [], uuid4(), self._fingerprint(), self._provenance()
+            )
+            == []
+        )
+
+    def test_out_of_bounds_box_is_rejected_by_the_locator(self):
+        # x + w exceeds 1: ImageRegionLocator must refuse it rather than
+        # anything upstream silently clamping.
+        regions = [_VisualRegion(label="train", bbox=(0.9, 0.1, 0.5, 0.2), confidence=None)]
+
+        with pytest.raises(ValueError, match="normalized"):
+            build_visual_region_representations(
+                regions, uuid4(), self._fingerprint(), self._provenance()
+            )

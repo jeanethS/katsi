@@ -401,6 +401,59 @@ def parse_visual_regions(
     return regions
 
 
+def build_visual_region_representations(
+    regions: list[_VisualRegion],
+    resource_version_id: ResourceVersionId,
+    pipeline_fingerprint: PipelineFingerprint,
+    adapter: ProducerProvenance,
+) -> list[DerivedRepresentation]:
+    """Expand detections into one addressable representation each.
+
+    One representation per detection rather than one carrying many boxes:
+    :class:`ImageRegionLocator` has a bounding box but no label, and a
+    consumer must be able to cite a single detection as evidence.
+
+    An empty list yields no representations. A frame containing nothing of
+    interest is a real answer, not a failure.
+    """
+    now = datetime.now(UTC)
+    representations: list[DerivedRepresentation] = []
+
+    for region in regions:
+        rep_id = uuid4()
+        representations.append(
+            DerivedRepresentation(
+                id=rep_id,
+                resource_version_id=resource_version_id,
+                kind=MediaRepresentationKind.VISUAL_REGION,
+                media_type="application/json",
+                status=MediaRepresentationStatus.CURRENT,
+                created_at=now,
+                updated_at=now,
+                textual_payload=region.label,
+                locators=(
+                    ImageRegionLocator(
+                        resource_version_id=resource_version_id,
+                        representation_id=rep_id,
+                        bounding_box=region.bbox,
+                    ),
+                ),
+                # Coverage is the box's area: how much of the frame this
+                # representation actually accounts for.
+                coverage=MediaCoverage(
+                    is_complete=False,
+                    coverage_fraction=min(1.0, region.bbox[2] * region.bbox[3]),
+                    detail=f"detected region: {region.label}",
+                ),
+                confidence=region.confidence,
+                producer=adapter,
+                pipeline_fingerprint=pipeline_fingerprint,
+            )
+        )
+
+    return representations
+
+
 class ImageOcrPipeline(MediaPipelineProtocol):
     """Bounded subprocess adapter producing whole-image and region OCR text.
 
