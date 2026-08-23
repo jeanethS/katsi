@@ -95,7 +95,7 @@ def _services():
         _state["claim_service"],
         _state["record_service"],
         _state["lease_service"],
-        s.brief,
+        s.workspace.brief,
     )
     _state["portable_state_service"] = PortableStateService(
         s.workspace.portable_state.relative_path
