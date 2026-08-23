@@ -597,6 +597,11 @@ class RepresentationRegistry:
             elif locator_type == "image_region":
                 from katsi_core.media.contracts import ImageRegionLocator
 
+                # JSON storage round-trips the tuple as a list; coerce at the
+                # deserialization boundary so the in-memory contract holds.
+                box = loc_data.get("bounding_box")
+                if isinstance(box, list):
+                    loc_data = {**loc_data, "bounding_box": tuple(box)}
                 parsed_locators.append(ImageRegionLocator(**loc_data))
             elif locator_type == "time_range":
                 from katsi_core.media.contracts import TimeRangeLocator

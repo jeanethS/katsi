@@ -410,6 +410,14 @@ class PipelineFingerprint(ImmutableModel):
     sampling_fingerprint: str = Field(
         min_length=1, description="Hash of sampling/chunking configuration"
     )
+    executable_policy: str | None = Field(
+        default=None,
+        description=(
+            "Digest of the owner-configured executable policy (path and fixed "
+            "argument template). Changing the tool or its arguments invalidates "
+            "cached output instead of silently reusing it."
+        ),
+    )
     language_policy: str = Field(default="*", description="Language code or wildcard")
     ocr_language: str | None = Field(default=None, description="OCR language if applicable")
     prompt_version: str | None = Field(
@@ -434,6 +442,7 @@ class PipelineFingerprint(ImmutableModel):
             "adapter": f"{self.adapter_name}@{self.adapter_version}",
             "model": model_key,
             "sampling": self.sampling_fingerprint,
+            "executable_policy": self.executable_policy or "none",
             "language": self.language_policy,
             "ocr_lang": self.ocr_language or "none",
             "prompt": self.prompt_version or "none",

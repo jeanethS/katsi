@@ -12,11 +12,12 @@ from katsi_core.media.adapter_catalog import build_media_pipeline_registry
 from katsi_core.media.cache import RepresentationCache
 from katsi_core.media.contracts import (
     DerivedRepresentation,
+    MediaPipelineDefinition,
     MediaProcessingConfig,
     MediaRepresentationKind,
 )
 from katsi_core.media.execution import PipelineExecutionOrchestrator
-from katsi_core.media.fingerprint import build_pipeline_fingerprint
+from katsi_core.media.fingerprint import _stable_digest, build_pipeline_fingerprint
 from katsi_core.media.registry import RepresentationRegistry
 from katsi_core.media.video_pipeline import ScenePlan, build_scene_representations
 
@@ -78,6 +79,7 @@ class MediaReprocessor:
                     adapter_version=adapter.get_adapter_version(),
                     model_identity=definition.model_identity,
                     settings=self._config.media_sampling,
+                    executable_policy=_executable_policy_digest(definition),
                 )
                 cached = (
                     self._cache.get_or_mark_miss(resource_version_id, kind, fingerprint)
@@ -124,6 +126,24 @@ class MediaReprocessor:
         for representations in produced.values():
             self._representations.register_representation_batch(representations)
         return counts
+
+
+def _executable_policy_digest(definition: MediaPipelineDefinition) -> str:
+    """Digest the owner-configured executable policy.
+
+    The executable path and argument template are inputs to the pipeline's
+    output exactly as much as the model or sampling policy: changing the tool,
+    its arguments (e.g. the OCR language), or its limits must invalidate
+    cached output rather than silently reusing text produced under another
+    configuration.
+    """
+    return _stable_digest(
+        {
+            "executable_path": definition.executable_path,
+            "fixed_args": list(definition.fixed_args),
+            "availability_probe": definition.availability_probe,
+        }
+    )
 
 
 def _duration_ms(representation: DerivedRepresentation) -> int | None:

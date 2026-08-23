@@ -68,6 +68,7 @@ def build_pipeline_fingerprint(
     input_representation_id: UUID | None = None,
     model_identity: str | None = None,
     model_version: str | None = None,
+    executable_policy: str | None = None,
     language_policy: str = "*",
     ocr_language: str | None = None,
     prompt_version: str | None = None,
@@ -77,8 +78,9 @@ def build_pipeline_fingerprint(
 
     Every input that can change a stage's output is bound into the
     fingerprint: source hash, input representation, adapter/contract
-    version, model/tool identity, prompt version, language policy, and the
-    sampling/chunking policy fingerprint derived from ``settings``.
+    version, model/tool identity, prompt version, language policy, the
+    owner-configured executable policy, and the sampling/chunking policy
+    fingerprint derived from ``settings``.
     """
     return PipelineFingerprint(
         source_content_hash=source_content_hash,
@@ -90,6 +92,7 @@ def build_pipeline_fingerprint(
         model_identity=model_identity,
         model_version=model_version,
         sampling_fingerprint=compute_sampling_fingerprint(settings),
+        executable_policy=executable_policy,
         language_policy=language_policy,
         ocr_language=ocr_language,
         prompt_version=prompt_version,
