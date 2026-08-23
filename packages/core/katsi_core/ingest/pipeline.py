@@ -14,6 +14,8 @@ from katsi_core.ingest.chunk import chunk
 from katsi_core.ingest.enrich import apply_extraction, project_chunks
 from katsi_core.ingest.extract import extract_text
 from katsi_core.ingest.records import FileRecordStore
+from katsi_core.media.contracts import MediaTypeFamily
+from katsi_core.media.detection import ContentSignatureDetector
 from katsi_core.models import FileRecord, IndexStatus
 from katsi_core.store.enrichment_cache import EnrichmentCache
 from katsi_core.store.graph import GraphStore
@@ -144,6 +146,15 @@ class IngestPipeline:
         ):
             logger.info("index_file: skip unchanged %s", p)
             return existing
+
+        # ---- media families carry no extractable text -------------------
+        # They are tracked resources so configured media pipelines can run over
+        # them; text extraction failing on an image is not an indexing error.
+        family = ContentSignatureDetector().detect_media(p, content_hash).family
+        if family in {MediaTypeFamily.IMAGE, MediaTypeFamily.AUDIO, MediaTypeFamily.VIDEO}:
+            record = FileRecord(**record_template, status=IndexStatus.SKIPPED)
+            self._record_store().put(record)
+            return record
 
         # ---- extract text ----------------------------------------------
         text = extract_text(p)

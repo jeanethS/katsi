@@ -170,6 +170,8 @@ def _index_tree(svc: dict, path: Path) -> dict[str, int]:
                     counts["error"] += 1
                 elif record.status.value == "stale":
                     counts["stale"] += 1
+                elif record.status.value == "skipped":
+                    counts["skipped"] += 1
             progress.update(task, advance=1)
     return counts
 

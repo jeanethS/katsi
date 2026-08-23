@@ -24,8 +24,15 @@ already tracked resources without deleting their source, text index, or prior
 representations, use:
 
 ```bash
+uv run katsi start /path/to/workspace          # tracks the files
 uv run katsi index --reprocess-media /path/to/workspace
 ```
+
+`--reprocess-media` only sees resources the workspace already tracks, and
+reconciliation is what tracks them, so run `katsi start` on the root first.
+Image, audio, and video extensions are in the default `ingest.include_globs`
+for that reason; text indexing reports them as `skipped`, never as errors,
+because their content belongs to the media pipelines below.
 
 Add `[katsi.media]` with the relevant family enabled and owner-authored
 `[[katsi.media.pipelines]]` entries. Each entry needs an `adapter_binding`,

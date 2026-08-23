@@ -18,6 +18,7 @@ class IndexStatus(StrEnum):
     STALE = "stale"
     ERROR = "error"
     DELETED = "deleted"
+    SKIPPED = "skipped"  # tracked resource with no text to index (media families)
 
 
 class FileRecord(BaseModel):

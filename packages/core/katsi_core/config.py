@@ -140,6 +140,25 @@ class IngestSettings(BaseModel):
             "**/*.ts",
             "**/*.pdf",
             "**/*.docx",
+            # Media families are tracked so configured media pipelines can run
+            # over them; they are never text-indexed.
+            "**/*.png",
+            "**/*.jpg",
+            "**/*.jpeg",
+            "**/*.gif",
+            "**/*.webp",
+            "**/*.tif",
+            "**/*.tiff",
+            "**/*.bmp",
+            "**/*.heic",
+            "**/*.mp3",
+            "**/*.wav",
+            "**/*.m4a",
+            "**/*.flac",
+            "**/*.mp4",
+            "**/*.mov",
+            "**/*.mkv",
+            "**/*.webm",
         ]
     )
     exclude_globs: list[str] = Field(

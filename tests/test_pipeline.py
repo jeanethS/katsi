@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import blake3
 
 from katsi_core.clients.llm import ExtractionError
-from katsi_core.config import Settings, SQLiteSettings
+from katsi_core.config import IngestSettings, Settings, SQLiteSettings
 from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
 from katsi_core.models import Extraction, IndexStatus
@@ -158,6 +158,36 @@ def test_index_file_marks_error_on_empty_text(tmp_path):
     assert result.status == IndexStatus.ERROR
     assert embed.embed_call_count == 0
     assert llm.extract_call_count == 0
+
+
+def test_index_file_skips_media_without_marking_error(tmp_path):
+    """A tracked image is skipped, not errored, so media pipelines can own it."""
+    png = tmp_path / "picture.png"
+    png.write_bytes(
+        bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+            "890000000a49444154789c6300010000050001"
+            "0d0a2db40000000049454e44ae426082"
+        )
+    )
+    embed = _FakeEmbed()
+    llm = _FakeLLM(EXTRACTION_JSON)
+    pipeline, _, _, _ = make_pipeline(tmp_path, embed, llm)
+
+    result = pipeline.index_file(png)
+
+    assert result.status == IndexStatus.SKIPPED
+    assert result.error is None
+    assert embed.embed_call_count == 0
+    assert llm.extract_call_count == 0
+
+
+def test_default_include_globs_track_image_files():
+    """Images must be tracked resources or --reprocess-media finds nothing."""
+    globs = IngestSettings().include_globs
+
+    assert "**/*.png" in globs
+    assert "**/*.jpg" in globs
 
 
 def test_index_file_marks_error_before_semantic_projection_on_extraction_failure(tmp_path):
