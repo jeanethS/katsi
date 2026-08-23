@@ -226,12 +226,12 @@ def index(
     if not path.exists():
         console.print(f"[red]error:[/] path not found: {path}")
         raise typer.Exit(code=1) from None
+    if reprocess_media:
+        _print_index_summary(dict(vars(_reprocess_media(svc, path))))
+        return
     files = _walk_files(path, s.ingest.include_globs, s.ingest.exclude_globs)
     console.print(f"[bold]indexing[/] {len(files)} file(s) under {path}")
     _print_index_summary(_index_tree(svc, path))
-    if reprocess_media:
-        outcomes = _reprocess_media(svc, path)
-        _print_index_summary(dict(vars(outcomes)))
 
 
 @app.command(name="start")

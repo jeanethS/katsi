@@ -113,7 +113,7 @@ def test_index_processes_md_file(cli_runner, tmp_path):
     assert llm.calls == 1
 
 
-def test_index_reprocess_flag_preserves_normal_indexing(cli_runner, tmp_path):
+def test_index_reprocess_flag_skips_normal_indexing(cli_runner, tmp_path):
     runner, cli_main, embed, llm, _, _ = cli_runner
     md_path = tmp_path / "doc.md"
     md_path.write_text("# Hello\n\nmentions Acme.")
@@ -121,8 +121,8 @@ def test_index_reprocess_flag_preserves_normal_indexing(cli_runner, tmp_path):
     result = runner.invoke(cli_main.app, ["index", "--reprocess-media", str(md_path)])
 
     assert result.exit_code == 0, result.output
-    assert embed.calls == 1
-    assert llm.calls == 1
+    assert embed.calls == 0
+    assert llm.calls == 0
 
 
 def test_search_prints_results_after_indexing(cli_runner, tmp_path):
