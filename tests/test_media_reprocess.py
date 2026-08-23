@@ -33,6 +33,19 @@ def _definition(identifier: str) -> MediaPipelineDefinition:
     )
 
 
+def _metadata_definition() -> MediaPipelineDefinition:
+    return MediaPipelineDefinition(
+        id="metadata",
+        adapter_binding="video_metadata_ffprobe",
+        name="Video metadata",
+        stage=PipelineStage.EXTRACT_METADATA,
+        accepted_mime_patterns=["video/*"],
+        representation_kinds_produced=[MediaRepresentationKind.MEDIA_DESCRIPTOR],
+        producer_type=MediaProducerType.DETERMINISTIC,
+        executable_path="/usr/bin/true",
+    )
+
+
 def _representation(resource_version_id, fingerprint) -> DerivedRepresentation:
     now = datetime.now(UTC)
     return DerivedRepresentation(
@@ -60,14 +73,22 @@ def test_reprocessor_batches_siblings_and_reuses_cache(tmp_path, monkeypatch) ->
     )
     config = MediaProcessingConfig(
         enable_video_processing=True,
-        pipelines=[_definition("scene-a"), _definition("scene-b")],
+        pipelines=[_metadata_definition(), _definition("scene-a"), _definition("scene-b")],
     )
     calls = 0
 
     def run(_self, _adapter, _definition, _path, resource_version_id, _hash, fingerprint):
         nonlocal calls
         calls += 1
-        return _representation(resource_version_id, fingerprint)
+        representation = _representation(resource_version_id, fingerprint)
+        if fingerprint.representation_kind is MediaRepresentationKind.MEDIA_DESCRIPTOR:
+            return representation.model_copy(
+                update={
+                    "kind": MediaRepresentationKind.MEDIA_DESCRIPTOR,
+                    "textual_payload": '{"duration_ms": 2000}',
+                }
+            )
+        return representation.model_copy(update={"textual_payload": '{"boundaries_ms": [1000]}'})
 
     monkeypatch.setattr(PipelineExecutionOrchestrator, "run", run)
     source = tmp_path / "clip.mp4"
@@ -78,13 +99,20 @@ def test_reprocessor_batches_siblings_and_reuses_cache(tmp_path, monkeypatch) ->
     first = reprocessor.process(source, resource_version_id, "a" * 64)
     second = reprocessor.process(source, resource_version_id, "a" * 64)
 
-    assert first.processed == 2
-    assert second.reused == 2
-    assert calls == 2
-    current = registry.get_representations_by_resource(
-        resource_version_id, MediaRepresentationStatus.CURRENT
+    assert first.processed == 3
+    assert second.reused == 1
+    assert calls == 5
+    current = [
+        representation
+        for representation in registry.get_representations_by_resource(resource_version_id)
+        if registry.is_current(representation.id)
+    ]
+    assert len(current) == 5
+    assert all(
+        representation.locators
+        for representation in current
+        if representation.kind is MediaRepresentationKind.SCENE
     )
-    assert len(current) == 2
 
 
 def test_reprocessor_reports_unavailable_without_pipelines(tmp_path) -> None:

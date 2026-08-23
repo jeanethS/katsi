@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,7 @@ from katsi_core.media.contracts import (
 from katsi_core.media.execution import PipelineExecutionOrchestrator
 from katsi_core.media.fingerprint import build_pipeline_fingerprint
 from katsi_core.media.registry import RepresentationRegistry
+from katsi_core.media.video_pipeline import ScenePlan, build_scene_representations
 
 
 @dataclass
@@ -51,39 +53,70 @@ class MediaReprocessor:
             for pipeline in self._pipelines.find_for_mime_type(mime_type)
             if not pipeline.definition.input_kinds
         ]
+        candidates.sort(key=lambda pipeline: pipeline.definition.stage.value != "extract_metadata")
         if not candidates:
             counts.unavailable += 1
             return counts
         produced: dict[MediaRepresentationKind, list[DerivedRepresentation]] = {}
+        duration_ms: int | None = None
         for pipeline in candidates:
             available, _ = pipeline.is_available()
             if not available:
                 counts.unavailable += 1
                 continue
             definition = pipeline.definition
+            adapter = pipeline.build_adapter()
             for kind in definition.representation_kinds_produced:
+                # Scene batches expand to many cited SceneLocators, so one cached
+                # representation is insufficient to represent the generation.
+                use_cache = kind is not MediaRepresentationKind.SCENE
                 fingerprint = build_pipeline_fingerprint(
                     source_content_hash=content_hash,
                     representation_kind=kind,
                     stage=definition.stage,
-                    adapter_name=definition.adapter_binding or definition.id,
-                    adapter_version="1",
+                    adapter_name=adapter.get_adapter_name(),
+                    adapter_version=adapter.get_adapter_version(),
                     model_identity=definition.model_identity,
                     settings=self._config.media_sampling,
                 )
-                cached = self._cache.get_or_mark_miss(resource_version_id, kind, fingerprint)
+                cached = (
+                    self._cache.get_or_mark_miss(resource_version_id, kind, fingerprint)
+                    if use_cache
+                    else None
+                )
                 if cached is not None:
+                    if cached.kind is MediaRepresentationKind.MEDIA_DESCRIPTOR:
+                        duration_ms = _duration_ms(cached)
                     counts.reused += 1
                     continue
                 result = self._orchestrator.run(
-                    pipeline.build_adapter(),
+                    adapter,
                     definition,
                     file_path,
                     resource_version_id,
                     content_hash,
                     fingerprint,
                 )
-                produced.setdefault(result.kind, []).append(result)
+                if result.kind is MediaRepresentationKind.MEDIA_DESCRIPTOR:
+                    duration_ms = _duration_ms(result)
+                if (
+                    result.kind is MediaRepresentationKind.SCENE
+                    and result.status.value == "current"
+                ):
+                    if duration_ms is None:
+                        counts.unavailable += 1
+                        continue
+                    produced.setdefault(result.kind, []).extend(
+                        _expand_scenes(
+                            result,
+                            duration_ms,
+                            resource_version_id,
+                            content_hash,
+                            self._config,
+                        )
+                    )
+                else:
+                    produced.setdefault(result.kind, []).append(result)
                 if result.status.value in {"failed", "unavailable"}:
                     counts.failed += 1
                 else:
@@ -91,3 +124,41 @@ class MediaReprocessor:
         for representations in produced.values():
             self._representations.register_representation_batch(representations)
         return counts
+
+
+def _duration_ms(representation: DerivedRepresentation) -> int | None:
+    try:
+        value = json.loads(representation.textual_payload or "{}").get("duration_ms")
+        return int(value) if isinstance(value, int | float) and value > 0 else None
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _expand_scenes(
+    batch: DerivedRepresentation,
+    duration_ms: int,
+    resource_version_id: UUID,
+    content_hash: str,
+    config: MediaProcessingConfig,
+) -> tuple[DerivedRepresentation, ...]:
+    try:
+        boundaries = json.loads(batch.textual_payload or "{}").get("boundaries_ms", [])
+        points = sorted(
+            {0, duration_ms, *(int(point) for point in boundaries if 0 < int(point) < duration_ms)}
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ()
+    scenes = tuple(
+        ScenePlan(start, end, (start + end) // 2)
+        for start, end in zip(points, points[1:], strict=False)
+    )
+    return build_scene_representations(
+        scenes,
+        {},
+        (),
+        resource_version_id=resource_version_id,
+        source_content_hash=content_hash,
+        settings=config.media_sampling,
+        adapter_name=batch.producer.adapter_name,
+        adapter_version=batch.producer.adapter_version,
+    )

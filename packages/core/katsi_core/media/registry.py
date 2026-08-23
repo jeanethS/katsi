@@ -175,11 +175,11 @@ class RepresentationRegistry:
         first = representations[0]
         with self._database.connection() as conn:
             if make_current and any(
-                item.status == MediaRepresentationStatus.CURRENT for item in representations
+                item.status
+                in {MediaRepresentationStatus.CURRENT, MediaRepresentationStatus.PARTIAL}
+                for item in representations
             ):
-                self._supersede_current_generation(
-                    conn, first.resource_version_id, first.kind
-                )
+                self._supersede_current_generation(conn, first.resource_version_id, first.kind)
             for item in representations:
                 self._insert_representation(conn, item, make_current)
 
@@ -217,9 +217,7 @@ class RepresentationRegistry:
         cannot drift between them.
         """
         # Serialize complex fields
-        locators_json = json.dumps(
-            [loc.model_dump(mode="json") for loc in representation.locators]
-        )
+        locators_json = json.dumps([loc.model_dump(mode="json") for loc in representation.locators])
         pipeline_fingerprint_json = json.dumps(
             representation.pipeline_fingerprint.model_dump(mode="json")
         )
@@ -263,9 +261,7 @@ class RepresentationRegistry:
                 representation.error.error_category if representation.error else None,
                 representation.error.error_message if representation.error else None,
                 1 if representation.error and representation.error.is_retriable else 0,
-                json.dumps(representation.error.diagnostic_info)
-                if representation.error
-                else None,
+                json.dumps(representation.error.diagnostic_info) if representation.error else None,
                 pipeline_fingerprint_json,
                 1 if make_current else 0,
             ),
@@ -613,6 +609,7 @@ class RepresentationRegistry:
             elif locator_type == "scene":
                 from katsi_core.media.contracts import SceneLocator
 
+                loc_data["keyframe_ids"] = tuple(loc_data.get("keyframe_ids", ()))
                 parsed_locators.append(SceneLocator(**loc_data))
             else:
                 # Fallback for unknown types

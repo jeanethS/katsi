@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 
-from katsi_core.media.audio_pipeline import AudioDecodePipeline, AudioSilenceDetectionPipeline
+from katsi_core.media.audio_pipeline import AudioDecodePipeline
 from katsi_core.media.contracts import (
     MediaPipelineDefinition,
     MediaProcessingConfig,
@@ -25,12 +25,6 @@ _ADAPTERS: dict[
         AudioDecodePipeline,
         PipelineStage.GENERATE_PROXY,
         MediaRepresentationKind.PROXY_MEDIA,
-        "audio/*",
-    ),
-    "audio_silence_detect_ffmpeg": (
-        AudioSilenceDetectionPipeline,
-        PipelineStage.DETECT_SILENCE,
-        MediaRepresentationKind.SILENCE_SPAN,
         "audio/*",
     ),
     "video_metadata_ffprobe": (

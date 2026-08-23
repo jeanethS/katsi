@@ -31,9 +31,11 @@ Add `[katsi.media]` with the relevant family enabled and owner-authored
 `[[katsi.media.pipelines]]` entries. Each entry needs an `adapter_binding`,
 its executable path, fixed arguments, limits, and optional availability probe.
 The currently supported bindings are `video_metadata_ffprobe`,
-`video_scene_detect_ffmpeg`, `audio_decode_ffmpeg`, and
-`audio_silence_detect_ffmpeg`. No executable, model, or wrapper is selected or
-downloaded by Katsi; unsupported or absent adapters are reported unavailable.
+`video_scene_detect_ffmpeg`, and `audio_decode_ffmpeg`. Silence detection,
+transcription, regions, captions, and keyframes need their upstream derived
+artifacts and are unavailable until their complete pipeline is configured. No
+executable, model, or wrapper is selected or downloaded by Katsi; unsupported
+or absent adapters are reported unavailable.
 
 Reprocessing reuses compatible content/fingerprint results. Changed executable
 policy or sampling produces a new historical generation; it never removes the
