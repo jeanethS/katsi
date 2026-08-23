@@ -201,13 +201,29 @@ def _reprocess_media(svc: dict, path: Path) -> ReprocessCounts:
               )
             """
         ).fetchall()
-    for row in rows:
-        file_path = (Path(row["root_path"]) / row["current_path"]).resolve()
-        if not file_path.is_relative_to(requested) or not file_path.is_file():
-            continue
-        outcome = reprocessor.process(file_path, UUID(row["id"]), row["content_hash"])
-        for name in total.__dataclass_fields__:
-            setattr(total, name, getattr(total, name) + getattr(outcome, name))
+    resources = [
+        (row, file_path)
+        for row in rows
+        if (file_path := (Path(row["root_path"]) / row["current_path"]).resolve()).is_relative_to(
+            requested
+        )
+        and file_path.is_file()
+    ]
+    console.print(f"[bold]reprocessing[/] {len(resources)} tracked file(s) under {path}")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("[cyan]reprocessing", total=len(resources) or None)
+        for row, file_path in resources:
+            progress.update(task, description=str(file_path.name)[:40])
+            outcome = reprocessor.process(file_path, UUID(row["id"]), row["content_hash"])
+            for name in total.__dataclass_fields__:
+                setattr(total, name, getattr(total, name) + getattr(outcome, name))
+            progress.update(task, advance=1)
     return total
 
 

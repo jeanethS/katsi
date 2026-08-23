@@ -123,6 +123,7 @@ def test_index_reprocess_flag_skips_normal_indexing(cli_runner, tmp_path):
     assert result.exit_code == 0, result.output
     assert embed.calls == 0
     assert llm.calls == 0
+    assert "reprocessing" in result.output
 
 
 def test_search_prints_results_after_indexing(cli_runner, tmp_path):
