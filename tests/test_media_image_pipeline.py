@@ -24,7 +24,6 @@ from katsi_core.media.blob_store import BlobStore
 from katsi_core.media.contracts import (
     DerivedRepresentation,
     ImageRegionLocator,
-    MediaCoverage,
     MediaPrivacyClass,
     MediaProducerType,
     MediaRepresentationKind,
@@ -41,21 +40,21 @@ from katsi_core.media.image_metadata import (
     extract_image_metadata,
 )
 from katsi_core.media.image_pipeline import (
-    VisualRegionDetectionPipeline,
-    build_region_detect_definition,
-    _VisualRegion,
-    build_visual_region_representations,
-    parse_visual_regions,
     ImageCaptionPipeline,
     ImageOcrPipeline,
     ImageThumbnailPipeline,
     ImageVisualEmbeddingPipeline,
+    VisualRegionDetectionPipeline,
     _is_strict_caption,
+    _VisualRegion,
     build_caption_pipeline_definition,
     build_embedding_pipeline_definition,
     build_ocr_pipeline_definition,
+    build_region_detect_definition,
     build_sips_heic_thumbnail_pipeline_definition,
     build_thumbnail_pipeline_definition,
+    build_visual_region_representations,
+    parse_visual_regions,
 )
 
 # ---------------------------------------------------------------------------
@@ -1069,10 +1068,16 @@ class TestVisualRegionDetectionPipeline:
         input_path = tmp_path / "keyframe.png"
         input_path.write_bytes(b"not really a png")
         payload = json.dumps(
-            {"regions": [{"label": "train", "bounding_box": [0.1, 0.2, 0.4, 0.5], "confidence": 0.9}]}
+            {
+                "regions": [
+                    {"label": "train", "bounding_box": [0.1, 0.2, 0.4, 0.5], "confidence": 0.9}
+                ]
+            }
         )
 
-        adapter = VisualRegionDetectionPipeline(self._fake_definition(tmp_path, payload), labels=self.LABELS)
+        adapter = VisualRegionDetectionPipeline(
+            self._fake_definition(tmp_path, payload), labels=self.LABELS
+        )
         representation = adapter.process(
             input_path,
             resource_version_id,
@@ -1096,7 +1101,9 @@ class TestVisualRegionDetectionPipeline:
             {"regions": [{"label": "spaceship", "bounding_box": [0.1, 0.1, 0.2, 0.2]}]}
         )
 
-        adapter = VisualRegionDetectionPipeline(self._fake_definition(tmp_path, payload), labels=self.LABELS)
+        adapter = VisualRegionDetectionPipeline(
+            self._fake_definition(tmp_path, payload), labels=self.LABELS
+        )
 
         with pytest.raises(ValueError, match="spaceship"):
             adapter.process(

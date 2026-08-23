@@ -659,7 +659,9 @@ class ImageOcrPipeline(MediaPipelineProtocol):
         pipeline_fingerprint: PipelineFingerprint,
         working_directory: Path,
     ) -> DerivedRepresentation:
-        definition = type(self).get_pipeline_definition()
+        # Instance lookup (not `type(self)`): a bound subclass may override
+        # this to supply owner configuration.
+        definition = self.get_pipeline_definition()
         output_path = working_directory / "ocr.json"
         result = self._executor.execute(
             definition, file_path, working_directory, output_path=output_path

@@ -1,6 +1,6 @@
 import pytest
 
-from katsi_core.config import Settings
+from katsi_core.config import Settings, reset_settings
 from katsi_core.media.adapter_catalog import adapter_class_for, build_media_pipeline_registry
 from katsi_core.media.contracts import (
     MediaPipelineDefinition,
@@ -88,3 +88,71 @@ def test_disabled_or_unavailable_pipeline_is_not_available() -> None:
         False,
         "Configured executable is unavailable: /does/not/exist",
     )
+
+
+def _image_ocr_definition() -> MediaPipelineDefinition:
+    return MediaPipelineDefinition(
+        id="owner-ocr",
+        adapter_binding="image_ocr_tesseract",
+        name="Owner OCR",
+        stage=PipelineStage.OCR,
+        accepted_mime_patterns=["image/*"],
+        representation_kinds_produced=[MediaRepresentationKind.OCR_TEXT],
+        producer_type=MediaProducerType.DETERMINISTIC,
+        executable_path="/usr/local/bin/ocr-wrapper",
+        fixed_args=["{input_path}", "{output_path}", "--lang", "spa+eng"],
+    )
+
+
+def _image_thumbnail_definition() -> MediaPipelineDefinition:
+    return MediaPipelineDefinition(
+        id="owner-thumbnail",
+        adapter_binding="image_thumbnail_magick",
+        name="Owner thumbnail",
+        stage=PipelineStage.GENERATE_THUMBNAIL,
+        accepted_mime_patterns=["image/*"],
+        representation_kinds_produced=[MediaRepresentationKind.THUMBNAIL],
+        producer_type=MediaProducerType.DETERMINISTIC,
+        executable_path="/opt/homebrew/bin/magick",
+        fixed_args=["{input_path}", "-auto-orient", "-resize", "512x512>", "{output_path}"],
+    )
+
+
+def test_image_ocr_binding_builds_definition_bound_adapter(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("KATSI_STORE__DATA_DIR", str(tmp_path))
+    reset_settings()
+    definition = _image_ocr_definition()
+
+    registry = build_media_pipeline_registry(
+        MediaProcessingConfig(enable_image_processing=True, pipelines=[definition])
+    )
+    adapter = registry.get(definition.id).build_adapter()
+
+    from katsi_core.media.adapter_catalog import ConfiguredImageOcrPipeline
+
+    assert isinstance(adapter, ConfiguredImageOcrPipeline)
+    assert adapter.get_pipeline_definition() is definition
+    assert adapter.get_pipeline_definition().fixed_args[-1] == "spa+eng"
+
+
+def test_image_thumbnail_binding_builds_blob_backed_adapter(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("KATSI_STORE__DATA_DIR", str(tmp_path))
+    reset_settings()
+    definition = _image_thumbnail_definition()
+
+    registry = build_media_pipeline_registry(
+        MediaProcessingConfig(enable_image_processing=True, pipelines=[definition])
+    )
+    adapter = registry.get(definition.id).build_adapter()
+
+    assert adapter._blob_store is not None
+    assert (tmp_path / "blobs").is_dir()
+
+
+def test_image_binding_rejects_stage_mismatch() -> None:
+    definition = _image_ocr_definition().model_copy(
+        update={"stage": PipelineStage.GENERATE_THUMBNAIL}
+    )
+
+    with pytest.raises(PipelineRegistrationError, match="does not match"):
+        adapter_class_for(definition)

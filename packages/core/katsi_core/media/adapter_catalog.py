@@ -4,19 +4,52 @@ from __future__ import annotations
 
 import fnmatch
 
+from katsi_core.config import get_settings
 from katsi_core.media.audio_pipeline import AudioDecodePipeline
+from katsi_core.media.blob_store import BlobStore
 from katsi_core.media.contracts import (
     MediaPipelineDefinition,
     MediaProcessingConfig,
     MediaRepresentationKind,
     PipelineStage,
 )
+from katsi_core.media.image_pipeline import ImageOcrPipeline, ImageThumbnailPipeline
 from katsi_core.media.pipeline_registry import MediaPipelineRegistry, PipelineRegistrationError
 from katsi_core.media.protocols import MediaPipelineProtocol
 from katsi_core.media.video_pipeline import (
     SceneDetectionPipeline,
     VideoMetadataPipeline,
 )
+
+
+class ConfiguredImageThumbnailPipeline(ImageThumbnailPipeline):
+    """Thumbnail adapter bound to the owner's definition and blob store.
+
+    `RegisteredPipeline.build_adapter` constructs adapters as
+    ``AdapterClass(definition)``, so the blob store is resolved here from the
+    owner's configured data directory rather than threaded through the
+    reprocess loop.
+    """
+
+    def __init__(self, definition: MediaPipelineDefinition) -> None:
+        super().__init__(definition, blob_store=BlobStore(get_settings().store.data_dir))
+
+
+class ConfiguredImageOcrPipeline(ImageOcrPipeline):
+    """OCR adapter that executes the owner's definition, not the class default.
+
+    The base pipeline is zero-arg and hardwired to its default definition,
+    which reports unavailable without an executable. Owner configuration
+    (executable path, ``--lang`` in fixed_args, timeouts) must win.
+    """
+
+    def __init__(self, definition: MediaPipelineDefinition) -> None:
+        super().__init__()
+        self._configured = definition
+
+    def get_pipeline_definition(self) -> MediaPipelineDefinition:
+        return self._configured
+
 
 _ADAPTERS: dict[
     str, tuple[type[MediaPipelineProtocol], PipelineStage, MediaRepresentationKind, str]
@@ -38,6 +71,18 @@ _ADAPTERS: dict[
         PipelineStage.DETECT_SCENES,
         MediaRepresentationKind.SCENE,
         "video/*",
+    ),
+    "image_thumbnail_magick": (
+        ConfiguredImageThumbnailPipeline,
+        PipelineStage.GENERATE_THUMBNAIL,
+        MediaRepresentationKind.THUMBNAIL,
+        "image/*",
+    ),
+    "image_ocr_tesseract": (
+        ConfiguredImageOcrPipeline,
+        PipelineStage.OCR,
+        MediaRepresentationKind.OCR_TEXT,
+        "image/*",
     ),
 }
 
