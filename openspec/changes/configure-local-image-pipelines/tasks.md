@@ -13,10 +13,10 @@
 
 ## 3. Verification
 
-- [ ] 3.1 Run the configured pipelines over a small folder and confirm representation counts, coverage fractions and `is_current` visibility for both kinds.
-- [ ] 3.2 Re-run unchanged and confirm every representation is reused and no executable is invoked.
-- [ ] 3.3 Change the OCR language, re-run, and confirm a new current representation is created while the prior one is retained as history.
-- [ ] 3.4 Point one definition at a nonexistent executable and confirm it is reported unavailable without aborting the run.
+- [x] 3.1 Run the configured pipelines over a small folder and confirm representation counts, coverage fractions and `is_current` visibility for both kinds.
+- [x] 3.2 Re-run unchanged and confirm every representation is reused and no executable is invoked.
+- [x] 3.3 Change the OCR language, re-run, and confirm a new current representation is created while the prior one is retained as history.
+- [x] 3.4 Point one definition at a nonexistent executable and confirm it is reported unavailable without aborting the run.
 - [x] 3.5 Run `uv run pytest`, `uv run ruff check .` and `uv run ruff format --check .`.
 
 ## 4. Handover
