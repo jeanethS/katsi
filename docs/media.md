@@ -31,15 +31,77 @@ Add `[katsi.media]` with the relevant family enabled and owner-authored
 `[[katsi.media.pipelines]]` entries. Each entry needs an `adapter_binding`,
 its executable path, fixed arguments, limits, and optional availability probe.
 The currently supported bindings are `video_metadata_ffprobe`,
-`video_scene_detect_ffmpeg`, and `audio_decode_ffmpeg`. Silence detection,
-transcription, regions, captions, and keyframes need their upstream derived
-artifacts and are unavailable until their complete pipeline is configured. No
-executable, model, or wrapper is selected or downloaded by Katsi; unsupported
-or absent adapters are reported unavailable.
+`video_scene_detect_ffmpeg`, `audio_decode_ffmpeg`, `image_thumbnail_magick`,
+and `image_ocr_tesseract`. Silence detection, transcription, regions, captions,
+and keyframes need their upstream derived artifacts and are unavailable until
+their complete pipeline is configured. No executable, model, or wrapper is
+selected or downloaded by Katsi; unsupported or absent adapters are reported
+unavailable.
 
 Reprocessing reuses compatible content/fingerprint results. Changed executable
 policy or sampling produces a new historical generation; it never removes the
 original file or old representation.
+
+## Local image pipelines (thumbnails and OCR)
+
+Image understanding is owner-configured and disabled unless two things exist:
+the `[katsi.media]` block below and the local tools it names. Nothing is
+selected, downloaded, or guessed. By default everything stays off:
+
+```toml
+[katsi.media]
+enable_image_processing = false  # set true only after the executables below exist
+
+# Thumbnail: ImageMagick writes the PNG directly; no wrapper is needed because
+# the thumbnail contract is a file, not JSON. `-auto-orient` applies EXIF
+# orientation before resizing; `512x512>` only shrinks larger images.
+[[katsi.media.pipelines]]
+id = "image_thumbnail_v1"
+adapter_binding = "image_thumbnail_magick"
+name = "Orientation-normalized thumbnail (magick)"
+stage = "generate_thumbnail"
+accepted_mime_patterns = ["image/*"]
+representation_kinds_produced = ["thumbnail"]
+producer_type = "deterministic"
+executable_path = "/opt/homebrew/bin/magick"
+fixed_args = ["{input_path}", "-auto-orient", "-resize", "512x512>", "{output_path}"]
+network_disabled = true
+timeout_seconds = 30
+
+# OCR: tesseract cannot emit the katsi JSON contract itself, so the
+# owner-supplied wrapper at tools/media/ocr_tesseract.py translates TSV into
+# {"text": ..., "regions": [{text, bbox, confidence}]}. The language is an
+# explicit argument on purpose: it is part of fixed_args, so changing it
+# changes the pipeline fingerprint and invalidates cached OCR instead of
+# silently reusing text produced under another language.
+[[katsi.media.pipelines]]
+id = "image_ocr_v1"
+adapter_binding = "image_ocr_tesseract"
+name = "Local image OCR (tesseract wrapper)"
+stage = "ocr"
+accepted_mime_patterns = ["image/*"]
+representation_kinds_produced = ["ocr_text"]
+producer_type = "deterministic"
+executable_path = "/Users/jeanhrdz/katsi/tools/media/ocr_tesseract.py"
+fixed_args = ["{input_path}", "{output_path}", "--lang", "spa+eng"]
+network_disabled = true
+timeout_seconds = 60
+```
+
+Both pipelines run under `sandbox-exec` with `(deny network*)`; the wrapper
+opens no sockets and reaches nothing on loopback. That constraint is why
+captioning is deliberately absent from this configuration: a caption pipeline
+would need to reach a vision model over HTTP, which the sandbox denies by
+design. Semantic description of what an image depicts belongs to the consumer,
+outside katsi, derived from the OCR text and scene evidence recorded here.
+Visual embeddings are likewise unconfigured: no local encoder emits the
+required `{embedding, space}` contract, so retrieval cannot rank by visual
+similarity until one is supplied.
+
+The `image_thumbnail_magick` and `image_ocr_tesseract` bindings are validated
+at registration against each definition's declared stage, produced kinds, and
+accepted MIME patterns — a mismatch fails registration loudly rather than
+surfacing at run time.
 
 ## Privacy
 
