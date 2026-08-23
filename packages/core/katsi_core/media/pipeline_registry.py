@@ -10,7 +10,10 @@ selection -- actual bounded execution lives in `execution.py`.
 from __future__ import annotations
 
 import fnmatch
+import os
+import shutil
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from katsi_core.media.contracts import MediaPipelineDefinition, MediaRepresentationKind
 from katsi_core.media.protocols import MediaPipelineProtocol
@@ -85,6 +88,29 @@ class RegisteredPipeline:
 
     definition: MediaPipelineDefinition
     adapter_class: type[MediaPipelineProtocol] | None = None
+
+    def is_available(self) -> tuple[bool, str | None]:
+        """Check the owner-selected executable and optional bounded probe."""
+        if self.adapter_class is None:
+            return False, "No local adapter is bound"
+        executable = self.definition.executable_path
+        if executable is None:
+            return False, "No executable is configured"
+        executable_path = Path(executable)
+        if not (
+            shutil.which(executable)
+            or (executable_path.is_file() and os.access(executable, os.X_OK))
+        ):
+            return False, f"Configured executable is unavailable: {executable}"
+        if self.definition.availability_probe:
+            return self.adapter_class._check_availability_probe(self.definition.availability_probe)
+        return True, None
+
+    def build_adapter(self) -> MediaPipelineProtocol:
+        """Instantiate a configured adapter after availability has been checked."""
+        if self.adapter_class is None:
+            raise PipelineNotFoundError(f"Pipeline '{self.definition.id}' has no local adapter")
+        return self.adapter_class(self.definition)
 
 
 @dataclass

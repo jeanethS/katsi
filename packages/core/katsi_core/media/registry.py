@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
@@ -129,80 +129,143 @@ class RepresentationRegistry:
         # Validate representation before storage
         representation.model_validate(representation.model_dump())
 
-        timestamp = _utc_now()
-
         with self._database.connection() as conn:
             # If making current, mark existing current representations as non-current
             if make_current and representation.status == MediaRepresentationStatus.CURRENT:
-                conn.execute(
-                    """
-                    UPDATE representations
-                    SET is_current = 0, updated_at = ?
-                    WHERE resource_version_id = ?
-                      AND kind = ?
-                      AND is_current = 1
-                """,
-                    (
-                        timestamp.isoformat(),
-                        str(representation.resource_version_id),
-                        representation.kind.value,
-                    ),
+                self._supersede_current_generation(
+                    conn, representation.resource_version_id, representation.kind
                 )
+            self._insert_representation(conn, representation, make_current)
 
-            # Serialize complex fields
-            locators_json = json.dumps(
-                [loc.model_dump(mode="json") for loc in representation.locators]
-            )
-            pipeline_fingerprint_json = json.dumps(
-                representation.pipeline_fingerprint.model_dump(mode="json")
-            )
+    def register_representation_batch(
+        self,
+        representations: list[DerivedRepresentation],
+        make_current: bool = True,
+    ) -> None:
+        """Register N representations of one kind as a single current generation.
 
-            # Insert the new representation
-            conn.execute(
-                """
-                INSERT INTO representations (
-                    id, resource_version_id, kind, media_type, status,
-                    created_at, updated_at, textual_payload, blob_reference,
-                    blob_hash, blob_byte_count, locators, coverage_fraction,
-                    coverage_is_complete, coverage_detail, confidence,
-                    producer_type, adapter_name, adapter_version, model_identity,
-                    model_version, error_category, error_message,
-                    error_is_retriable, error_diagnostic, pipeline_fingerprint,
-                    is_current
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    str(representation.id),
-                    str(representation.resource_version_id),
-                    representation.kind.value,
-                    representation.media_type,
-                    representation.status.value,
-                    representation.created_at.isoformat(),
-                    representation.updated_at.isoformat(),
-                    representation.textual_payload,
-                    representation.blob_reference,
-                    str(representation.blob_hash) if representation.blob_hash else None,
-                    representation.blob_byte_count,
-                    locators_json,
-                    representation.coverage.coverage_fraction,
-                    1 if representation.coverage.is_complete else 0,
-                    representation.coverage.detail,
-                    representation.confidence,
-                    representation.producer.producer_type.value,
-                    representation.producer.adapter_name,
-                    representation.producer.adapter_version,
-                    representation.producer.model_identity,
-                    representation.producer.model_version,
-                    representation.error.error_category if representation.error else None,
-                    representation.error.error_message if representation.error else None,
-                    1 if representation.error and representation.error.is_retriable else 0,
-                    json.dumps(representation.error.diagnostic_info)
-                    if representation.error
-                    else None,
-                    pipeline_fingerprint_json,
-                    1 if make_current else 0,
-                ),
-            )
+        Scenes, keyframes, transcript segments and silence spans are inherently
+        many-per-kind: one media file yields N of them. Registering those one at
+        a time through :meth:`register_representation` would make each member
+        supersede the one before it, leaving only the last visible. Supersession
+        is a property of a *generation* of output, not of an individual row, so
+        this retires the previous generation exactly once and then admits every
+        member of the new one.
+
+        All members must share one ``resource_version_id`` and one ``kind``;
+        that is what makes "the previous generation" well defined. An empty
+        list is a no-op.
+
+        Raises:
+            ValueError: If the batch spans multiple resources or kinds.
+        """
+        if not representations:
+            return
+
+        resource_version_ids = {str(item.resource_version_id) for item in representations}
+        if len(resource_version_ids) != 1:
+            raise ValueError("A batch must share a single resource_version_id")
+        kinds = {item.kind for item in representations}
+        if len(kinds) != 1:
+            raise ValueError("A batch must share a single representation kind")
+
+        for item in representations:
+            item.model_validate(item.model_dump())
+
+        first = representations[0]
+        with self._database.connection() as conn:
+            if make_current and any(
+                item.status
+                in {MediaRepresentationStatus.CURRENT, MediaRepresentationStatus.PARTIAL}
+                for item in representations
+            ):
+                self._supersede_current_generation(conn, first.resource_version_id, first.kind)
+            for item in representations:
+                self._insert_representation(conn, item, make_current)
+
+    def _supersede_current_generation(
+        self,
+        conn: Any,
+        resource_version_id: ResourceVersionId,
+        kind: MediaRepresentationKind,
+    ) -> None:
+        """Retire the currently-visible generation of one kind for one resource."""
+        conn.execute(
+            """
+            UPDATE representations
+            SET is_current = 0, updated_at = ?
+            WHERE resource_version_id = ?
+              AND kind = ?
+              AND is_current = 1
+        """,
+            (
+                _utc_now().isoformat(),
+                str(resource_version_id),
+                kind.value,
+            ),
+        )
+
+    def _insert_representation(
+        self,
+        conn: Any,
+        representation: DerivedRepresentation,
+        make_current: bool,
+    ) -> None:
+        """Insert one immutable representation row.
+
+        Shared by the single and batch registration paths so the column list
+        cannot drift between them.
+        """
+        # Serialize complex fields
+        locators_json = json.dumps([loc.model_dump(mode="json") for loc in representation.locators])
+        pipeline_fingerprint_json = json.dumps(
+            representation.pipeline_fingerprint.model_dump(mode="json")
+        )
+
+        # Insert the new representation
+        conn.execute(
+            """
+            INSERT INTO representations (
+                id, resource_version_id, kind, media_type, status,
+                created_at, updated_at, textual_payload, blob_reference,
+                blob_hash, blob_byte_count, locators, coverage_fraction,
+                coverage_is_complete, coverage_detail, confidence,
+                producer_type, adapter_name, adapter_version, model_identity,
+                model_version, error_category, error_message,
+                error_is_retriable, error_diagnostic, pipeline_fingerprint,
+                is_current
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                str(representation.id),
+                str(representation.resource_version_id),
+                representation.kind.value,
+                representation.media_type,
+                representation.status.value,
+                representation.created_at.isoformat(),
+                representation.updated_at.isoformat(),
+                representation.textual_payload,
+                representation.blob_reference,
+                str(representation.blob_hash) if representation.blob_hash else None,
+                representation.blob_byte_count,
+                locators_json,
+                representation.coverage.coverage_fraction,
+                1 if representation.coverage.is_complete else 0,
+                representation.coverage.detail,
+                representation.confidence,
+                representation.producer.producer_type.value,
+                representation.producer.adapter_name,
+                representation.producer.adapter_version,
+                representation.producer.model_identity,
+                representation.producer.model_version,
+                representation.error.error_category if representation.error else None,
+                representation.error.error_message if representation.error else None,
+                1 if representation.error and representation.error.is_retriable else 0,
+                json.dumps(representation.error.diagnostic_info) if representation.error else None,
+                pipeline_fingerprint_json,
+                1 if make_current else 0,
+            ),
+        )
 
     def get_representation(self, representation_id: UUID) -> DerivedRepresentation | None:
         """Get a representation by its ID.
@@ -546,6 +609,7 @@ class RepresentationRegistry:
             elif locator_type == "scene":
                 from katsi_core.media.contracts import SceneLocator
 
+                loc_data["keyframe_ids"] = tuple(loc_data.get("keyframe_ids", ()))
                 parsed_locators.append(SceneLocator(**loc_data))
             else:
                 # Fallback for unknown types

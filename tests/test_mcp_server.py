@@ -3,10 +3,26 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 
-from katsi_core.config import Settings
+from katsi_core.config import Settings, SQLiteSettings
+from katsi_core.media.contracts import (
+    DerivedRepresentation,
+    MediaCoverage,
+    MediaProducerType,
+    MediaRepresentationKind,
+    MediaRepresentationStatus,
+    PipelineFingerprint,
+    PipelineStage,
+    ProducerProvenance,
+    ResourceVersionId,
+    TimeRangeLocator,
+    WholeResourceLocator,
+)
+from katsi_core.media.registry import RepresentationRegistry
 from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
 from katsi_core.models import Extraction
@@ -216,3 +232,246 @@ def test_smoke_index_then_get_context(server_state, tmp_path):
     assert len(bundle.files) >= 1
     # second call with same query shouldn't need a new extract (only 1 was made),
     # but embed.embed will be called again for the query vector. Allow that.
+
+
+# ---------------------------------------------------------------------------
+# list_media_representations
+#
+# The capability-checked media tools had no harness before this: the
+# server_state fixture supplies no workspace database, registry, or identity.
+# ---------------------------------------------------------------------------
+
+
+class _FakeIdentity:
+    def __init__(self):
+        self.id = uuid4()
+
+
+class _FakeIdentityService:
+    def __init__(self, *, allow: bool = True):
+        self.allow = allow
+
+    def authorize(self, *args, **kwargs):
+        if not self.allow:
+            raise PermissionError("denied")
+
+
+def _scene(resource_version_id, *, start_ms, end_ms):
+    representation_id = uuid4()
+    now = datetime.now(UTC)
+    return DerivedRepresentation(
+        id=representation_id,
+        resource_version_id=resource_version_id,
+        kind=MediaRepresentationKind.SCENE,
+        media_type="application/json",
+        status=MediaRepresentationStatus.CURRENT,
+        created_at=now,
+        updated_at=now,
+        textual_payload="a caption that must never be disclosed here",
+        locators=(
+            TimeRangeLocator(
+                resource_version_id=resource_version_id,
+                representation_id=representation_id,
+                start_ms=start_ms,
+                end_ms=end_ms,
+            ),
+        ),
+        coverage=MediaCoverage(is_complete=False, coverage_fraction=0.2),
+        producer=ProducerProvenance(
+            producer_type=MediaProducerType.DETERMINISTIC,
+            adapter_name="fake_scene",
+            adapter_version="1",
+        ),
+        pipeline_fingerprint=PipelineFingerprint(
+            source_content_hash="a" * 64,
+            representation_kind=MediaRepresentationKind.SCENE,
+            stage=PipelineStage.DETECT_SCENES,
+            adapter_name="fake_scene",
+            adapter_version="1",
+            sampling_fingerprint="b" * 64,
+        ),
+    )
+
+
+def _keyframe(resource_version_id):
+    representation_id = uuid4()
+    now = datetime.now(UTC)
+    return DerivedRepresentation(
+        id=representation_id,
+        resource_version_id=resource_version_id,
+        kind=MediaRepresentationKind.KEYFRAME,
+        media_type="image/png",
+        status=MediaRepresentationStatus.CURRENT,
+        created_at=now,
+        updated_at=now,
+        blob_reference=f"private-keyframe:{'f' * 8}",
+        blob_hash="f" * 64,
+        blob_byte_count=2048,
+        locators=(
+            WholeResourceLocator(
+                resource_version_id=resource_version_id, representation_id=representation_id
+            ),
+        ),
+        coverage=MediaCoverage(is_complete=True, coverage_fraction=1.0),
+        producer=ProducerProvenance(
+            producer_type=MediaProducerType.DETERMINISTIC,
+            adapter_name="fake_keyframe",
+            adapter_version="1",
+        ),
+        pipeline_fingerprint=PipelineFingerprint(
+            source_content_hash="c" * 64,
+            representation_kind=MediaRepresentationKind.KEYFRAME,
+            stage=PipelineStage.EXTRACT_KEYFRAMES,
+            adapter_name="fake_keyframe",
+            adapter_version="1",
+            sampling_fingerprint="d" * 64,
+        ),
+    )
+
+
+@pytest.fixture
+def media_state(server_state, tmp_path):
+    """Wire a workspace database, registry, and authorised identity into _state."""
+    srv, _embed, _llm, _records = server_state
+
+    workspace_id = str(uuid4())
+    resource_id = str(uuid4())
+    resource_version_id = ResourceVersionId(str(uuid4()))
+    media_path = "/project/clip.mp4"
+
+    database = WorkspaceSQLite(tmp_path / "workspace.sqlite3", SQLiteSettings())
+    with database.connection() as connection:
+        apply_migrations(connection, target_version=1)
+        connection.execute(
+            "INSERT INTO workspaces VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (workspace_id, "/project", "Project", "active", 1, "now", "now"),
+        )
+        connection.execute(
+            "INSERT INTO resources VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (resource_id, workspace_id, media_path, "current", 1, "now", "now"),
+        )
+        connection.execute(
+            "INSERT INTO resource_versions VALUES (?, ?, ?, ?, ?, ?)",
+            (str(resource_version_id), resource_id, "e" * 64, 1024, "2026-01-01T00:00:00Z", "evt"),
+        )
+
+    registry = RepresentationRegistry(database)
+    srv._state.update(
+        {
+            "workspace_database": database,
+            "representation_registry": registry,
+            "identity_service": _FakeIdentityService(),
+            "authenticated_identity": _FakeIdentity(),
+        }
+    )
+    return srv, registry, workspace_id, resource_version_id, media_path
+
+
+def test_list_media_representations_returns_current_generation(media_state):
+    srv, registry, workspace_id, resource_version_id, media_path = media_state
+    scenes = [
+        _scene(resource_version_id, start_ms=0, end_ms=1000),
+        _scene(resource_version_id, start_ms=1000, end_ms=2000),
+        _scene(resource_version_id, start_ms=2000, end_ms=3000),
+    ]
+    registry.register_representation_batch(scenes)
+
+    rows = srv.list_media_representations(workspace_id, media_path)
+
+    assert {row["representation_id"] for row in rows} == {str(s.id) for s in scenes}
+    assert [row["locators"][0]["start_ms"] for row in rows] == [0, 1000, 2000]
+
+
+def test_list_media_representations_never_discloses_payload(media_state):
+    srv, registry, workspace_id, resource_version_id, media_path = media_state
+    registry.register_representation_batch([_scene(resource_version_id, start_ms=0, end_ms=1000)])
+
+    rows = srv.list_media_representations(workspace_id, media_path)
+
+    assert rows
+    for row in rows:
+        assert set(row) == {
+            "representation_id",
+            "resource_version_id",
+            "kind",
+            "status",
+            "locators",
+            "coverage_fraction",
+        }
+        assert "caption" not in json.dumps(row)
+
+
+def test_list_media_representations_filters_by_kind(media_state):
+    srv, registry, workspace_id, resource_version_id, media_path = media_state
+    registry.register_representation_batch([_scene(resource_version_id, start_ms=0, end_ms=1000)])
+    registry.register_representation_batch([_keyframe(resource_version_id)])
+
+    rows = srv.list_media_representations(workspace_id, media_path, kinds=["scene"])
+
+    assert [row["kind"] for row in rows] == ["scene"]
+
+
+def test_list_media_representations_omits_superseded_generation(media_state):
+    srv, registry, workspace_id, resource_version_id, media_path = media_state
+    old = [_scene(resource_version_id, start_ms=0, end_ms=1000)]
+    registry.register_representation_batch(old)
+    new = [_scene(resource_version_id, start_ms=0, end_ms=500)]
+    registry.register_representation_batch(new)
+
+    rows = srv.list_media_representations(workspace_id, media_path)
+
+    assert [row["representation_id"] for row in rows] == [str(new[0].id)]
+
+
+def test_list_media_representations_is_deterministic(media_state):
+    srv, registry, workspace_id, resource_version_id, media_path = media_state
+    registry.register_representation_batch(
+        [
+            _scene(resource_version_id, start_ms=2000, end_ms=3000),
+            _scene(resource_version_id, start_ms=0, end_ms=1000),
+            _scene(resource_version_id, start_ms=1000, end_ms=2000),
+        ]
+    )
+
+    first = srv.list_media_representations(workspace_id, media_path)
+    second = srv.list_media_representations(workspace_id, media_path)
+
+    assert first == second
+
+
+def test_list_media_representations_rejects_unknown_kind(media_state):
+    srv, _registry, workspace_id, _rv, media_path = media_state
+
+    with pytest.raises(ValueError, match="unknown representation kind: bogus"):
+        srv.list_media_representations(workspace_id, media_path, kinds=["bogus"])
+
+
+@pytest.mark.parametrize("limit", [0, 501])
+def test_list_media_representations_rejects_out_of_range_limit(media_state, limit):
+    srv, _registry, workspace_id, _rv, media_path = media_state
+
+    with pytest.raises(ValueError, match="limit must be between"):
+        srv.list_media_representations(workspace_id, media_path, limit=limit)
+
+
+def test_list_media_representations_rejects_unknown_path(media_state):
+    srv, _registry, workspace_id, _rv, _media_path = media_state
+
+    with pytest.raises(ValueError, match="unknown path in workspace"):
+        srv.list_media_representations(workspace_id, "/project/missing.mp4")
+
+
+def test_list_media_representations_requires_authentication(media_state):
+    srv, _registry, workspace_id, _rv, media_path = media_state
+    srv._state["authenticated_identity"] = None
+
+    with pytest.raises(PermissionError, match="Authentication required"):
+        srv.list_media_representations(workspace_id, media_path)
+
+
+def test_list_media_representations_requires_capability(media_state):
+    srv, _registry, workspace_id, _rv, media_path = media_state
+    srv._state["identity_service"] = _FakeIdentityService(allow=False)
+
+    with pytest.raises(PermissionError, match="authorization denied"):
+        srv.list_media_representations(workspace_id, media_path)

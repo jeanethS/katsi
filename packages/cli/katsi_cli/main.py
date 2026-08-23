@@ -22,6 +22,7 @@ from katsi_core.config import get_settings
 from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
 from katsi_core.media.registry import RepresentationRegistry
+from katsi_core.media.reprocess import MediaReprocessor, ReprocessCounts
 from katsi_core.retrieve.context import build_context
 from katsi_core.retrieve.search import search
 from katsi_core.store.graph import GraphStore
@@ -94,7 +95,7 @@ def _services():
         _state["claim_service"],
         _state["record_service"],
         _state["lease_service"],
-        s.brief,
+        s.workspace.brief,
     )
     _state["portable_state_service"] = PortableStateService(
         s.workspace.portable_state.relative_path
@@ -182,9 +183,58 @@ def _print_index_summary(counts: dict[str, int]) -> None:
     console.print(table)
 
 
+def _reprocess_media(svc: dict, path: Path) -> ReprocessCounts:
+    """Reprocess current tracked media under PATH without changing source state."""
+    requested = path.resolve()
+    reprocessor = MediaReprocessor(svc["representation_registry"], svc["settings"].media)
+    total = ReprocessCounts()
+    with svc["workspace_database"].connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT rv.id, rv.content_hash, r.current_path, w.root_path
+            FROM resource_versions AS rv
+            JOIN resources AS r ON r.id = rv.resource_id
+            JOIN workspaces AS w ON w.id = r.workspace_id
+            WHERE r.status = 'current'
+              AND rv.observed_at = (
+                  SELECT MAX(observed_at) FROM resource_versions WHERE resource_id = r.id
+              )
+            """
+        ).fetchall()
+    resources = [
+        (row, file_path)
+        for row in rows
+        if (file_path := (Path(row["root_path"]) / row["current_path"]).resolve()).is_relative_to(
+            requested
+        )
+        and file_path.is_file()
+    ]
+    console.print(f"[bold]reprocessing[/] {len(resources)} tracked file(s) under {path}")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("[cyan]reprocessing", total=len(resources) or None)
+        for row, file_path in resources:
+            progress.update(task, description=str(file_path.name)[:40])
+            outcome = reprocessor.process(file_path, UUID(row["id"]), row["content_hash"])
+            for name in total.__dataclass_fields__:
+                setattr(total, name, getattr(total, name) + getattr(outcome, name))
+            progress.update(task, advance=1)
+    return total
+
+
 @app.command()
 def index(
     path: Path = typer.Argument(..., help="File or directory to index."),  # noqa: B008
+    reprocess_media: bool = typer.Option(
+        False,
+        "--reprocess-media",
+        help="Run configured local media pipelines for current tracked resources.",
+    ),
 ) -> None:
     """Index PATH recursively, honoring include/exclude globs from config."""
     svc = _services()
@@ -192,6 +242,9 @@ def index(
     if not path.exists():
         console.print(f"[red]error:[/] path not found: {path}")
         raise typer.Exit(code=1) from None
+    if reprocess_media:
+        _print_index_summary(dict(vars(_reprocess_media(svc, path))))
+        return
     files = _walk_files(path, s.ingest.include_globs, s.ingest.exclude_globs)
     console.print(f"[bold]indexing[/] {len(files)} file(s) under {path}")
     _print_index_summary(_index_tree(svc, path))

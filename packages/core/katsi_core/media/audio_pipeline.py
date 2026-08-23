@@ -438,11 +438,331 @@ class AudioDecodePipeline(MediaPipelineProtocol):
 
 
 # =============================================================================
+# 7.2b Measured silence spans (deterministic, ffmpeg silencedetect)
+# =============================================================================
+
+
+# Real ffmpeg output (verified against ffmpeg 8.1.2) looks like:
+#   [Parsed_silencedetect_0 @ 0x814c3c900] silence_start: 1.999955
+#   [Parsed_silencedetect_0 @ 0x814c3c900] silence_end: 5 | silence_duration: 3.000045
+# Start and end are always on separate lines, and a time may be formatted as a
+# bare integer, hence the optional decimal part.
+_SILENCE_START_PATTERN = re.compile(r"\bsilence_start:\s*(-?\d+(?:\.\d+)?)")
+_SILENCE_END_PATTERN = re.compile(r"\bsilence_end:\s*(-?\d+(?:\.\d+)?)")
+
+
+@dataclass(frozen=True, slots=True)
+class SilenceSpanData:
+    """One measured span of silence in a normalized audio track (7.2b).
+
+    Deterministic: produced by ffmpeg's silencedetect filter, never by a
+    model. Carries no text -- silence is positionally useful, not
+    semantically retrievable.
+    """
+
+    start_ms: int
+    end_ms: int
+
+
+def _seconds_to_ms(raw: str) -> int:
+    return int(round(float(raw) * 1000))
+
+
+def parse_silence_spans(stderr: str, *, track_duration_ms: int) -> list[SilenceSpanData]:
+    """Strictly parse ffmpeg silencedetect stderr into measured spans.
+
+    A trailing ``silence_start`` with no matching ``silence_end`` means the
+    track ended while still silent. Current ffmpeg closes such a span itself
+    at EOF, but older builds do not, so that span closes at
+    ``track_duration_ms`` rather than being dropped: trailing dead air is
+    exactly what a caller wants to find. Never fabricates -- any structurally
+    impossible pairing raises rather than being silently repaired.
+    """
+    if track_duration_ms <= 0:
+        raise ValueError("track_duration_ms must be positive")
+
+    spans: list[SilenceSpanData] = []
+    open_start_ms: int | None = None
+
+    for line in stderr.splitlines():
+        start_match = _SILENCE_START_PATTERN.search(line)
+        if start_match:
+            if open_start_ms is not None:
+                raise ValueError("Received silence_start while a previous span was still open")
+            open_start_ms = _seconds_to_ms(start_match.group(1))
+            continue
+
+        end_match = _SILENCE_END_PATTERN.search(line)
+        if end_match:
+            if open_start_ms is None:
+                raise ValueError("Received silence_end without a preceding silence_start")
+            end_ms = _seconds_to_ms(end_match.group(1))
+            if end_ms <= open_start_ms:
+                raise ValueError(
+                    f"Silence end_ms ({end_ms}) must exceed start_ms ({open_start_ms})"
+                )
+            spans.append(SilenceSpanData(start_ms=open_start_ms, end_ms=end_ms))
+            open_start_ms = None
+
+    if open_start_ms is not None:
+        if open_start_ms >= track_duration_ms:
+            raise ValueError(
+                f"Trailing silence_start ({open_start_ms}) exceeds track duration "
+                f"({track_duration_ms})"
+            )
+        spans.append(SilenceSpanData(start_ms=open_start_ms, end_ms=track_duration_ms))
+
+    return spans
+
+
+def build_silence_detect_definition(
+    *,
+    executable_path: str = "ffmpeg",
+    noise_threshold_db: float = -35.0,
+    min_silence_ms: int = 250,
+    timeout_seconds: float = 60.0,
+    max_output_bytes: int = 20_000_000,
+) -> MediaPipelineDefinition:
+    """Owner-configured definition for measuring silence spans via ffmpeg.
+
+    ``noise_threshold_db`` and ``min_silence_ms`` are explicit parameters
+    rather than module constants: a real recording needs them tuned per
+    microphone and room. The fixed argument template only ever substitutes
+    the ``input_path`` placeholder. The output stream is discarded
+    (``-f null -``) because silencedetect reports on stderr.
+    """
+    return MediaPipelineDefinition(
+        id="audio_silence_detect_ffmpeg_v1",
+        name="Measure silence spans",
+        description="Deterministic measurement of silence intervals via ffmpeg silencedetect.",
+        stage=PipelineStage.DETECT_SILENCE,
+        accepted_mime_patterns=["audio/*"],
+        input_kinds=[MediaRepresentationKind.PROXY_MEDIA],
+        representation_kinds_produced=[MediaRepresentationKind.SILENCE_SPAN],
+        producer_type=MediaProducerType.DETERMINISTIC,
+        executable_path=executable_path,
+        fixed_args=[
+            "-i",
+            "{input_path}",
+            "-af",
+            f"silencedetect=noise={noise_threshold_db}dB:d={min_silence_ms / 1000}",
+            "-f",
+            "null",
+            "-",
+        ],
+        allowed_env_vars=[],
+        working_directory=".",
+        shell_enabled=False,
+        network_disabled=True,
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=max_output_bytes,
+        strict_output_contract=True,
+        retry_on_failure=True,
+    )
+
+
+class AudioSilenceDetectionPipeline(MediaPipelineProtocol):
+    """Measure silence spans in a normalized audio track (7.2b).
+
+    Kept separate from the transcription segment stream on purpose: ffmpeg is
+    :attr:`MediaProducerType.DETERMINISTIC` while transcription is
+    ``MODEL_BACKED``, and merging them would make a measured boundary
+    indistinguishable from an inferred one.
+
+    Like :class:`AudioTranscriptionPipeline`, ``process`` returns exactly one
+    representation carrying the whole batch; use
+    :func:`build_silence_span_representations` to expand it into the N
+    per-span representations.
+    """
+
+    def __init__(self, definition: MediaPipelineDefinition | None = None) -> None:
+        self._definition = definition or build_silence_detect_definition()
+        self._executor = BoundedSubprocessExecutor()
+
+    @classmethod
+    def get_adapter_name(cls) -> str:
+        return "audio_silence_detect_ffmpeg"
+
+    @classmethod
+    def get_adapter_version(cls) -> str:
+        return "1.0.0"
+
+    def get_pipeline_definition(self) -> MediaPipelineDefinition:  # type: ignore[override]
+        return self._definition
+
+    @classmethod
+    def get_hardware_requirements(cls) -> list[HardwareRequirement]:
+        return [HardwareRequirement.NONE]
+
+    @classmethod
+    def get_software_dependencies(cls) -> list[SoftwareDependency]:
+        return [SoftwareDependency.FFMPEG]
+
+    def process(
+        self,
+        file_path: Path,
+        resource_version_id: ResourceVersionId,
+        source_content_hash: ContentHash,
+        pipeline_fingerprint: PipelineFingerprint,
+        working_directory: Path,
+    ) -> DerivedRepresentation:
+        # Duration is derived here rather than passed in: the orchestrator
+        # calls process() with a fixed five-argument signature. The input is
+        # always the normalized mono 16kHz WAV proxy from the decode stage,
+        # so the 7.1 header parser always applies.
+        track_duration_ms = parse_wav_metadata(file_path.read_bytes()).duration_ms
+
+        result = self._executor.execute(self._definition, file_path, working_directory)
+
+        if result.timed_out or result.exit_code != 0:
+            raise RuntimeError(
+                f"Silence detection failed: exit_code={result.exit_code} "
+                f"timed_out={result.timed_out} stderr={result.stderr_sample[:500]!r}"
+            )
+        # A truncated stderr silently loses real spans; never parse it.
+        if result.output_truncated:
+            raise RuntimeError(
+                f"Silence detection output was truncated; refusing to parse: "
+                f"stderr={result.stderr_sample[:500]!r}"
+            )
+
+        # silencedetect reports on stderr, not into an output file.
+        spans = parse_silence_spans(result.stderr_sample, track_duration_ms=track_duration_ms)
+        total_silent_ms = sum(span.end_ms - span.start_ms for span in spans)
+
+        now = datetime.now(UTC)
+        rep_id = uuid4()
+        return DerivedRepresentation(
+            id=rep_id,
+            resource_version_id=resource_version_id,
+            kind=MediaRepresentationKind.SILENCE_SPAN,
+            media_type="application/json",
+            status=MediaRepresentationStatus.CURRENT,
+            created_at=now,
+            updated_at=now,
+            textual_payload=json.dumps(
+                {
+                    "track_duration_ms": track_duration_ms,
+                    "total_silent_ms": total_silent_ms,
+                    "spans": [{"start_ms": s.start_ms, "end_ms": s.end_ms} for s in spans],
+                },
+                sort_keys=True,
+            ),
+            locators=(
+                WholeResourceLocator(
+                    resource_version_id=resource_version_id, representation_id=rep_id
+                ),
+            ),
+            # Coverage describes how much of the source this representation
+            # accounts for, not how much of it was silent: the batch analyses
+            # the whole track, so it is complete. The silent fraction is a
+            # different quantity and lives in the payload.
+            coverage=MediaCoverage(
+                is_complete=True,
+                coverage_fraction=1.0,
+                detail="silence measured across the whole track",
+            ),
+            producer=ProducerProvenance(
+                producer_type=MediaProducerType.DETERMINISTIC,
+                adapter_name=self.get_adapter_name(),
+                adapter_version=self.get_adapter_version(),
+            ),
+            pipeline_fingerprint=pipeline_fingerprint,
+        )
+
+    def validate_output(
+        self, output: Any, representation_kind: MediaRepresentationKind
+    ) -> tuple[bool, str | None]:
+        if not isinstance(output, DerivedRepresentation):
+            return False, "Expected a DerivedRepresentation"
+        if output.status != MediaRepresentationStatus.CURRENT:
+            return False, "Expected CURRENT status for successful silence detection"
+        if output.kind != MediaRepresentationKind.SILENCE_SPAN:
+            return False, f"Expected SILENCE_SPAN representation, got {output.kind}"
+        return True, None
+
+
+def build_silence_span_representations(
+    spans: list[SilenceSpanData],
+    resource_version_id: ResourceVersionId,
+    pipeline_fingerprint: PipelineFingerprint,
+    adapter: ProducerProvenance,
+    *,
+    track_duration_ms: int,
+) -> list[DerivedRepresentation]:
+    """Expand measured spans into N per-span representations.
+
+    Each span becomes its own immutable representation carrying exactly one
+    :class:`TimeRangeLocator`, so a consumer always cites a single,
+    unambiguous time range. Silence carries no ``textual_payload``: it is
+    positionally useful, not semantically retrievable, and never receives an
+    embedding.
+
+    An empty ``spans`` list returns ``[]``. A track with no silence is a valid
+    result, not a failure.
+    """
+    if track_duration_ms <= 0:
+        raise ValueError("track_duration_ms must be positive")
+
+    now = datetime.now(UTC)
+    representations: list[DerivedRepresentation] = []
+
+    for span in spans:
+        rep_id = uuid4()
+        # Each representation covers only its own span of the source.
+        coverage_fraction = min(1.0, (span.end_ms - span.start_ms) / track_duration_ms)
+        representations.append(
+            DerivedRepresentation(
+                id=rep_id,
+                resource_version_id=resource_version_id,
+                kind=MediaRepresentationKind.SILENCE_SPAN,
+                media_type="application/json",
+                status=MediaRepresentationStatus.CURRENT,
+                created_at=now,
+                updated_at=now,
+                textual_payload="",
+                locators=(
+                    TimeRangeLocator(
+                        resource_version_id=resource_version_id,
+                        representation_id=rep_id,
+                        start_ms=span.start_ms,
+                        end_ms=span.end_ms,
+                    ),
+                ),
+                coverage=MediaCoverage(
+                    is_complete=False,
+                    coverage_fraction=coverage_fraction,
+                    detail="measured silence span",
+                ),
+                producer=adapter,
+                pipeline_fingerprint=pipeline_fingerprint,
+            )
+        )
+
+    return representations
+
+
+# =============================================================================
 # 7.3 Configured local speech transcription: strict segments + coverage
 # =============================================================================
 
 
 _ALLOWED_SEGMENT_KINDS = {"speech", "silence", "music", "unrecognized", "unsupported_language"}
+
+
+@dataclass(frozen=True, slots=True)
+class WordTimingData:
+    """One word-level timing inside a speech segment (7.3).
+
+    Rides inside its parent transcript segment; never its own
+    representation, graph node, or embedding -- a single word is not
+    independently meaningful to retrieve.
+    """
+
+    start_ms: int
+    end_ms: int
+    text: str
+    confidence: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -456,6 +776,8 @@ class TranscriptSegmentData:
     segment_kind: str  # one of _ALLOWED_SEGMENT_KINDS
     language: str | None = None
     speaker_label: str | None = None
+    # Last field so existing positional construction stays valid.
+    words: tuple[WordTimingData, ...] = ()
 
 
 def build_transcribe_definition(
@@ -464,7 +786,16 @@ def build_transcribe_definition(
     timeout_seconds: float = 120.0,
     max_output_bytes: int = 20_000_000,
 ) -> MediaPipelineDefinition:
-    """Owner-configured definition for local speech transcription."""
+    """Owner-configured definition for local speech transcription.
+
+    The configured executable is an owner-supplied wrapper, not the stock
+    whisper CLI: the strict contract requires ``segments`` and
+    ``coverage_fraction``, which stock whisper does not emit. With
+    ``--word-timestamps`` the wrapper must additionally emit an optional
+    per-segment ``words`` array of ``{start_ms, end_ms, text, confidence?}``,
+    each word's range falling within its parent segment, time-ordered and
+    non-overlapping. Speech segments only.
+    """
     return MediaPipelineDefinition(
         id="audio_transcribe_whisper_v1",
         name="Local speech transcription",
@@ -475,7 +806,7 @@ def build_transcribe_definition(
         representation_kinds_produced=[MediaRepresentationKind.TRANSCRIPT_SEGMENT],
         producer_type=MediaProducerType.MODEL_BACKED,
         executable_path=executable_path,
-        fixed_args=["{input_path}", "--output_dir", "{working_directory}"],
+        fixed_args=["{input_path}", "--output_dir", "{working_directory}", "--word-timestamps"],
         allowed_env_vars=[],
         working_directory=".",
         shell_enabled=False,
@@ -504,6 +835,59 @@ def _parse_transcription_batch(raw: str) -> dict[str, Any]:
     if not is_valid:
         raise ValueError(f"Transcription output failed validation: {error}")
     return parsed
+
+
+def _parse_word_timings(
+    raw_segment: dict[str, Any], *, segment_start_ms: int, segment_end_ms: int, segment_kind: str
+) -> tuple[WordTimingData, ...]:
+    """Strictly parse optional word-level timings for one segment.
+
+    The array is optional so transcription wrappers written against the
+    pre-word contract keep working: they simply produce no words.
+    """
+    raw_words = raw_segment.get("words")
+    if raw_words is None:
+        return ()
+    if not isinstance(raw_words, list):
+        raise ValueError("Segment words must be a JSON array")
+    # 7.6 parity with text: non-speech segments never carry fabricated words.
+    if segment_kind != "speech" and raw_words:
+        raise ValueError(f"Non-speech segment_kind={segment_kind!r} must not carry words")
+
+    words: list[WordTimingData] = []
+    previous_end_ms = segment_start_ms
+    for raw_word in raw_words:
+        if not isinstance(raw_word, dict):
+            raise ValueError("Each word must be a JSON object")
+
+        start_ms = int(raw_word["start_ms"])
+        end_ms = int(raw_word["end_ms"])
+        if end_ms <= start_ms:
+            raise ValueError(f"Word end_ms ({end_ms}) must exceed start_ms ({start_ms})")
+        if start_ms < segment_start_ms or end_ms > segment_end_ms:
+            raise ValueError(
+                f"Word range ({start_ms}, {end_ms}) must fall within its segment "
+                f"({segment_start_ms}, {segment_end_ms})"
+            )
+        if start_ms < previous_end_ms:
+            raise ValueError("Words must be time-ordered and non-overlapping")
+        previous_end_ms = end_ms
+
+        text = raw_word["text"]
+        if not isinstance(text, str):
+            raise ValueError("Word text must be a string")
+
+        confidence = raw_word.get("confidence")
+        if confidence is not None:
+            confidence = float(confidence)
+            if not (0.0 <= confidence <= 1.0):
+                raise ValueError("Word confidence must be within [0.0, 1.0]")
+
+        words.append(
+            WordTimingData(start_ms=start_ms, end_ms=end_ms, text=text, confidence=confidence)
+        )
+
+    return tuple(words)
 
 
 class AudioTranscriptionPipeline(MediaPipelineProtocol):
@@ -644,6 +1028,13 @@ def parse_transcript_segments(batch: dict[str, Any]) -> tuple[list[TranscriptSeg
             if not (0.0 <= confidence <= 1.0):
                 raise ValueError("confidence must be within [0.0, 1.0]")
 
+        words = _parse_word_timings(
+            raw_segment,
+            segment_start_ms=start_ms,
+            segment_end_ms=end_ms,
+            segment_kind=segment_kind,
+        )
+
         segments.append(
             TranscriptSegmentData(
                 start_ms=start_ms,
@@ -652,6 +1043,7 @@ def parse_transcript_segments(batch: dict[str, Any]) -> tuple[list[TranscriptSeg
                 confidence=confidence,
                 segment_kind=segment_kind,
                 language=raw_segment.get("language"),
+                words=words,
             )
         )
 

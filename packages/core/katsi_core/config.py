@@ -8,9 +8,17 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from katsi_core.media.settings import ChunkingThresholds, MediaSamplingSettings
+
+if TYPE_CHECKING:
+    from katsi_core.media.contracts import MediaProcessingConfig
+
+__all__ = ["ChunkingThresholds", "MediaSamplingSettings", "Settings", "SQLiteSettings"]
 
 
 class OllamaSettings(BaseModel):
@@ -208,90 +216,6 @@ class SynthSettings(BaseModel):
     auto: SynthAutoSettings = Field(default_factory=SynthAutoSettings)
 
 
-class ChunkingThresholds(BaseModel):
-    """Configurable chunking strategy parameters for multimedia processing.
-
-    Chunking policies are part of the pipeline fingerprint - changing any threshold
-    invalidates cached representations and forces re-processing with the new policy.
-
-    This ensures that different chunking strategies (e.g., token targets, overlap)
-    produce distinct representation versions rather than silently reinterpreting cached
-    chunks with incompatible parameters.
-    """
-
-    target_tokens: int = Field(
-        default=512,
-        ge=64,
-        le=100000,
-        description="Approximate target chunk size in tokens (non-whitespace density)",
-    )
-    overlap: int = Field(
-        default=64,
-        ge=0,
-        le=10000,
-        description="Approximate overlap between consecutive chunks in tokens",
-    )
-    separator_hierarchy: list[str] = Field(
-        default=["\n\n", "\n", ". ", " ", ""],
-        description="Separator priority order for recursive splitting",
-    )
-
-    @field_validator("overlap")
-    @classmethod
-    def overlap_less_than_target(cls, v: int, info) -> int:
-        """Overlap must be less than target to avoid infinite chunks."""
-        target = info.data.get("target_tokens", 512)
-        if v >= target:
-            raise ValueError(f"overlap ({v}) must be less than target_tokens ({target})")
-        return v
-
-
-class MediaSamplingSettings(BaseModel):
-    """Sampling and chunking policy configuration for multimedia processing.
-
-    All thresholds are part of the pipeline fingerprint. Changing any value
-    produces a new representation version and invalidates cached results.
-
-    This binding ensures that chunking policy changes are visible in the
-    representation fingerprint, preventing silent cache reuse when parameters
-    change (e.g., increasing target_tokens from 512 to 1024).
-    """
-
-    chunking: ChunkingThresholds = Field(
-        default_factory=ChunkingThresholds,
-        description="Chunking strategy for text, OCR, captions, and transcripts",
-    )
-
-    # Future sampling thresholds can be added here:
-    # video_max_keyframes: int = Field(default=100, ge=1, le=10000)
-    # audio_max_segments: int = Field(default=500, ge=1, le=5000)
-    # image_max_regions: int = Field(default=50, ge=1, le=1000)
-
-    @field_validator("chunking")
-    @classmethod
-    def validate_chunking_policy(cls, v: ChunkingThresholds) -> ChunkingThresholds:
-        """Ensure chunking policy is valid for multimedia content."""
-        # Target should be large enough to be useful but small enough to process
-        if v.target_tokens < 64:
-            raise ValueError("target_tokens must be at least 64 for meaningful chunks")
-        if v.target_tokens > 100000:
-            raise ValueError("target_tokens must not exceed 100000 for performance")
-
-        # Overlap should be reasonable relative to target
-        if v.overlap > v.target_tokens * 0.5:
-            raise ValueError("overlap should not exceed 50% of target_tokens")
-
-        return v
-
-    def get_fingerprint_components(self) -> dict[str, str | int | tuple[str, ...]]:
-        """Extract values for pipeline fingerprint computation."""
-        return {
-            "chunking_target_tokens": self.chunking.target_tokens,
-            "chunking_overlap": self.chunking.overlap,
-            "chunking_separators": tuple(self.chunking.separator_hierarchy),
-        }
-
-
 class Settings(BaseSettings):
     """Top-level settings. Loaded from katsi.toml if present, env-overridable."""
 
@@ -309,6 +233,7 @@ class Settings(BaseSettings):
     synth: SynthSettings = Field(default_factory=SynthSettings)
     workspace: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
     lease: LeaseSettings = Field(default_factory=LeaseSettings)
+    media: MediaProcessingConfig = Field(default_factory=dict)
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> Settings:

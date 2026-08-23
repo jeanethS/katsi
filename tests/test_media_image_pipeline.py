@@ -19,10 +19,12 @@ from uuid import uuid4
 import blake3
 import pytest
 
+from katsi_core.config import MediaSamplingSettings
 from katsi_core.media.blob_store import BlobStore
 from katsi_core.media.contracts import (
     DerivedRepresentation,
     ImageRegionLocator,
+    MediaCoverage,
     MediaPrivacyClass,
     MediaProducerType,
     MediaRepresentationKind,
@@ -33,11 +35,17 @@ from katsi_core.media.contracts import (
     WholeResourceLocator,
 )
 from katsi_core.media.execution import PipelineExecutionOrchestrator
+from katsi_core.media.fingerprint import build_pipeline_fingerprint
 from katsi_core.media.image_metadata import (
     build_image_metadata_representation,
     extract_image_metadata,
 )
 from katsi_core.media.image_pipeline import (
+    VisualRegionDetectionPipeline,
+    build_region_detect_definition,
+    _VisualRegion,
+    build_visual_region_representations,
+    parse_visual_regions,
     ImageCaptionPipeline,
     ImageOcrPipeline,
     ImageThumbnailPipeline,
@@ -46,6 +54,7 @@ from katsi_core.media.image_pipeline import (
     build_caption_pipeline_definition,
     build_embedding_pipeline_definition,
     build_ocr_pipeline_definition,
+    build_sips_heic_thumbnail_pipeline_definition,
     build_thumbnail_pipeline_definition,
 )
 
@@ -58,6 +67,25 @@ def _write(tmp_path: Path, name: str, data: bytes) -> Path:
     path = tmp_path / name
     path.write_bytes(data)
     return path
+
+
+def test_sips_heic_thumbnail_definition_is_bounded_and_fixed() -> None:
+    definition = build_sips_heic_thumbnail_pipeline_definition("/usr/bin/sips")
+
+    assert definition.accepted_mime_patterns == ["image/heic"]
+    assert definition.executable_path == "/usr/bin/sips"
+    assert definition.fixed_args == [
+        "-s",
+        "format",
+        "png",
+        "-Z",
+        "512",
+        "{input_path}",
+        "--out",
+        "{output_path}",
+    ]
+    assert definition.shell_enabled is False
+    assert definition.network_disabled is True
 
 
 def _content_hash(data: bytes) -> str:
@@ -866,3 +894,272 @@ class TestRepresentationIndependence:
         )
 
         assert rep.status == MediaRepresentationStatus.CURRENT
+
+
+class TestVisualRegionParsing:
+    ALLOWED = {"train", "person", "food"}
+
+    def test_parses_labelled_regions(self):
+        payload = {
+            "regions": [
+                {"label": "train", "bounding_box": [0.1, 0.2, 0.4, 0.5], "confidence": 0.9},
+                {"label": "person", "bounding_box": [0.6, 0.1, 0.2, 0.3]},
+            ]
+        }
+
+        regions = parse_visual_regions(payload, allowed_labels=self.ALLOWED)
+
+        assert [r.label for r in regions] == ["train", "person"]
+        assert regions[0].bbox == (0.1, 0.2, 0.4, 0.5)
+        assert regions[0].confidence == 0.9
+        assert regions[1].confidence is None
+
+    def test_empty_regions_is_valid(self):
+        assert parse_visual_regions({"regions": []}, allowed_labels=self.ALLOWED) == []
+
+    def test_missing_regions_key_raises(self):
+        with pytest.raises(ValueError, match="regions"):
+            parse_visual_regions({}, allowed_labels=self.ALLOWED)
+
+    def test_undeclared_label_raises(self):
+        payload = {"regions": [{"label": "spaceship", "bounding_box": [0.1, 0.1, 0.2, 0.2]}]}
+
+        with pytest.raises(ValueError, match="spaceship"):
+            parse_visual_regions(payload, allowed_labels=self.ALLOWED)
+
+    def test_malformed_region_raises_rather_than_skipping(self):
+        # Unlike _parse_ocr_regions, a bad entry is fatal: the regions are
+        # the entire result, so silently dropping one loses the answer.
+        payload = {"regions": [{"label": "train", "bounding_box": [0.1, 0.2]}]}
+
+        with pytest.raises(ValueError, match="four numbers"):
+            parse_visual_regions(payload, allowed_labels=self.ALLOWED)
+
+    def test_non_object_region_raises(self):
+        with pytest.raises(ValueError, match="JSON object"):
+            parse_visual_regions({"regions": ["train"]}, allowed_labels=self.ALLOWED)
+
+    def test_confidence_out_of_range_raises(self):
+        payload = {
+            "regions": [{"label": "train", "bounding_box": [0.1, 0.1, 0.2, 0.2], "confidence": 1.4}]
+        }
+
+        with pytest.raises(ValueError, match="confidence"):
+            parse_visual_regions(payload, allowed_labels=self.ALLOWED)
+
+    def test_low_confidence_detections_are_dropped(self):
+        payload = {
+            "regions": [
+                {"label": "train", "bounding_box": [0.1, 0.1, 0.2, 0.2], "confidence": 0.9},
+                {"label": "person", "bounding_box": [0.5, 0.5, 0.2, 0.2], "confidence": 0.05},
+            ]
+        }
+
+        regions = parse_visual_regions(payload, allowed_labels=self.ALLOWED, min_confidence=0.3)
+
+        assert [r.label for r in regions] == ["train"]
+
+    def test_out_of_range_box_is_not_clamped(self):
+        # Left to ImageRegionLocator's validator in the expander; the parser
+        # must not quietly repair it here either.
+        payload = {"regions": [{"label": "train", "bounding_box": [0.9, 0.1, 0.5, 0.2]}]}
+
+        regions = parse_visual_regions(payload, allowed_labels=self.ALLOWED)
+
+        assert regions[0].bbox == (0.9, 0.1, 0.5, 0.2)
+
+
+class TestVisualRegionRepresentations:
+    def _provenance(self):
+        return ProducerProvenance(
+            producer_type=MediaProducerType.MODEL_BACKED,
+            adapter_name="image_detect_regions",
+            adapter_version="1.0.0",
+        )
+
+    def _fingerprint(self):
+        return PipelineFingerprint(
+            source_content_hash="a" * 64,
+            representation_kind=MediaRepresentationKind.VISUAL_REGION,
+            stage=PipelineStage.DETECT_REGIONS,
+            adapter_name="image_detect_regions",
+            adapter_version="1.0.0",
+            sampling_fingerprint="b" * 64,
+        )
+
+    def test_one_representation_per_region(self):
+        resource_version_id = uuid4()
+        regions = [
+            _VisualRegion(label="train", bbox=(0.1, 0.2, 0.4, 0.5), confidence=0.9),
+            _VisualRegion(label="person", bbox=(0.6, 0.1, 0.2, 0.3), confidence=None),
+        ]
+
+        representations = build_visual_region_representations(
+            regions, resource_version_id, self._fingerprint(), self._provenance()
+        )
+
+        assert len(representations) == 2
+        first = representations[0]
+        assert first.kind == MediaRepresentationKind.VISUAL_REGION
+        assert first.textual_payload == "train"
+        assert first.confidence == 0.9
+        assert len(first.locators) == 1
+        assert first.locators[0].locator_type == "image_region"
+        assert first.locators[0].bounding_box == (0.1, 0.2, 0.4, 0.5)
+        assert first.coverage.is_complete is False
+
+    def test_no_regions_produces_no_representations(self):
+        assert (
+            build_visual_region_representations(
+                [], uuid4(), self._fingerprint(), self._provenance()
+            )
+            == []
+        )
+
+    def test_out_of_bounds_box_is_rejected_by_the_locator(self):
+        # x + w exceeds 1: ImageRegionLocator must refuse it rather than
+        # anything upstream silently clamping.
+        regions = [_VisualRegion(label="train", bbox=(0.9, 0.1, 0.5, 0.2), confidence=None)]
+
+        with pytest.raises(ValueError, match="normalized"):
+            build_visual_region_representations(
+                regions, uuid4(), self._fingerprint(), self._provenance()
+            )
+
+
+class TestVisualRegionDetectionPipeline:
+    LABELS = ("train", "person")
+
+    def _fake_definition(self, tmp_path, payload_json: str, *, exit_code: int = 0):
+        # The payload goes via a sidecar file, never inline in the script:
+        # execution._substitute_args runs str.format() over every fixed_args
+        # element, so a literal JSON brace would be read as a placeholder.
+        payload_path = tmp_path / "payload.json"
+        payload_path.write_text(payload_json)
+        script = (
+            "import sys, shutil\n"
+            "shutil.copyfile(sys.argv[1], sys.argv[3])\n"
+            "sys.exit(" + str(exit_code) + ")\n"
+        )
+        return build_region_detect_definition(labels=self.LABELS).model_copy(
+            update={
+                "executable_path": sys.executable,
+                "fixed_args": [
+                    "-c",
+                    script,
+                    str(payload_path),
+                    "{input_path}",
+                    "{output_path}",
+                ],
+            }
+        )
+
+    def _fingerprint(self, source_content_hash):
+        return build_pipeline_fingerprint(
+            source_content_hash=source_content_hash,
+            representation_kind=MediaRepresentationKind.VISUAL_REGION,
+            stage=PipelineStage.DETECT_REGIONS,
+            adapter_name="image_detect_regions",
+            adapter_version="1.0.0",
+            settings=MediaSamplingSettings(),
+        )
+
+    def test_process_returns_single_batch_representation(self, tmp_path):
+        resource_version_id, source_content_hash = uuid4(), "a" * 64
+        input_path = tmp_path / "keyframe.png"
+        input_path.write_bytes(b"not really a png")
+        payload = json.dumps(
+            {"regions": [{"label": "train", "bounding_box": [0.1, 0.2, 0.4, 0.5], "confidence": 0.9}]}
+        )
+
+        adapter = VisualRegionDetectionPipeline(self._fake_definition(tmp_path, payload), labels=self.LABELS)
+        representation = adapter.process(
+            input_path,
+            resource_version_id,
+            source_content_hash,
+            self._fingerprint(source_content_hash),
+            tmp_path,
+        )
+
+        assert isinstance(representation, DerivedRepresentation)
+        assert representation.kind == MediaRepresentationKind.VISUAL_REGION
+        batch = json.loads(representation.textual_payload)
+        assert batch["regions"] == [
+            {"label": "train", "bounding_box": [0.1, 0.2, 0.4, 0.5], "confidence": 0.9}
+        ]
+
+    def test_undeclared_label_from_detector_raises(self, tmp_path):
+        resource_version_id, source_content_hash = uuid4(), "a" * 64
+        input_path = tmp_path / "keyframe.png"
+        input_path.write_bytes(b"x")
+        payload = json.dumps(
+            {"regions": [{"label": "spaceship", "bounding_box": [0.1, 0.1, 0.2, 0.2]}]}
+        )
+
+        adapter = VisualRegionDetectionPipeline(self._fake_definition(tmp_path, payload), labels=self.LABELS)
+
+        with pytest.raises(ValueError, match="spaceship"):
+            adapter.process(
+                input_path,
+                resource_version_id,
+                source_content_hash,
+                self._fingerprint(source_content_hash),
+                tmp_path,
+            )
+
+    def test_nonzero_exit_raises(self, tmp_path):
+        resource_version_id, source_content_hash = uuid4(), "a" * 64
+        input_path = tmp_path / "keyframe.png"
+        input_path.write_bytes(b"x")
+
+        adapter = VisualRegionDetectionPipeline(
+            self._fake_definition(tmp_path, json.dumps({"regions": []}), exit_code=1),
+            labels=self.LABELS,
+        )
+
+        with pytest.raises(RuntimeError, match="Region detection failed"):
+            adapter.process(
+                input_path,
+                resource_version_id,
+                source_content_hash,
+                self._fingerprint(source_content_hash),
+                tmp_path,
+            )
+
+    def test_empty_detection_is_not_a_failure(self, tmp_path):
+        resource_version_id, source_content_hash = uuid4(), "a" * 64
+        input_path = tmp_path / "keyframe.png"
+        input_path.write_bytes(b"x")
+
+        adapter = VisualRegionDetectionPipeline(
+            self._fake_definition(tmp_path, json.dumps({"regions": []})), labels=self.LABELS
+        )
+        representation = adapter.process(
+            input_path,
+            resource_version_id,
+            source_content_hash,
+            self._fingerprint(source_content_hash),
+            tmp_path,
+        )
+
+        assert json.loads(representation.textual_payload)["regions"] == []
+
+    def test_definition_declares_labels_and_is_offline(self):
+        definition = build_region_detect_definition(labels=self.LABELS)
+
+        assert definition.producer_type == MediaProducerType.MODEL_BACKED
+        assert definition.network_disabled is True
+        assert definition.stage == PipelineStage.DETECT_REGIONS
+        assert definition.input_kinds == [MediaRepresentationKind.KEYFRAME]
+        assert "train,person" in " ".join(definition.fixed_args)
+
+    def test_definition_requires_at_least_one_label(self):
+        with pytest.raises(ValueError, match="at least one label"):
+            build_region_detect_definition(labels=())
+
+    def test_pipeline_requires_at_least_one_label(self):
+        # Labels are explicit, so customising fixed_args cannot silently
+        # open the closed label set.
+        definition = build_region_detect_definition(labels=self.LABELS)
+        with pytest.raises(ValueError, match="at least one label"):
+            VisualRegionDetectionPipeline(definition, labels=())

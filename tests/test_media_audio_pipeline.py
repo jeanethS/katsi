@@ -25,23 +25,31 @@ from katsi_core.media.audio_pipeline import (
     AudioDecodePipeline,
     AudioMetadataError,
     AudioMetadataPipeline,
+    AudioSilenceDetectionPipeline,
     AudioSpeakerSegmentationPipeline,
     AudioTranscriptionPipeline,
+    SilenceSpanData,
     TranscriptSegmentData,
+    WordTimingData,
     apply_speaker_labels,
     assemble_transcript_chunks,
     build_decode_definition,
     build_segment_representations,
+    build_silence_detect_definition,
+    build_silence_span_representations,
     build_transcribe_definition,
+    parse_silence_spans,
     parse_speaker_segments,
     parse_transcript_segments,
     parse_wav_metadata,
 )
 from katsi_core.media.cache import RepresentationCache
 from katsi_core.media.contracts import (
+    DerivedRepresentation,
     MediaProducerType,
     MediaRepresentationKind,
     MediaRepresentationStatus,
+    PipelineStage,
     ProducerProvenance,
 )
 from katsi_core.media.execution import PipelineExecutionOrchestrator
@@ -289,6 +297,352 @@ class TestAudioDecodePipeline:
 # ---------------------------------------------------------------------------
 
 
+class TestAudioSilenceDetectionPipeline:
+    """Silence detection pipeline (7.2b).
+
+    The fake executable writes canned silencedetect text to stderr, proving
+    the adapter only ever routes through BoundedSubprocessExecutor with a
+    fixed template -- never a raw subprocess call of its own.
+    """
+
+    # 8000 Hz mono 16-bit: 80000 frames == 10_000 ms.
+    _TEN_SECOND_FRAMES = 80_000
+
+    def _fake_silence_definition(self, tmp_path, stderr_text, *, exit_code=0, max_output_bytes=None):
+        script = tmp_path / "fake_silencedetect.py"
+        script.write_text(
+            "import sys\nsys.stderr.write(sys.argv[1])\nsys.exit(int(sys.argv[2]))\n"
+        )
+        update = {
+            "executable_path": sys.executable,
+            "fixed_args": [str(script), stderr_text, str(exit_code)],
+        }
+        if max_output_bytes is not None:
+            update["max_output_bytes"] = max_output_bytes
+        return build_silence_detect_definition().model_copy(update=update)
+
+    def _fingerprint(self, source_content_hash):
+        return build_pipeline_fingerprint(
+            source_content_hash=source_content_hash,
+            representation_kind=MediaRepresentationKind.SILENCE_SPAN,
+            stage=PipelineStage.DETECT_SILENCE,
+            adapter_name="audio_silence_detect_ffmpeg",
+            adapter_version="1.0.0",
+            settings=MediaSamplingSettings(),
+        )
+
+    def _wav(self, tmp_path):
+        path = tmp_path / "proxy.wav"
+        path.write_bytes(_build_wav_bytes(num_frames=self._TEN_SECOND_FRAMES))
+        return path
+
+    def test_process_returns_single_batch_representation(
+        self, resource_version_id, source_content_hash, tmp_path
+    ):
+        stderr_text = (
+            "[Parsed_silencedetect_0 @ 0xbfec3c900] silence_start: 1.999955\n"
+            "[Parsed_silencedetect_0 @ 0xbfec3c900] silence_end: 5.000068 | "
+            "silence_duration: 3.000113\n"
+        )
+        adapter = AudioSilenceDetectionPipeline(
+            self._fake_silence_definition(tmp_path, stderr_text)
+        )
+
+        representation = adapter.process(
+            self._wav(tmp_path),
+            resource_version_id,
+            source_content_hash,
+            self._fingerprint(source_content_hash),
+            tmp_path,
+        )
+
+        # One representation carrying the batch, mirroring
+        # AudioTranscriptionPipeline -- expansion is the expander's job.
+        assert isinstance(representation, DerivedRepresentation)
+        assert representation.kind == MediaRepresentationKind.SILENCE_SPAN
+        assert representation.status == MediaRepresentationStatus.CURRENT
+        payload = json.loads(representation.textual_payload)
+        assert payload["track_duration_ms"] == 10_000
+        assert payload["spans"] == [{"start_ms": 2000, "end_ms": 5000}]
+        assert payload["total_silent_ms"] == 3000
+        # Coverage is what the batch accounts for -- the whole track -- not
+        # how much of it was silent. The silent amount lives in the payload.
+        assert representation.coverage.is_complete is True
+        assert representation.coverage.coverage_fraction == 1.0
+
+    def test_process_derives_duration_without_an_extra_parameter(
+        self, resource_version_id, source_content_hash, tmp_path
+    ):
+        # The orchestrator calls process() with exactly five positional
+        # arguments, so duration must come from the WAV header.
+        adapter = AudioSilenceDetectionPipeline(
+            self._fake_silence_definition(tmp_path, "no silence here\n")
+        )
+
+        representation = adapter.process(
+            self._wav(tmp_path),
+            resource_version_id,
+            source_content_hash,
+            self._fingerprint(source_content_hash),
+            tmp_path,
+        )
+
+        assert json.loads(representation.textual_payload)["track_duration_ms"] == 10_000
+
+    def test_no_silence_produces_empty_span_batch(
+        self, resource_version_id, source_content_hash, tmp_path
+    ):
+        adapter = AudioSilenceDetectionPipeline(
+            self._fake_silence_definition(tmp_path, "size=N/A time=00:00:10.00 speed=100x\n")
+        )
+
+        representation = adapter.process(
+            self._wav(tmp_path),
+            resource_version_id,
+            source_content_hash,
+            self._fingerprint(source_content_hash),
+            tmp_path,
+        )
+
+        payload = json.loads(representation.textual_payload)
+        assert payload["spans"] == []
+        assert payload["total_silent_ms"] == 0
+
+    def test_nonzero_exit_raises(self, resource_version_id, source_content_hash, tmp_path):
+        adapter = AudioSilenceDetectionPipeline(
+            self._fake_silence_definition(tmp_path, "boom\n", exit_code=1)
+        )
+
+        with pytest.raises(RuntimeError, match="Silence detection failed"):
+            adapter.process(
+                self._wav(tmp_path),
+                resource_version_id,
+                source_content_hash,
+                self._fingerprint(source_content_hash),
+                tmp_path,
+            )
+
+    def test_truncated_output_refuses_to_parse(
+        self, resource_version_id, source_content_hash, tmp_path
+    ):
+        stderr_text = (
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 1.0\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 2.0 | silence_duration: 1.0\n"
+        )
+        adapter = AudioSilenceDetectionPipeline(
+            self._fake_silence_definition(tmp_path, stderr_text, max_output_bytes=8)
+        )
+
+        with pytest.raises(RuntimeError, match="truncated"):
+            adapter.process(
+                self._wav(tmp_path),
+                resource_version_id,
+                source_content_hash,
+                self._fingerprint(source_content_hash),
+                tmp_path,
+            )
+
+    def test_definition_carries_threshold_and_min_duration(self):
+        definition = build_silence_detect_definition(
+            noise_threshold_db=-40.0, min_silence_ms=500
+        )
+
+        joined = " ".join(definition.fixed_args)
+        assert "noise=-40.0dB" in joined
+        assert "d=0.5" in joined
+
+    def test_definition_is_deterministic_and_offline(self):
+        definition = build_silence_detect_definition()
+
+        assert definition.producer_type == MediaProducerType.DETERMINISTIC
+        assert definition.network_disabled is True
+        assert definition.stage == PipelineStage.DETECT_SILENCE
+        assert definition.representation_kinds_produced == [
+            MediaRepresentationKind.SILENCE_SPAN
+        ]
+
+    def _provenance(self):
+        return ProducerProvenance(
+            producer_type=MediaProducerType.DETERMINISTIC,
+            adapter_name="audio_silence_detect_ffmpeg",
+            adapter_version="1.0.0",
+        )
+
+    def test_expander_produces_one_representation_per_span(
+        self, resource_version_id, source_content_hash
+    ):
+        spans = [
+            SilenceSpanData(start_ms=1000, end_ms=2000),
+            SilenceSpanData(start_ms=5000, end_ms=6000),
+        ]
+
+        representations = build_silence_span_representations(
+            spans,
+            resource_version_id,
+            self._fingerprint(source_content_hash),
+            self._provenance(),
+            track_duration_ms=10_000,
+        )
+
+        assert len(representations) == 2
+        first = representations[0]
+        assert first.kind == MediaRepresentationKind.SILENCE_SPAN
+        assert len(first.locators) == 1
+        assert first.locators[0].locator_type == "time_range"
+        assert (first.locators[0].start_ms, first.locators[0].end_ms) == (1000, 2000)
+        # Silence carries no text: positionally useful, not retrievable.
+        assert first.textual_payload == ""
+        # Each span covers only itself: 1s of a 10s track.
+        assert first.coverage.is_complete is False
+        assert first.coverage.coverage_fraction == pytest.approx(0.1)
+        assert representations[1].coverage.coverage_fraction == pytest.approx(0.1)
+
+    def test_expander_with_no_spans_produces_no_representations(
+        self, resource_version_id, source_content_hash
+    ):
+        # A track with no silence is a valid result, not a failure.
+        assert (
+            build_silence_span_representations(
+                [],
+                resource_version_id,
+                self._fingerprint(source_content_hash),
+                self._provenance(),
+                track_duration_ms=10_000,
+            )
+            == []
+        )
+
+    def test_expander_rejects_non_positive_track_duration(
+        self, resource_version_id, source_content_hash
+    ):
+        with pytest.raises(ValueError, match="must be positive"):
+            build_silence_span_representations(
+                [SilenceSpanData(start_ms=0, end_ms=100)],
+                resource_version_id,
+                self._fingerprint(source_content_hash),
+                self._provenance(),
+                track_duration_ms=0,
+            )
+
+
+class TestSilenceSpanParsing:
+    """Silence measurement (7.2b).
+
+    Fixtures below use output captured from a real ``ffmpeg`` 8.1.2 run
+    (``silencedetect=noise=-35dB:d=0.25``), including its actual
+    ``[Parsed_silencedetect_0 @ ...]`` prefix -- not an invented one.
+    """
+
+    def test_parses_paired_silence_spans(self):
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0xbfec3c900] silence_start: 1.999955\n"
+            "[Parsed_silencedetect_0 @ 0xbfec3c900] silence_end: 5.000068 | "
+            "silence_duration: 3.000113\n"
+        )
+
+        spans = parse_silence_spans(stderr, track_duration_ms=9_000)
+
+        assert spans == [SilenceSpanData(start_ms=2000, end_ms=5000)]
+
+    def test_parses_integer_formatted_times(self):
+        # ffmpeg drops the decimal part when a time lands on a whole second.
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0xc6ec3c900] silence_start: 0\n"
+            "[Parsed_silencedetect_0 @ 0xc6ec3c900] silence_end: 2 | silence_duration: 2\n"
+        )
+
+        spans = parse_silence_spans(stderr, track_duration_ms=2_000)
+
+        assert spans == [SilenceSpanData(start_ms=0, end_ms=2000)]
+
+    def test_silence_duration_on_end_line_is_not_mistaken_for_a_time(self):
+        # silence_duration shares the silence_end line; it must never be
+        # read as a start or an end.
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 1\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 4 | silence_duration: 3\n"
+        )
+
+        spans = parse_silence_spans(stderr, track_duration_ms=10_000)
+
+        assert spans == [SilenceSpanData(start_ms=1000, end_ms=4000)]
+
+    def test_multiple_spans_parse_in_order(self):
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 1.5\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 3.25 | silence_duration: 1.75\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 10.0\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 12.5 | silence_duration: 2.5\n"
+        )
+
+        spans = parse_silence_spans(stderr, track_duration_ms=20_000)
+
+        assert [(s.start_ms, s.end_ms) for s in spans] == [(1500, 3250), (10_000, 12_500)]
+
+    def test_trailing_silence_closes_at_track_duration(self):
+        # Current ffmpeg closes a trailing span itself; older builds do not.
+        stderr = "[Parsed_silencedetect_0 @ 0x1] silence_start: 8.0\n"
+
+        spans = parse_silence_spans(stderr, track_duration_ms=10_000)
+
+        assert spans == [SilenceSpanData(start_ms=8000, end_ms=10_000)]
+
+    def test_no_silence_produces_no_spans(self):
+        stderr = (
+            "size=N/A time=00:00:09.00 bitrate=N/A speed= 900x\n"
+            "video:0KiB audio:0KiB subtitle:0KiB\n"
+        )
+
+        assert parse_silence_spans(stderr, track_duration_ms=9_000) == []
+
+    def test_ignores_unrelated_ffmpeg_stderr_noise(self):
+        stderr = (
+            "ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers\n"
+            "  Duration: 00:00:20.00, start: 0.000000, bitrate: 256 kb/s\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 1.0\n"
+            "size=N/A time=00:00:02.00 bitrate=N/A speed= 200x\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 2.0 | silence_duration: 1.0\n"
+        )
+
+        spans = parse_silence_spans(stderr, track_duration_ms=20_000)
+
+        assert spans == [SilenceSpanData(start_ms=1000, end_ms=2000)]
+
+    def test_silence_end_without_start_raises(self):
+        stderr = "[Parsed_silencedetect_0 @ 0x1] silence_end: 2.0 | silence_duration: 1.0\n"
+
+        with pytest.raises(ValueError, match="silence_end without"):
+            parse_silence_spans(stderr, track_duration_ms=5_000)
+
+    def test_second_silence_start_while_span_open_raises(self):
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 1.0\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 2.0\n"
+        )
+
+        with pytest.raises(ValueError, match="still open"):
+            parse_silence_spans(stderr, track_duration_ms=5_000)
+
+    def test_trailing_silence_beyond_track_duration_raises(self):
+        stderr = "[Parsed_silencedetect_0 @ 0x1] silence_start: 12.0\n"
+
+        with pytest.raises(ValueError, match="exceeds track duration"):
+            parse_silence_spans(stderr, track_duration_ms=10_000)
+
+    def test_zero_length_span_rejected(self):
+        stderr = (
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 2.0\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 2.0 | silence_duration: 0.0\n"
+        )
+
+        with pytest.raises(ValueError, match="must exceed"):
+            parse_silence_spans(stderr, track_duration_ms=5_000)
+
+    def test_non_positive_track_duration_rejected(self):
+        with pytest.raises(ValueError, match="must be positive"):
+            parse_silence_spans("", track_duration_ms=0)
+
+
 class TestTranscriptSegmentParsing:
     def test_parses_speech_silence_music_unrecognized_segments(self):
         batch = {
@@ -339,6 +693,153 @@ class TestTranscriptSegmentParsing:
             "segments": [{"start_ms": 0, "end_ms": 100, "segment_kind": "silence", "text": "oops"}],
         }
         with pytest.raises(ValueError, match="must not carry text"):
+            parse_transcript_segments(batch)
+
+    def test_parses_word_timings_within_segment(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 1000,
+                    "end_ms": 3000,
+                    "segment_kind": "speech",
+                    "text": "hello world",
+                    "words": [
+                        {"start_ms": 1000, "end_ms": 1500, "text": "hello", "confidence": 0.9},
+                        {"start_ms": 1600, "end_ms": 2400, "text": "world"},
+                    ],
+                }
+            ],
+        }
+
+        segments, _ = parse_transcript_segments(batch)
+
+        assert [w.text for w in segments[0].words] == ["hello", "world"]
+        assert isinstance(segments[0].words[0], WordTimingData)
+        assert segments[0].words[0].start_ms == 1000
+        assert segments[0].words[0].confidence == 0.9
+        assert segments[0].words[1].confidence is None
+
+    def test_segment_without_words_key_parses_with_empty_words(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {"start_ms": 0, "end_ms": 1000, "segment_kind": "speech", "text": "hi"}
+            ],
+        }
+
+        segments, _ = parse_transcript_segments(batch)
+
+        assert segments[0].words == ()
+
+    def test_word_outside_parent_segment_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 1000,
+                    "end_ms": 2000,
+                    "segment_kind": "speech",
+                    "text": "hi",
+                    "words": [{"start_ms": 1000, "end_ms": 2500, "text": "hi"}],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="within its segment"):
+            parse_transcript_segments(batch)
+
+    def test_out_of_order_words_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 0,
+                    "end_ms": 3000,
+                    "segment_kind": "speech",
+                    "text": "a b",
+                    "words": [
+                        {"start_ms": 1500, "end_ms": 2000, "text": "b"},
+                        {"start_ms": 100, "end_ms": 500, "text": "a"},
+                    ],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="time-ordered"):
+            parse_transcript_segments(batch)
+
+    def test_overlapping_words_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 0,
+                    "end_ms": 3000,
+                    "segment_kind": "speech",
+                    "text": "a b",
+                    "words": [
+                        {"start_ms": 100, "end_ms": 1200, "text": "a"},
+                        {"start_ms": 1000, "end_ms": 2000, "text": "b"},
+                    ],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="time-ordered"):
+            parse_transcript_segments(batch)
+
+    def test_zero_length_word_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 0,
+                    "end_ms": 3000,
+                    "segment_kind": "speech",
+                    "text": "a",
+                    "words": [{"start_ms": 100, "end_ms": 100, "text": "a"}],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="must exceed"):
+            parse_transcript_segments(batch)
+
+    def test_non_speech_segment_with_words_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 0,
+                    "end_ms": 1000,
+                    "segment_kind": "silence",
+                    "text": "",
+                    "words": [{"start_ms": 0, "end_ms": 500, "text": "ghost"}],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="must not carry words"):
+            parse_transcript_segments(batch)
+
+    def test_word_confidence_out_of_range_rejected(self):
+        batch = {
+            "coverage_fraction": 1.0,
+            "segments": [
+                {
+                    "start_ms": 0,
+                    "end_ms": 3000,
+                    "segment_kind": "speech",
+                    "text": "a",
+                    "words": [
+                        {"start_ms": 100, "end_ms": 500, "text": "a", "confidence": 1.5}
+                    ],
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="confidence"):
             parse_transcript_segments(batch)
 
     def test_invalid_time_range_rejected(self):
