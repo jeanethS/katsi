@@ -58,56 +58,91 @@ app = typer.Typer(help="katsi: local-first relational file context.", no_args_is
 console = Console()
 
 
-_state: dict = {}
-
-
-def _services():
-    """Lazily construct + share pipeline, embed, llm, graph, vectors, records."""
-    if _state:
-        return _state
-    s = get_settings()
-    _state["settings"] = s
-    _state["embed"] = EmbedClient(s)
-    _state["llm"] = LLMClient(s)
-    _state["graph"] = GraphStore(s.store.data_dir / s.store.kuzu_db)
-    _state["vectors"] = VectorStore(s.store.data_dir / "vectors", s.store.lancedb_table)
-    _state["records"] = FileRecordStore(s.store.data_dir / "records")
+def _open_workspace_database(svc: dict) -> WorkspaceSQLite:
+    s = svc["settings"]
     database = WorkspaceSQLite(s.store.data_dir / s.workspace.sqlite.filename, s.workspace.sqlite)
     with database.connection() as connection:
         apply_migrations(connection, s.workspace.sqlite.schema_version)
-    _state["workspace_database"] = database
-    _state["representation_registry"] = RepresentationRegistry(database)
-    _state["workspace_repository"] = WorkspaceRepository(database)
-    _state["identity_service"] = IdentityService(database)
-    credential = os.environ.get(s.mcp.agent_credential_env)
-    if credential:
-        _state["authenticated_identity"] = _state["identity_service"].authenticate(credential)
-    _state["authorization_service"] = AuthorizationService(database)
-    _state["claim_service"] = ClaimService(
-        database, _state["identity_service"], _state["authorization_service"]
-    )
-    _state["lease_service"] = WorkLeaseService(database, _state["identity_service"], s.lease)
-    _state["record_service"] = WorkspaceRecordService(database, _state["identity_service"])
-    _state["brief_service"] = BriefService(
-        _state["workspace_repository"],
-        database,
-        _state["record_service"],
-        _state["claim_service"],
-        _state["record_service"],
-        _state["lease_service"],
-        s.workspace.brief,
-    )
-    _state["portable_state_service"] = PortableStateService(
-        s.workspace.portable_state.relative_path
-    )
-    _state["pipeline"] = IngestPipeline(
-        s,
-        graph=_state["graph"],
-        vectors=_state["vectors"],
-        embed=_state["embed"],
-        llm=_state["llm"],
-        records=_state["records"],
-    )
+    return database
+
+
+def _authenticate(svc: dict) -> object:
+    credential = os.environ.get(svc["settings"].mcp.agent_credential_env)
+    if not credential:
+        raise KeyError("authenticated_identity")
+    return svc["identity_service"].authenticate(credential)
+
+
+_FACTORIES = {
+    "settings": lambda _: get_settings(),
+    "embed": lambda svc: EmbedClient(svc["settings"]),
+    "llm": lambda svc: LLMClient(svc["settings"]),
+    "graph": lambda svc: GraphStore(svc["settings"].store.data_dir / svc["settings"].store.kuzu_db),
+    "vectors": lambda svc: VectorStore(
+        svc["settings"].store.data_dir / "vectors", svc["settings"].store.lancedb_table
+    ),
+    "records": lambda svc: FileRecordStore(svc["settings"].store.data_dir / "records"),
+    "workspace_database": _open_workspace_database,
+    "representation_registry": lambda svc: RepresentationRegistry(svc["workspace_database"]),
+    "workspace_repository": lambda svc: WorkspaceRepository(svc["workspace_database"]),
+    "identity_service": lambda svc: IdentityService(svc["workspace_database"]),
+    "authenticated_identity": _authenticate,
+    "authorization_service": lambda svc: AuthorizationService(svc["workspace_database"]),
+    "claim_service": lambda svc: ClaimService(
+        svc["workspace_database"], svc["identity_service"], svc["authorization_service"]
+    ),
+    "lease_service": lambda svc: WorkLeaseService(
+        svc["workspace_database"], svc["identity_service"], svc["settings"].lease
+    ),
+    "record_service": lambda svc: WorkspaceRecordService(
+        svc["workspace_database"], svc["identity_service"]
+    ),
+    "brief_service": lambda svc: BriefService(
+        svc["workspace_repository"],
+        svc["workspace_database"],
+        svc["record_service"],
+        svc["claim_service"],
+        svc["record_service"],
+        svc["lease_service"],
+        svc["settings"].workspace.brief,
+    ),
+    "portable_state_service": lambda svc: PortableStateService(
+        svc["settings"].workspace.portable_state.relative_path
+    ),
+    "pipeline": lambda svc: IngestPipeline(
+        svc["settings"],
+        graph=svc["graph"],
+        vectors=svc["vectors"],
+        embed=svc["embed"],
+        llm=svc["llm"],
+        records=svc["records"],
+    ),
+}
+
+
+class _Services(dict):
+    """Service container that builds each entry on first access.
+
+    Eager construction made every command take kuzu's single-writer lock and
+    open the vector store, even `index --reprocess-media`, which touches
+    neither: a media run then blocked any other katsi command on the same
+    store. Tests still pre-populate entries with plain `dict.update`.
+    """
+
+    def __missing__(self, key: str):
+        factory = _FACTORIES.get(key)
+        if factory is None:
+            raise KeyError(key)
+        value = factory(self)
+        self[key] = value
+        return value
+
+
+_state: dict = _Services()
+
+
+def _services() -> dict:
+    """Return the shared service container; entries are built when first used."""
     return _state
 
 
@@ -288,8 +323,11 @@ def start_cmd(
             svc["settings"].workspace.observer,
             svc["claim_service"],
         )
-        reconciler.on_startup(workspace.id)
         console.print(f"[green]workspace {action}:[/] {workspace.display_name} ({workspace.id})")
+        with console.status(f"[cyan]reconciling {root}"):
+            reconciler.on_startup(workspace.id)
+        tracked = len(svc["workspace_repository"].list_current_resources(workspace.id))
+        console.print(f"[bold]tracked[/] {tracked} file(s)")
         _print_index_summary(_index_tree(svc, root))
         console.print("[dim]Ready: use `katsi search`, `katsi ask`, or `katsi workspace-brief`.[/]")
 
@@ -466,7 +504,12 @@ def _print_json(payload: object) -> None:
 
 
 def _authenticated_identity(svc: dict) -> object:
-    identity = svc.get("authenticated_identity")
+    # A missing credential raises KeyError out of the lazy factory; both that
+    # and a pre-populated None mean the same thing to the caller.
+    try:
+        identity = svc["authenticated_identity"]
+    except KeyError:
+        identity = None
     if identity is None:
         raise PermissionError("Authentication required: set KATSI_AGENT_CREDENTIAL")
     return identity

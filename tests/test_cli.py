@@ -126,6 +126,23 @@ def test_index_reprocess_flag_skips_normal_indexing(cli_runner, tmp_path):
     assert "reprocessing" in result.output
 
 
+def test_index_reprocess_does_not_open_the_graph_store(cli_runner, tmp_path):
+    """Media reprocessing must not take kuzu's single-writer lock it never uses."""
+    runner, cli_main, _, _, _, settings = cli_runner
+    database = cli_main._state["workspace_database"]
+    cli_main._state.clear()
+    cli_main._state.update({"settings": settings, "workspace_database": database})
+    md_path = tmp_path / "doc.md"
+    md_path.write_text("# Hello\n\nmentions Acme.")
+
+    result = runner.invoke(cli_main.app, ["index", "--reprocess-media", str(md_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "graph" not in cli_main._state
+    assert "vectors" not in cli_main._state
+    assert "llm" not in cli_main._state
+
+
 def test_search_prints_results_after_indexing(cli_runner, tmp_path):
     runner, cli_main, embed, _, _, _ = cli_runner
     md_path = tmp_path / "doc.md"
