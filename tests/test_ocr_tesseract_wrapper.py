@@ -132,6 +132,54 @@ def test_dimensions_failure_still_emits_text_only(run_wrapper: Any) -> None:
     assert payload == {"text": "HOLA MUNDO 123"}
 
 
+def test_undecodable_input_is_transcoded_then_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A HEIC tesseract cannot open is OCR'd through a magick PNG transcode."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = tmp_path / "calls.log"
+    # Refuses anything but the transcoded PNG, the way tesseract refuses HEIF.
+    (bin_dir / "tesseract").write_text(
+        "#!/bin/sh\n"
+        f'echo "tesseract $1" >> {calls}\n'
+        'case "$1" in\n'
+        "  *input.png)\n"
+        f"    cat <<'EOF'\n{TSV_WITH_TEXT}\nEOF\n"
+        "    ;;\n"
+        "  *) echo 'Error during processing.' >&2; exit 1 ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "magick").write_text(
+        "#!/bin/sh\n"
+        f'echo "magick $*" >> {calls}\n'
+        'if [ "$1" = "identify" ]; then echo "400 100"; exit 0; fi\n'
+        'cp "$1" "$3"\n'
+    )
+    for name in ("tesseract", "magick"):
+        (bin_dir / name).chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", str(bin_dir), prepend=":")
+    source = tmp_path / "photo.heic"
+    source.write_bytes(b"heic-bytes")
+    out = tmp_path / "out.json"
+
+    code = wrapper.main([str(source), str(out), "--lang", "spa+eng"])
+
+    assert code == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["text"] == "HOLA MUNDO 123"
+    log = calls.read_text()
+    assert "-auto-orient" in log
+    assert log.count("tesseract ") == 2  # original refused, transcode read
+
+
+def test_transcode_failure_reports_the_tesseract_error(run_wrapper: Any, tmp_path: Path) -> None:
+    """When magick cannot convert either, no output file and a non-zero exit."""
+    code, out = run_wrapper(None, input_image=tmp_path / "broken.heic")
+
+    assert code != 0
+    assert not out.exists()
+
+
 def test_explicit_language_is_required(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     FakeTools(tmp_path, TSV_WITH_TEXT)
     monkeypatch.setenv("PATH", str(tmp_path / "bin"), prepend=":")

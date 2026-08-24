@@ -23,13 +23,16 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 TESSERACT = "tesseract"
-IDENTIFY = ("magick", "identify")
+MAGICK = "magick"
+IDENTIFY = (MAGICK, "identify")
 
 # tesseract TSV confidence sentinel for non-text rows.
 _NO_CONFIDENCE = -1.0
@@ -72,6 +75,28 @@ def _image_dimensions(input_path: str) -> tuple[float, float] | None:
     if width <= 0 or height <= 0:
         return None
     return width, height
+
+
+def _ocr_tsv(input_path: str, language: str, workdir: str) -> tuple[str, str]:
+    """Return (TSV, path tesseract read), transcoding with magick if needed.
+
+    tesseract has no HEIF decoder, so an iPhone HEIC fails outright. Only such
+    a refusal triggers a transcode -- the common case pays no extra process --
+    and a failed transcode surfaces tesseract's own error, not magick's.
+    """
+    # tesseract's own option is `-l`; `--lang` is this wrapper's interface so
+    # the owner-facing argument template never depends on tool spelling.
+    command = [TESSERACT, input_path, "stdout", "-l", language, "tsv"]
+    try:
+        return _run(command), input_path
+    except OcrWrapperError as undecodable:
+        converted = str(Path(workdir) / "input.png")
+        try:
+            _run([MAGICK, input_path, "-auto-orient", converted])
+        except OcrWrapperError:
+            raise undecodable from None
+        command[1] = converted
+        return _run(command), converted
 
 
 def parse_tsv(tsv_text: str) -> tuple[str, list[tuple[str, int, int, int, int, float]]]:
@@ -222,11 +247,13 @@ def main(argv: Sequence[str]) -> int:
         return 2
 
     try:
-        # tesseract's own option is `-l`; `--lang` is this wrapper's interface
-        # so the owner-facing argument template never depends on tool spelling.
-        tsv = _run([TESSERACT, input_path, "stdout", "-l", language, "tsv"])
-        text, regions = parse_tsv(tsv)
-        payload = build_payload(text, regions, _image_dimensions(input_path))
+        with tempfile.TemporaryDirectory(prefix="katsi-ocr-") as workdir:
+            tsv, read_path = _ocr_tsv(input_path, language, workdir)
+            text, regions = parse_tsv(tsv)
+            # Boxes are normalized against the image tesseract actually read,
+            # which for a transcoded file is the auto-oriented one -- the same
+            # orientation the thumbnail pipeline produces.
+            payload = build_payload(text, regions, _image_dimensions(read_path))
     except OcrWrapperError as exc:
         print(f"ocr_tesseract: {exc}", file=sys.stderr)
         return 1
