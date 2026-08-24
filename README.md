@@ -74,6 +74,10 @@ Core usage requires:
 Optional capabilities:
 
 - `markitdown[pdf]` for PDF extraction (`uv sync --extra pdf`)
+- Local media executables for the pipelines you configure, such as ImageMagick
+  (`magick`) for thumbnails, Tesseract for OCR — with the language data your
+  material needs — and ffmpeg/ffprobe for audio and video. Katsi never selects,
+  downloads, or installs one for you.
 - Node.js and npm for the dashboard frontend in `packages/app/frontend`
 - An API key only when you intentionally enable cloud synthesis
 
@@ -101,6 +105,32 @@ uv run --package katsi-cli katsi ask "What is this project for?"
 
 The default `ask` mode prints a compact context bundle for your client to
 synthesize over. It does not send your workspace to a cloud model.
+
+### Process a media library
+
+Media work is a separate, opt-in pass. Text indexing never sends an image,
+audio file, or video to the text extractor; those families are tracked as
+workspace resources and reported as `skipped`, so the configured pipelines can
+own them:
+
+```bash
+uv run --package katsi-cli katsi start /path/to/library       # tracks the files
+uv run --package katsi-cli katsi index --reprocess-media /path/to/library
+```
+
+`--reprocess-media` only sees resources the workspace already tracks, and
+reconciliation is what tracks them, so `katsi start` comes first. The run is
+cached and resumable: unchanged files come back as `reused`, a family with no
+configured pipeline as `unavailable`, and neither the original file nor prior
+representations are ever deleted.
+
+Nothing is processed until the owner configures it. With ImageMagick and
+Tesseract installed and declared under `[katsi.media]`, an image library yields
+private thumbnails and cited OCR text; the [multimedia guide](docs/media.md)
+carries the full configuration block. On macOS,
+`build_sips_heic_thumbnail_pipeline_definition("/usr/bin/sips")` is an
+alternative HEIC thumbnail adapter. Every adapter is bounded, local-only, and
+never changes the source file.
 
 ### Connect an MCP client
 
@@ -293,7 +323,7 @@ honestly rather than fabricating transcript text.
 
 | Media family | Content-safe detection | Available derived representations |
 |---|---|---|
-| Images (`PNG`, `JPEG`, `GIF`, `BMP`, `WebP`, `TIFF`) | Magic-number inspection, dimensions, and extension-mismatch warnings | Thumbnails, OCR text, image captions, visual embeddings |
+| Images (`PNG`, `JPEG`, `GIF`, `BMP`, `WebP`, `TIFF`, `HEIC`) | Magic-number inspection, dimensions, and extension-mismatch warnings | Thumbnails, OCR text, image captions, visual embeddings. The bundled OCR wrapper transcodes formats Tesseract cannot decode, such as HEIC, through ImageMagick. |
 | Documents (`PDF`, `DOCX`, `PPTX`, `XLSX`) | Content signatures and Office-container inspection; encrypted files are identified | Extracted text, rendered/proxy media, page-level OCR |
 | Audio (`MP3`, `WAV`, `FLAC`, `OGG`, `M4A`) | Content signatures and structural metadata | Metadata, normalized proxy media, time-coded transcript segments, optional speaker segmentation |
 | Video (`MP4`, `MOV`, `M4V`, `WebM`, `MKV`, `AVI`) | Content signatures and bounded container inspection | Media descriptor, proxy media, scenes, keyframes, and caption/visual-embedding derivatives through registered pipelines |
@@ -329,7 +359,9 @@ so `--package` is important.
 
 | Command | What it does |
 |---|---|
-| `katsi index PATH` | Recursively index a file or directory using configured include/exclude globs. |
+| `katsi start PATH` | Register or open a workspace, reconcile the tree so its files become tracked resources, then index the textual ones. `--watch` keeps reconciling external changes. |
+| `katsi index PATH` | Recursively index a file or directory using configured include/exclude globs. Image, audio, and video files are reported as `skipped`: they belong to the media pipelines. |
+| `katsi index --reprocess-media PATH` | Run the configured local media pipelines over already tracked resources under PATH. Skips text indexing entirely; reuses cached representations. |
 | `katsi status` | Show indexed-file counts, chunk counts, and recent indexing state. |
 | `katsi search QUERY --top 8` | Return ranked files and why each is relevant. |
 | `katsi ask QUERY --max-tokens 3000` | Print a budgeted relational context bundle. |
@@ -415,6 +447,21 @@ top_k_chunks = 16
 top_k_files = 8
 default_context_max_tokens = 3000
 
+[katsi.media]
+enable_image_processing = false # each family stays off until its tools exist
+
+[[katsi.media.pipelines]]
+id = "image_ocr_v1"
+adapter_binding = "image_ocr_tesseract"
+stage = "ocr"
+accepted_mime_patterns = ["image/*"]
+representation_kinds_produced = ["ocr_text"]
+producer_type = "deterministic"
+executable_path = "/path/to/katsi/tools/media/ocr_tesseract.py"
+fixed_args = ["{input_path}", "{output_path}", "--lang", "spa+eng"]
+network_disabled = true
+timeout_seconds = 120
+
 [katsi.mcp]
 enable_answer_tool = false
 
@@ -422,8 +469,16 @@ enable_answer_tool = false
 backend = "return_only" # return_only | local | cloud | auto
 ```
 
-The default is `return_only`: Katsi retrieves locally and lets the calling MCP
-client synthesize. `local` uses Ollama. `cloud` and `auto` are explicit opt-in
+Media pipelines are owner-authored: each entry names the executable, its fixed
+argument template, and the contract it produces, and registration fails loudly
+when a declared stage, MIME pattern, or representation kind does not match its
+adapter. The executable and its arguments are part of the pipeline fingerprint,
+so changing the OCR language creates a new representation instead of reusing
+text produced under the old one. See [the multimedia guide](docs/media.md) for
+every supported binding.
+
+The default synthesis backend is `return_only`: Katsi retrieves locally and
+lets the calling MCP client synthesize. `local` uses Ollama. `cloud` and `auto` are explicit opt-in
 modes; configure the provider, model, and API-key environment variable under
 `[katsi.synth.cloud]` before using them.
 
