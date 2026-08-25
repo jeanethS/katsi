@@ -89,18 +89,16 @@ class RepresentationCache:
                 is_exact_resource_match=True,
             )
 
-        target_digest = fingerprint_digest(fingerprint)
-        for candidate in self._scan_candidates(kind):
-            if candidate.status not in _ELIGIBLE_STATUSES:
-                continue
-            if fingerprint_digest(candidate.pipeline_fingerprint) != target_digest:
-                continue
-            return CacheLookupResult(
-                representation=candidate,
-                reused_from_resource_version_id=candidate.resource_version_id,
-                is_exact_resource_match=False,
-            )
-        return None
+        candidate = self._registry.find_by_fingerprint_digest(
+            kind, fingerprint_digest(fingerprint), _ELIGIBLE_STATUSES
+        )
+        if candidate is None:
+            return None
+        return CacheLookupResult(
+            representation=candidate,
+            reused_from_resource_version_id=candidate.resource_version_id,
+            is_exact_resource_match=False,
+        )
 
     def reuse_for_resource(
         self,
@@ -142,20 +140,6 @@ class RepresentationCache:
         if result is None:
             return None
         return self.reuse_for_resource(resource_version_id, result)
-
-    def _scan_candidates(self, kind: MediaRepresentationKind) -> list[DerivedRepresentation]:
-        """Fetch all representations of ``kind`` for compatibility scanning.
-
-        Uses the registry's own row-hydration path
-        (``_row_to_representation``) so serialization stays consistent with
-        how representations are stored, without duplicating that logic.
-        """
-        with self._registry._database.connection() as conn:  # noqa: SLF001
-            rows = conn.execute(
-                "SELECT * FROM representations WHERE kind = ? ORDER BY created_at DESC",
-                (kind.value,),
-            ).fetchall()
-        return [self._registry._row_to_representation(row) for row in rows]  # noqa: SLF001
 
 
 __all__ = [

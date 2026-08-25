@@ -6,6 +6,7 @@ import fnmatch
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from pathlib import Path as PathLib
 from threading import Event
@@ -255,12 +256,22 @@ def _reprocess_media(svc: dict, path: Path) -> ReprocessCounts:
         console=console,
     ) as progress:
         task = progress.add_task("[cyan]reprocessing", total=len(resources) or None)
-        for row, file_path in resources:
-            progress.update(task, description=str(file_path.name)[:40])
-            outcome = reprocessor.process(file_path, UUID(row["id"]), row["content_hash"])
-            for name in total.__dataclass_fields__:
-                setattr(total, name, getattr(total, name) + getattr(outcome, name))
-            progress.update(task, advance=1)
+        # Media pipelines are subprocess-bound (magick, tesseract, ffmpeg), so
+        # threads overlap their wall time; SQLite runs in WAL with a busy
+        # timeout and hands out one connection per call.
+        with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1)) as pool:
+            futures = {
+                pool.submit(
+                    reprocessor.process, file_path, UUID(row["id"]), row["content_hash"]
+                ): file_path
+                for row, file_path in resources
+            }
+            for future in as_completed(futures):
+                progress.update(task, description=str(futures[future].name)[:40])
+                outcome = future.result()
+                for name in total.__dataclass_fields__:
+                    setattr(total, name, getattr(total, name) + getattr(outcome, name))
+                progress.update(task, advance=1)
     return total
 
 

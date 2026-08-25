@@ -90,7 +90,10 @@ def _ocr_tsv(input_path: str, language: str, workdir: str) -> tuple[str, str]:
     try:
         return _run(command), input_path
     except OcrWrapperError as undecodable:
-        converted = str(Path(workdir) / "input.png")
+        # TIFF, not PNG: the pixels tesseract reads are identical, but PNG
+        # compression of a 12MP photo costs more than the decode and the OCR
+        # together (~1.8s vs ~0.27s per HEIC).
+        converted = str(Path(workdir) / "input.tif")
         try:
             _run([MAGICK, input_path, "-auto-orient", converted])
         except OcrWrapperError:

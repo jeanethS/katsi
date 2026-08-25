@@ -144,7 +144,7 @@ def test_undecodable_input_is_transcoded_then_read(
         "#!/bin/sh\n"
         f'echo "tesseract $1" >> {calls}\n'
         'case "$1" in\n'
-        "  *input.png)\n"
+        "  *input.tif)\n"
         f"    cat <<'EOF'\n{TSV_WITH_TEXT}\nEOF\n"
         "    ;;\n"
         "  *) echo 'Error during processing.' >&2; exit 1 ;;\n"

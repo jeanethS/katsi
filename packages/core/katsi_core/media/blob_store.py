@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import blake3
 
@@ -197,8 +198,10 @@ class BlobStore:
         # Create parent directory if needed
         blob_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write to temporary file first (atomic write)
-        temp_path = blob_path.with_suffix(".tmp")
+        # Write to temporary file first (atomic write). The temp name carries a
+        # per-write token so two concurrent writers of identical content cannot
+        # clobber or unlink each other's staging file.
+        temp_path = blob_path.with_suffix(f".{uuid4().hex}.tmp")
         try:
             temp_path.write_bytes(content)
 

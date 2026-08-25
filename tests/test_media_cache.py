@@ -337,3 +337,29 @@ def test_changed_adapter_version_also_produces_cache_miss(cache, registry, produ
         new_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint_v2
     )
     assert result is None
+
+
+def test_legacy_database_without_digest_column_is_migrated_and_still_reuses(
+    temp_db, registry, producer
+):
+    """A database created before ``fingerprint_digest`` keeps reusing its rows."""
+    resource_id = ResourceVersionId(str(uuid4()))
+    other_resource_id = ResourceVersionId(str(uuid4()))
+    fingerprint = _fingerprint()
+    registry.register_representation(
+        _representation(resource_id, fingerprint, producer), make_current=True
+    )
+
+    # Simulate the pre-migration schema: drop the digest column entirely.
+    with temp_db.connection() as conn:
+        conn.execute("DROP INDEX idx_representations_fingerprint_digest")
+        conn.execute("ALTER TABLE representations DROP COLUMN fingerprint_digest")
+
+    migrated = RepresentationCache(RepresentationRegistry(temp_db))
+    result = migrated.find_compatible(
+        other_resource_id, MediaRepresentationKind.EXTRACTED_TEXT, fingerprint
+    )
+
+    assert result is not None
+    assert result.is_exact_resource_match is False
+    assert result.representation.resource_version_id == resource_id

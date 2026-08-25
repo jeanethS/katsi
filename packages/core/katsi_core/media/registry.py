@@ -34,11 +34,22 @@ from katsi_core.media.contracts import (
     RepresentationError,
     ResourceVersionId,
 )
+from katsi_core.media.fingerprint import fingerprint_digest
 from katsi_core.store.workspace_sqlite import WorkspaceSQLite
 
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _fingerprint_from_json(pipeline_fingerprint_json: str) -> PipelineFingerprint:
+    """Rebuild a stored fingerprint; StrictModel does not coerce strings."""
+    data = json.loads(pipeline_fingerprint_json)
+    data["representation_kind"] = MediaRepresentationKind(data["representation_kind"])
+    data["stage"] = PipelineStage(data["stage"])
+    if data.get("input_representation_id") is not None:
+        data["input_representation_id"] = UUID(data["input_representation_id"])
+    return PipelineFingerprint(**data)
 
 
 class RepresentationRegistry:
@@ -92,9 +103,12 @@ class RepresentationRegistry:
                     error_is_retriable INTEGER,
                     error_diagnostic TEXT,
                     pipeline_fingerprint TEXT NOT NULL,
+                    fingerprint_digest TEXT,
                     is_current INTEGER DEFAULT 1
                 )
             """)
+
+            self._ensure_fingerprint_digest_column(conn)
 
             # Create indexes for better query performance
             conn.execute("""
@@ -111,6 +125,26 @@ class RepresentationRegistry:
                 CREATE INDEX IF NOT EXISTS idx_representations_pipeline_fingerprint
                 ON representations (pipeline_fingerprint)
             """)
+
+            # Compatible-cache lookup: without this index every cache miss
+            # scanned and hydrated every representation of the kind, making a
+            # whole-library reprocess quadratic in the number of media files.
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_representations_fingerprint_digest
+                ON representations (kind, fingerprint_digest, status)
+            """)
+
+    def _ensure_fingerprint_digest_column(self, conn: Any) -> None:
+        """Add and backfill ``fingerprint_digest`` for databases created before it."""
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(representations)").fetchall()}
+        if "fingerprint_digest" in columns:
+            return
+        conn.execute("ALTER TABLE representations ADD COLUMN fingerprint_digest TEXT")
+        rows = conn.execute("SELECT id, pipeline_fingerprint FROM representations").fetchall()
+        conn.executemany(
+            "UPDATE representations SET fingerprint_digest = ? WHERE id = ?",
+            [(fingerprint_digest(_fingerprint_from_json(row[1])), row[0]) for row in rows],
+        )
 
     def register_representation(
         self,
@@ -233,8 +267,8 @@ class RepresentationRegistry:
                 producer_type, adapter_name, adapter_version, model_identity,
                 model_version, error_category, error_message,
                 error_is_retriable, error_diagnostic, pipeline_fingerprint,
-                is_current
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                fingerprint_digest, is_current
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 str(representation.id),
@@ -263,9 +297,32 @@ class RepresentationRegistry:
                 1 if representation.error and representation.error.is_retriable else 0,
                 json.dumps(representation.error.diagnostic_info) if representation.error else None,
                 pipeline_fingerprint_json,
+                fingerprint_digest(representation.pipeline_fingerprint),
                 1 if make_current else 0,
             ),
         )
+
+    def find_by_fingerprint_digest(
+        self,
+        kind: MediaRepresentationKind,
+        digest: str,
+        statuses: tuple[MediaRepresentationStatus, ...],
+    ) -> DerivedRepresentation | None:
+        """Find the newest representation of ``kind`` with a matching cache digest."""
+        placeholders = ",".join("?" for _ in statuses)
+        with self._database.connection() as conn:
+            row = conn.execute(
+                f"""
+                SELECT * FROM representations
+                WHERE kind = ?
+                  AND fingerprint_digest = ?
+                  AND status IN ({placeholders})
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,  # noqa: S608 - placeholders are generated, values stay bound
+                (kind.value, digest, *(status.value for status in statuses)),
+            ).fetchone()
+        return self._row_to_representation(row) if row is not None else None
 
     def get_representation(self, representation_id: UUID) -> DerivedRepresentation | None:
         """Get a representation by its ID.
@@ -568,7 +625,9 @@ class RepresentationRegistry:
             error_is_retriable,
             error_diagnostic_json,
             pipeline_fingerprint_json,
-            is_current,
+            # is_current and fingerprint_digest are derived storage columns, and
+            # their order differs between fresh and migrated databases.
+            *_derived,
         ) = row
 
         # Parse complex fields
@@ -636,18 +695,7 @@ class RepresentationRegistry:
             model_version=model_version,
         )
 
-        pipeline_fingerprint_data = json.loads(pipeline_fingerprint_json)
-        # Convert enum strings back to proper enum types
-        pipeline_fingerprint_data["representation_kind"] = MediaRepresentationKind(
-            pipeline_fingerprint_data["representation_kind"]
-        )
-        pipeline_fingerprint_data["stage"] = PipelineStage(pipeline_fingerprint_data["stage"])
-        # Convert UUID string back to UUID (StrictModel does not coerce str -> UUID)
-        if pipeline_fingerprint_data.get("input_representation_id") is not None:
-            pipeline_fingerprint_data["input_representation_id"] = UUID(
-                pipeline_fingerprint_data["input_representation_id"]
-            )
-        pipeline_fingerprint = PipelineFingerprint(**pipeline_fingerprint_data)
+        pipeline_fingerprint = _fingerprint_from_json(pipeline_fingerprint_json)
 
         error = None
         if error_category is not None:

@@ -18,6 +18,8 @@ from katsi_core.media.contracts import (
 )
 from katsi_core.media.execution import PipelineExecutionOrchestrator
 from katsi_core.media.fingerprint import _stable_digest, build_pipeline_fingerprint
+from katsi_core.media.pipeline_registry import RegisteredPipeline
+from katsi_core.media.protocols import MediaPipelineProtocol
 from katsi_core.media.registry import RepresentationRegistry
 from katsi_core.media.video_pipeline import ScenePlan, build_scene_representations
 
@@ -40,6 +42,9 @@ class MediaReprocessor:
         self._cache = RepresentationCache(registry)
         self._config = config
         self._orchestrator = PipelineExecutionOrchestrator()
+        # Availability probes spawn a subprocess; adapters are stateless. Both
+        # are per-pipeline facts, not per-file ones, so resolve each once.
+        self._adapters: dict[str, MediaPipelineProtocol | None] = {}
 
     def process(
         self, file_path: Path, resource_version_id: UUID, content_hash: str
@@ -61,12 +66,11 @@ class MediaReprocessor:
         produced: dict[MediaRepresentationKind, list[DerivedRepresentation]] = {}
         duration_ms: int | None = None
         for pipeline in candidates:
-            available, _ = pipeline.is_available()
-            if not available:
+            adapter = self._adapter_for(pipeline)
+            if adapter is None:
                 counts.unavailable += 1
                 continue
             definition = pipeline.definition
-            adapter = pipeline.build_adapter()
             for kind in definition.representation_kinds_produced:
                 # Scene batches expand to many cited SceneLocators, so one cached
                 # representation is insufficient to represent the generation.
@@ -126,6 +130,14 @@ class MediaReprocessor:
         for representations in produced.values():
             self._representations.register_representation_batch(representations)
         return counts
+
+    def _adapter_for(self, pipeline: RegisteredPipeline) -> MediaPipelineProtocol | None:
+        """Resolve a pipeline's adapter once, or ``None`` when it is unavailable."""
+        pipeline_id = pipeline.definition.id
+        if pipeline_id not in self._adapters:
+            available, _ = pipeline.is_available()
+            self._adapters[pipeline_id] = pipeline.build_adapter() if available else None
+        return self._adapters[pipeline_id]
 
 
 def _executable_policy_digest(definition: MediaPipelineDefinition) -> str:
