@@ -133,3 +133,21 @@
 - [x] 14.4 Dogfood a cross-modal Claim that cites an image region, PDF page, audio interval, and video keyframe from the Katsi workspace.
 - [x] 14.5 Update README, configuration examples, optional dependency instructions, privacy documentation, MCP result contracts, and media troubleshooting guide.
 - [x] 14.6 Run `uv run pytest`, `uv run ruff check .`, and `uv run ruff format --check .` and resolve every failure before enabling each modality by default.
+
+## 15. CLI Media Ingestion
+
+- [x] 15.1 Route media candidates from `katsi index` through configured, available local media pipelines instead of the text ingest pipeline.
+- [x] 15.2 Report unavailable media separately and continue indexing the remaining files.
+- [x] 15.3 Add CLI-level regression tests proving image and video files never reach MarkItDown and supported media is recorded through the media path.
+- [x] 15.4 Document the media-indexing command and availability requirements.
+
+## 16. HEIC Support
+
+- [x] 16.1 Detect common HEIC ISO-BMFF brands as `image/heic` without trusting the extension.
+- [x] 16.2 Add an owner-configured, bounded macOS `sips` HEIC-to-PNG thumbnail pipeline.
+- [x] 16.3 Add detector and pipeline regression tests plus setup documentation.
+
+## 17. Status Reporting
+
+- [x] 17.1 Separate text-file and media-file counts in `katsi status`.
+- [x] 17.2 Stream content hashes during reconciliation so the configured media limit does not become a RAM limit.

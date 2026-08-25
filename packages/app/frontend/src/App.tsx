@@ -1,13 +1,28 @@
-import { useEffect, useState } from "react";
-import { BookOpen, ChatCircleText, Cloud, Gear, Moon, Sun } from "@phosphor-icons/react";
-import { Button, Card, ProgressBar, SourceChip } from "./components/primitives";
+import { useEffect, useState, type FormEvent } from "react";
+import { BookOpen, ChatCircleText, Gear } from "@phosphor-icons/react";
+import { Button, Card, SourceChip } from "./components/primitives";
 import { request } from "./api/client";
-import type { Status as ApiStatus } from "./api/types";
+import type { IndexResult, Status as ApiStatus } from "./api/types";
 import { useT } from "./i18n/useT";
 import { useUiStore } from "./stores/ui";
+import { GalaxyPanel } from "./webgl/GalaxyPanel";
+import { IngestPulse } from "./webgl/IngestPulse";
+import { KnowledgeGalaxy } from "./webgl/KnowledgeGalaxy";
+import { useGraphData } from "./webgl/useGraphData";
+import type { GraphNode } from "./api/types";
 
 type Route = "library" | "ask" | "status" | "dev";
 type Mode = "auto" | "local" | "cloud";
+type FolderStatus = "ready" | "indexing" | "indexed" | "error";
+
+interface LibraryFolder {
+  id: string;
+  name: string;
+  path: string;
+  status: FolderStatus;
+  detail?: string;
+  progress?: number;
+}
 
 const modeKeys: Record<Mode, "ask.auto" | "ask.local" | "ask.cloud"> = {
   auto: "ask.auto",
@@ -57,50 +72,66 @@ function Receipt({ mode, t }: { mode: Mode; t: ReturnType<typeof useT> }) {
 
 function Library({ t }: { t: ReturnType<typeof useT> }) {
   const [hasFolder, setHasFolder] = useState(true);
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [addingFolder, setAddingFolder] = useState(false);
+  const [folderPath, setFolderPath] = useState("");
+  const [folders, setFolders] = useState<LibraryFolder[]>(() => [
+    { id: "notes", name: t("folder.name"), path: t("folder.path"), status: "indexed", detail: t("folder.meta") },
+    { id: "research", name: t("folder.research"), path: t("folder.researchPath"), status: "ready" },
+    { id: "projects", name: t("folder.projects"), path: t("folder.projectsPath"), status: "indexing", detail: "118 / 412 / china-trip.md", progress: 29 },
+  ]);
+  const { data, error, loading } = useGraphData();
+  const addFolder = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const path = folderPath.trim();
+    if (!path) return;
+    const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+    setFolders((current) => [...current, { id: crypto.randomUUID(), name, path, status: "ready" }]);
+    setFolderPath("");
+    setAddingFolder(false);
+    setHasFolder(true);
+  };
+  const indexFolder = async (id: string) => {
+    const folder = folders.find((entry) => entry.id === id);
+    if (!folder || folder.status === "indexing") return;
+    setFolders((current) => current.map((entry) => entry.id === id ? { ...entry, status: "indexing", detail: t("library.indexing"), progress: 10 } : entry));
+    try {
+      const result = await request<IndexResult>("/api/index", { method: "POST", body: JSON.stringify({ path: folder.path }) });
+      setFolders((current) => current.map((entry) => entry.id === id ? { ...entry, status: result.error ? "error" : "indexed", detail: `${result.indexed} / ${result.total} ${t("library.indexed")}`, progress: 100 } : entry));
+    } catch (cause: unknown) {
+      setFolders((current) => current.map((entry) => entry.id === id ? { ...entry, status: "error", detail: (cause as Error).message, progress: undefined } : entry));
+    }
+  };
   return (
-    <section className="screen">
+    <section className="screen library-screen">
       <header className="screen-header">
         <h1 className="display screen-title">{t("library.title")}</h1>
-        <Button onClick={() => setHasFolder(true)}>{t("library.addFolder")}</Button>
+        <Button onClick={() => setAddingFolder(true)}>{t("library.addFolder")}</Button>
       </header>
+      {addingFolder && <form className="folder-form" onSubmit={addFolder}><label htmlFor="folder-path">{t("library.folderPath")}</label><div><input autoFocus id="folder-path" onChange={(event) => setFolderPath(event.target.value)} placeholder={t("library.folderPlaceholder")} value={folderPath} /><Button type="submit">{t("library.add")}</Button><Button onClick={() => setAddingFolder(false)} type="button" variant="ghost">{t("folder.cancel")}</Button></div></form>}
       {hasFolder ? (
-        <div className="folder-list">
-          <Card>
-            <div className="folder-row">
-              <div>
-                <p className="folder-name">{t("folder.name")}</p>
-                <p className="path">{t("folder.path")}</p>
+        <div className="library-workspace">
+          <div className="folder-list">
+            {folders.map((folder) => <Card key={folder.id}>
+              <div className="folder-row">
+                <div><p className="folder-name">{folder.name}</p><p className="path">{folder.path}</p></div>
+                {folder.status === "indexing" ? <Button disabled variant="ghost">{t("library.indexing")}</Button> : <Button onClick={() => indexFolder(folder.id)}>{t("library.index")}</Button>}
               </div>
-              <Button variant="ghost">•••</Button>
-            </div>
-            <p className="metadata"><span className="status-dot" />{t("folder.meta")}</p>
-          </Card>
-          <Card>
-            <div className="folder-row">
-              <div>
-                <p className="folder-name">{t("folder.research")}</p>
-                <p className="path">{t("folder.researchPath")}</p>
-              </div>
-              <Button>{t("library.index")}</Button>
-            </div>
-          </Card>
-          <Card>
-            <div className="folder-row">
-              <div>
-                <p className="folder-name">{t("folder.projects")}</p>
-                <p className="path">{t("folder.projectsPath")}</p>
-              </div>
-              <Button variant="ghost">{t("folder.cancel")}</Button>
-            </div>
-            <p className="metadata">118 / 412 / china-trip.md</p>
-            <ProgressBar value={29} />
-          </Card>
+              {folder.detail && <p className={`metadata ${folder.status === "error" ? "folder-error" : ""}`}><span className={folder.status === "error" ? "status-dot is-error" : "status-dot"} />{folder.detail}</p>}
+              {folder.status === "indexing" && <IngestPulse label={t("library.ingesting")} value={folder.progress ?? 10} />}
+            </Card>)}
+          </div>
+          <section className="galaxy-area" aria-label={t("library.graphTitle")}>
+            <div className="galaxy-header"><div><p className="eyebrow">{t("library.graphEyebrow")}</p><h2 className="display">{t("library.graphTitle")}</h2></div><p>{loading ? t("library.graphLoading") : error ? t("library.graphOffline") : t("library.graphReady")}</p></div>
+            <KnowledgeGalaxy data={data} loading={loading} onSelect={setSelectedNode} selectedId={selectedNode?.id} />
+            <GalaxyPanel data={data} emptyLabel={t("library.graphSelect")} node={selectedNode} relationshipLabel={t("library.relationships")} />
+          </section>
         </div>
       ) : (
         <div className="empty-state">
           <h2 className="display">{t("library.emptyTitle")}</h2>
           <p>{t("library.emptyBody")}</p>
-          <Button onClick={() => setHasFolder(true)}>{t("library.addFolder")}</Button>
+          <Button onClick={() => setAddingFolder(true)}>{t("library.addFolder")}</Button>
         </div>
       )}
     </section>

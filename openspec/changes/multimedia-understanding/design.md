@@ -280,6 +280,14 @@ When any sampling threshold changes, the system creates a new representation ver
 - **Treat sampling as implementation detail:** Simple but prevents owner-driven chunking strategy changes and creates the exact silent-reuse bug this decision avoids.
 - **Re-chunk on every representation access:** Guarantees current policy but defeats the performance and reproducibility goals of content-addressed caching.
 
+### 17. Keep the CLI dispatcher modality-aware
+
+`katsi index` remains the single recursive entry point. It detects each candidate before extraction: text-compatible files use the existing `IngestPipeline`; image, audio, and video files use the configured media registry only when its availability probe passes. No media file falls through to MarkItDown. An unavailable pipeline produces an explicit unavailable result while the remaining files continue indexing. The CLI does not invent media commands or enable optional semantic stages; it only invokes owner-configured local pipelines.
+
+### 18. Decode HEIC through an optional macOS adapter
+
+The detector recognizes ISO-BMFF HEIC brands as `image/heic` without trusting the file extension. A separate owner-configured `/usr/bin/sips` pipeline may render a bounded PNG thumbnail in the private blob store. Its fixed arguments only accept the executor's input and output placeholders; the original remains immutable. Non-macOS installs and unavailable `sips` retain a descriptor and report the thumbnail unavailable.
+
 ## Risks / Trade-offs
 
 - **[Media dependencies make installation large or fragile]** → Use optional modality extras, lazy adapter loading, availability probes, and text-only fallback.

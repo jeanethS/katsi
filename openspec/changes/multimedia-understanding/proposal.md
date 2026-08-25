@@ -8,6 +8,8 @@ Katsi currently reduces supported files to plain text, so images, screenshots, a
 - Produce local, content-hash-cached Derived Representations such as metadata, OCR, captions, transcripts, timestamped segments, scene boundaries, and sampled keyframes.
 - Add precise Evidence Locators for pages, regions, timestamps, scenes, and frames so agents can inspect the source behind a Claim.
 - Add modality-aware retrieval that searches textual and visual representations separately, fuses results at the resource level, and returns compact locator-backed evidence.
+- Route configured local media types through those pipelines from `katsi index`, reporting unavailable media without falling back to text extraction.
+- Add an optional macOS `sips` adapter for HEIC detection and private PNG thumbnails.
 - Support partial media-processing success and expose unavailable or failed representations without poisoning valid results.
 - Add owner-configured media pipeline definitions, resource budgets, privacy controls, and provenance fingerprints.
 - Allow governed creation and replacement of derived media artifacts while prohibiting destructive mutation of original media and agent-generated arbitrary processing commands.

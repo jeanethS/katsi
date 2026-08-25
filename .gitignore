@@ -13,3 +13,4 @@ katsi.toml
 packages/app/frontend/node_modules/
 packages/app/frontend/.vite/
 /*-spec.md
+*.tsbuildinfo

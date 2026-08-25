@@ -105,6 +105,15 @@ class TestSignatureDetection:
         assert descriptor.mime_type == "video/mp4"
         assert descriptor.family == MediaTypeFamily.VIDEO
 
+    def test_detects_heic_iso_bmff_container(self, tmp_path, detector):
+        data = b"\x00\x00\x00\x18ftypheic" + b"\x00" * 100
+        path = _write(tmp_path, "photo.heic", data)
+
+        descriptor = detector.detect_media(path, _content_hash(data))
+
+        assert descriptor.mime_type == "image/heic"
+        assert descriptor.family == MediaTypeFamily.IMAGE
+
     def test_unknown_content_reports_unknown_family_not_exception(self, tmp_path, detector):
         data = b"this is not any known media signature at all"
         path = _write(tmp_path, "mystery.bin", data)

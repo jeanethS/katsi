@@ -120,10 +120,13 @@ def _match_iso_bmff(prefix: bytes) -> _SignatureMatch:
     major_brand = prefix[8:12]
     audio_brands = {b"M4A ", b"M4B "}
     mov_brands = {b"qt  "}
+    heic_brands = {b"heic", b"heix", b"hevc", b"heim", b"heis", b"mif1", b"msf1"}
     if major_brand in audio_brands:
         return _SignatureMatch("audio/mp4", MediaTypeFamily.AUDIO, "mp4")
     if major_brand in mov_brands:
         return _SignatureMatch("video/quicktime", MediaTypeFamily.VIDEO, "mov")
+    if major_brand in heic_brands:
+        return _SignatureMatch("image/heic", MediaTypeFamily.IMAGE, "heic")
     return _SignatureMatch("video/mp4", MediaTypeFamily.VIDEO, "mp4")
 
 

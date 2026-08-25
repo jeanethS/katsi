@@ -11,6 +11,14 @@ def test_schema_init_idempotent(tmp_path):
     gs.init_schema()  # second call must not raise
 
 
+def test_read_only_graph_can_open_with_writer(tmp_path):
+    GraphStore(tmp_path / "graph")
+
+    reader = GraphStore(tmp_path / "graph", read_only=True)
+
+    assert reader.count_nodes() == {"entities": 0, "topics": 0}
+
+
 def test_upsert_and_get_file(tmp_path):
     gs = GraphStore(tmp_path / "graph")
     f = FileRecord(

@@ -11,6 +11,10 @@ The system SHALL identify configured image, audio, video, and scanned-document t
 - **WHEN** a file's inspected media type matches a configured supported image type
 - **THEN** the system records it as an image resource and selects applicable local image pipelines
 
+#### Scenario: HEIC image is detected on macOS
+- **WHEN** a HEIC ISO-BMFF brand is inspected
+- **THEN** the system identifies it as `image/heic` and, when an owner-configured local `sips` pipeline is available, may create a private PNG thumbnail without modifying the original
+
 #### Scenario: Extension disagrees with content
 - **WHEN** a file extension indicates an image but inspected content indicates another type
 - **THEN** the system records the mismatch and does not trust the extension as the processing authority
@@ -18,6 +22,17 @@ The system SHALL identify configured image, audio, video, and scanned-document t
 #### Scenario: Media type is unsupported
 - **WHEN** no configured pipeline accepts the inspected media type
 - **THEN** the system preserves file metadata and reports that semantic representations are unavailable
+
+### Requirement: CLI indexing dispatches supported media safely
+`katsi index PATH` SHALL detect configured media files and route them through the applicable available local media pipelines. It SHALL NOT pass image, audio, or video files to the text extractor. Files whose required media pipelines are unavailable SHALL be reported as unavailable without preventing the rest of the index run from completing.
+
+#### Scenario: Image folder is indexed
+- **WHEN** a user indexes a folder containing a supported image and its metadata pipeline is available
+- **THEN** the CLI records the media representation and reports it as indexed
+
+#### Scenario: Media pipeline is unavailable
+- **WHEN** a user indexes a supported media file but no required pipeline is available
+- **THEN** the CLI reports the file as unavailable and does not invoke the text extractor
 
 ### Requirement: Original media bytes remain immutable
 Multimedia understanding SHALL read original resource versions without modifying them. Derived Representations MUST be stored separately and MUST retain the exact source content hash.
@@ -166,4 +181,3 @@ The governed action catalog MAY create thumbnails, transcripts, proxy media, key
 #### Scenario: Agent requests in-place lossy conversion
 - **WHEN** a Change Set requests destructive transcoding of an original media file
 - **THEN** the system rejects the operation
-

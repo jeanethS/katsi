@@ -9,6 +9,8 @@ from uuid import uuid4
 import pytest
 
 from katsi_core.config import Settings, SQLiteSettings
+from katsi_core.ingest.pipeline import IngestPipeline
+from katsi_core.ingest.records import FileRecordStore
 from katsi_core.media.contracts import (
     DerivedRepresentation,
     MediaCoverage,
@@ -23,8 +25,6 @@ from katsi_core.media.contracts import (
     WholeResourceLocator,
 )
 from katsi_core.media.registry import RepresentationRegistry
-from katsi_core.ingest.pipeline import IngestPipeline
-from katsi_core.ingest.records import FileRecordStore
 from katsi_core.models import Extraction
 from katsi_core.store.graph import GraphStore
 from katsi_core.store.vectors import VectorStore

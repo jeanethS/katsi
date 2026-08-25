@@ -532,6 +532,34 @@ class WorkspaceRepository:
             ).fetchone()
         return row["content_hash"] if row else None
 
+    def current_resource_versions(self, workspace_id: WorkspaceId) -> dict[str, ResourceVersion]:
+        """Return current file paths mapped to their immutable source versions."""
+        versions: dict[str, ResourceVersion] = {}
+        for resource in self.list_current_resources(workspace_id):
+            if resource.current_path is None:
+                continue
+            content_hash = self.current_content_hash(resource.id)
+            if content_hash is None:
+                continue
+            with self._database.connection() as connection:
+                row = connection.execute(
+                    """
+                    SELECT id, byte_count, observed_at, source_event_id FROM resource_versions
+                    WHERE resource_id = ? AND content_hash = ?
+                    """,
+                    (str(resource.id), content_hash),
+                ).fetchone()
+            if row is not None:
+                versions[resource.current_path] = ResourceVersion(
+                    id=UUID(row["id"]),
+                    resource_id=resource.id,
+                    content_hash=content_hash,
+                    byte_count=row["byte_count"],
+                    observed_at=datetime.fromisoformat(row["observed_at"]),
+                    source_event_id=UUID(row["source_event_id"]),
+                )
+        return versions
+
     def list_events(
         self, workspace_id: WorkspaceId, *, after_sequence: int = 0, limit: int = 100
     ) -> list[WorkspaceEvent]:

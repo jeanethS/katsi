@@ -24,6 +24,33 @@ def test_status_endpoint_returns_frontend_contract() -> None:
     assert response.json() == expected
 
 
+def test_graph_endpoint_returns_frontend_contract() -> None:
+    expected = {
+        "nodes": [{"id": "file:one", "label": "one.md", "type": "file"}],
+        "edges": [],
+    }
+
+    response = TestClient(create_app(graph_provider=lambda: expected)).get("/api/graph")
+
+    assert response.status_code == 200
+    assert response.json() == expected
+
+
+def test_index_endpoint_passes_selected_folder_to_provider() -> None:
+    response = TestClient(
+        create_app(index_provider=lambda path: {"indexed": 2, "skipped": 1, "error": 0, "total": 3})
+    ).post("/api/index", json={"path": "/tmp/notes"})
+
+    assert response.status_code == 200
+    assert response.json() == {"indexed": 2, "skipped": 1, "error": 0, "total": 3}
+
+
+def test_index_endpoint_requires_a_folder_path() -> None:
+    response = TestClient(create_app(index_provider=lambda _path: {})).post("/api/index", json={})
+
+    assert response.status_code == 400
+
+
 def test_get_status_reads_local_services(tmp_path, monkeypatch) -> None:
     settings = Settings(store={"data_dir": tmp_path})
     FileRecordStore(tmp_path / "records").put(

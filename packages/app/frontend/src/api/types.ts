@@ -1,5 +1,36 @@
 export type SynthesisMode = "auto" | "local" | "cloud";
 
+export type GraphNodeType = "file" | "entity" | "topic";
+export type GraphEdgeType = "mentions" | "about" | "references" | "duplicate";
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: GraphNodeType;
+  path?: string;
+  summary?: string;
+  kind?: string;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: GraphEdgeType;
+  weight: number;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface IndexResult {
+  indexed: number;
+  skipped: number;
+  error: number;
+  total: number;
+}
+
 export interface Folder {
   id: string;
   path: string;

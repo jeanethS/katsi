@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -56,5 +56,31 @@ describe("Status screen", () => {
     expect(await screen.findByText("Ollama is not reachable")).toBeInTheDocument();
     expect(document.querySelector(".status-dot.is-error")).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Library screen", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    window.location.hash = "";
+  });
+
+  it("adds a folder and indexes it through the backend", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ nodes: [], edges: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ indexed: 2, skipped: 0, error: 0, total: 2 }) }));
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Add folder" }));
+    fireEvent.change(screen.getByLabelText("Folder path"), { target: { value: "/tmp/project-notes" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    const folder = screen.getByText("project-notes").closest("section");
+    expect(folder).not.toBeNull();
+    fireEvent.click(within(folder!).getByRole("button", { name: "Index now" }));
+
+    expect(await screen.findByText("2 / 2 files indexed")).toBeInTheDocument();
+    expect(fetch).toHaveBeenLastCalledWith("/api/index", expect.objectContaining({ method: "POST" }));
   });
 });

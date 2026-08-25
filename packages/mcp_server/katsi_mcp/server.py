@@ -54,7 +54,7 @@ def _services():
     _state["settings"] = s
     _state["embed"] = EmbedClient(s)
     _state["llm"] = LLMClient(s)
-    _state["graph"] = GraphStore(s.store.data_dir / s.store.kuzu_db)
+    _state["graph"] = GraphStore(s.store.data_dir / s.store.kuzu_db, read_only=True)
     _state["vectors"] = VectorStore(s.store.data_dir / "vectors", s.store.lancedb_table)
     _state["records"] = FileRecordStore(s.store.data_dir / "records")
     database = WorkspaceSQLite(s.store.data_dir / s.workspace.sqlite.filename, s.workspace.sqlite)
@@ -122,7 +122,24 @@ def index_status() -> dict:
     """Counts by status, last index time, total chunks."""
     svc = _services()
     counts = svc["records"].count_by_status()
-    total_files = sum(counts.values())
+    text_files = sum(counts.values())
+    database = svc.get("workspace_database")
+    media_counts = {}
+    if database is not None:
+        RepresentationRegistry(database)
+        with database.connection() as connection:
+            media_counts = {
+                row["status"]: row["count"]
+                for row in connection.execute(
+                    """
+                    SELECT status, COUNT(DISTINCT resource_version_id) AS count
+                    FROM representations
+                    WHERE kind = 'media_descriptor' AND is_current = 1
+                    GROUP BY status
+                    """
+                ).fetchall()
+            }
+    media_files = sum(media_counts.values())
     last_indexed = None
     for rec in svc["records"].list_all():
         if rec.last_indexed_at is not None and (
@@ -137,7 +154,10 @@ def index_status() -> dict:
     diagnostics = _projection_diagnostics(svc)
     return {
         "counts_by_status": counts,
-        "total_files": total_files,
+        "media_counts_by_status": media_counts,
+        "text_files": text_files,
+        "media_files": media_files,
+        "total_files": text_files + media_files,
         "total_chunks": total_chunks,
         "last_indexed_at": last_indexed.isoformat() if last_indexed else None,
         "projection_diagnostics": diagnostics,

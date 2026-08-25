@@ -24,11 +24,12 @@ def _unwrap(val):
 class GraphStore:
     """Kùzu-backed graph store for files, entities, topics, and relationships."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, *, read_only: bool = False) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = kuzu.Database(str(db_path))
+        self._db = kuzu.Database(str(db_path), read_only=read_only)
         self._conn = kuzu.Connection(self._db)
-        self.init_schema()
+        if not read_only:
+            self.init_schema()
 
     def init_schema(self) -> None:
         """Run the DDL idempotently (IF NOT EXISTS)."""
