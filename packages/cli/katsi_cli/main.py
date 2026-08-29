@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fnmatch
 import json
 import logging
 import os
@@ -22,6 +21,7 @@ from katsi_core.clients.llm import LLMClient
 from katsi_core.config import get_settings
 from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
+from katsi_core.ingest.walk import matches_any, walk_files
 from katsi_core.media.registry import RepresentationRegistry
 from katsi_core.media.reprocess import MediaReprocessor, ReprocessCounts
 from katsi_core.retrieve.context import build_context
@@ -147,41 +147,10 @@ def _services() -> dict:
     return _state
 
 
-def _matches_any(path_str: str, patterns: list[str]) -> bool:
-    p = path_str.replace("\\", "/")
-    for pat in patterns:
-        if fnmatch.fnmatch(p, pat):
-            return True
-        # also check basename
-        base = p.rsplit("/", 1)[-1]
-        if fnmatch.fnmatch(base, pat):
-            return True
-    return False
-
-
-def _walk_files(root: Path, include: list[str], exclude: list[str]) -> list[Path]:
-    """Yield files under root matching include globs and NOT matching exclude globs."""
-    out: list[Path] = []
-    if not root.exists():
-        return out
-    if root.is_file():
-        rp = str(root)
-        if _matches_any(rp, include) and not _matches_any(rp, exclude):
-            out.append(root)
-        return out
-    for p in root.rglob("*"):
-        if p.is_dir():
-            continue
-        rp = str(p)
-        if _matches_any(rp, include) and not _matches_any(rp, exclude):
-            out.append(p)
-    return out
-
-
 def _index_tree(svc: dict, path: Path) -> dict[str, int]:
     """Index matching files, preserving the pipeline's content-hash cache."""
     settings = svc["settings"]
-    files = _walk_files(path, settings.ingest.include_globs, settings.ingest.exclude_globs)
+    files = walk_files(path, settings.ingest.include_globs, settings.ingest.exclude_globs)
     counts = {"indexed": 0, "skipped": 0, "error": 0, "stale": 0}
     pipeline = svc["pipeline"]
     with Progress(
@@ -293,7 +262,7 @@ def index(
     if reprocess_media:
         _print_index_summary(dict(vars(_reprocess_media(svc, path))))
         return
-    files = _walk_files(path, s.ingest.include_globs, s.ingest.exclude_globs)
+    files = walk_files(path, s.ingest.include_globs, s.ingest.exclude_globs)
     console.print(f"[bold]indexing[/] {len(files)} file(s) under {path}")
     _print_index_summary(_index_tree(svc, path))
 
@@ -353,8 +322,8 @@ def start_cmd(
             if (
                 candidate is not None
                 and candidate.is_file()
-                and _matches_any(str(candidate), svc["settings"].ingest.include_globs)
-                and not _matches_any(str(candidate), svc["settings"].ingest.exclude_globs)
+                and matches_any(str(candidate), svc["settings"].ingest.include_globs)
+                and not matches_any(str(candidate), svc["settings"].ingest.exclude_globs)
             ):
                 svc["pipeline"].index_file(candidate)
 
@@ -1074,11 +1043,10 @@ def list_identities_cmd() -> None:
     database = svc["workspace_database"]
 
     try:
-        rows = (
-            database.connection()
-            .execute("SELECT * FROM agent_identities ORDER BY created_at")
-            .fetchall()
-        )
+        with database.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM agent_identities ORDER BY created_at"
+            ).fetchall()
 
         if not rows:
             console.print("[yellow]no identities found[/]")
@@ -1217,7 +1185,8 @@ def inspect_capabilities_cmd(
             params.append(str(workspace_id))
 
         query += " ORDER BY issued_at"
-        rows = database.connection().execute(query, params).fetchall()
+        with database.connection() as conn:
+            rows = conn.execute(query, params).fetchall()
 
         if not rows:
             console.print("[yellow]no active capabilities found[/]")

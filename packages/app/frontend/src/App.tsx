@@ -80,7 +80,7 @@ function Library({ t }: { t: ReturnType<typeof useT> }) {
     { id: "research", name: t("folder.research"), path: t("folder.researchPath"), status: "ready" },
     { id: "projects", name: t("folder.projects"), path: t("folder.projectsPath"), status: "indexing", detail: "118 / 412 / china-trip.md", progress: 29 },
   ]);
-  const { data, error, loading } = useGraphData();
+  const { data, error, loading, status: graphStatus } = useGraphData();
   const addFolder = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const path = folderPath.trim();
@@ -122,7 +122,7 @@ function Library({ t }: { t: ReturnType<typeof useT> }) {
             </Card>)}
           </div>
           <section className="galaxy-area" aria-label={t("library.graphTitle")}>
-            <div className="galaxy-header"><div><p className="eyebrow">{t("library.graphEyebrow")}</p><h2 className="display">{t("library.graphTitle")}</h2></div><p>{loading ? t("library.graphLoading") : error ? t("library.graphOffline") : t("library.graphReady")}</p></div>
+            <div className="galaxy-header"><div><p className="eyebrow">{t("library.graphEyebrow")}</p><h2 className="display">{t("library.graphTitle")}</h2></div><p>{loading ? t("library.graphLoading") : graphStatus === "unavailable" || error ? t("library.graphOffline") : graphStatus === "empty" ? t("library.graphEmpty") : t("library.graphReady")}</p></div>
             <KnowledgeGalaxy data={data} loading={loading} onSelect={setSelectedNode} selectedId={selectedNode?.id} />
             <GalaxyPanel data={data} emptyLabel={t("library.graphSelect")} node={selectedNode} relationshipLabel={t("library.relationships")} />
           </section>

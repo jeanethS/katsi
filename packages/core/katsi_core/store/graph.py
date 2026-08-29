@@ -581,6 +581,131 @@ class GraphStore:
             {"id": str(resource_version_id)},
         )
 
+    def export_graph(
+        self, *, file_limit: int = 100, entity_limit: int = 50, topic_limit: int = 50
+    ) -> dict[str, list[dict]]:
+        """Return a bounded node/edge view of the graph for visualization surfaces.
+
+        Edges are emitted only between nodes that survived the limits, so the
+        payload is self-consistent without the caller filtering it again.
+        """
+        nodes: list[dict] = []
+        edges: list[dict] = []
+        file_ids: set[str] = set()
+        entity_names: set[str] = set()
+        topic_names: set[str] = set()
+
+        files = self._conn.execute(
+            "MATCH (f:File) RETURN f.id, f.name, f.path, f.summary LIMIT $limit",
+            {"limit": file_limit},
+        )
+        while files.has_next():
+            row = files.get_next()
+            file_id = str(_unwrap(row[0]))
+            file_ids.add(file_id)
+            nodes.append(
+                {
+                    "id": file_id,
+                    "label": str(_unwrap(row[1])) or file_id,
+                    "type": "file",
+                    "path": str(_unwrap(row[2])),
+                    "summary": str(_unwrap(row[3])),
+                }
+            )
+
+        entities = self._conn.execute(
+            "MATCH (e:Entity) RETURN e.name, e.kind LIMIT $limit", {"limit": entity_limit}
+        )
+        while entities.has_next():
+            row = entities.get_next()
+            name = str(_unwrap(row[0]))
+            entity_names.add(name)
+            nodes.append(
+                {
+                    "id": f"entity:{name}",
+                    "label": name,
+                    "type": "entity",
+                    "kind": str(_unwrap(row[1])),
+                }
+            )
+
+        topics = self._conn.execute(
+            "MATCH (t:Topic) RETURN t.name LIMIT $limit", {"limit": topic_limit}
+        )
+        while topics.has_next():
+            row = topics.get_next()
+            name = str(_unwrap(row[0]))
+            topic_names.add(name)
+            nodes.append({"id": f"topic:{name}", "label": name, "type": "topic"})
+
+        mentions = self._conn.execute(
+            "MATCH (f:File)-[m:MENTIONS]->(e:Entity) RETURN f.id, e.name, m.weight"
+        )
+        while mentions.has_next():
+            row = mentions.get_next()
+            file_id = str(_unwrap(row[0]))
+            name = str(_unwrap(row[1]))
+            if file_id in file_ids and name in entity_names:
+                edges.append(
+                    {
+                        "source": file_id,
+                        "target": f"entity:{name}",
+                        "type": "mentions",
+                        "weight": float(_unwrap(row[2])),
+                    }
+                )
+
+        about = self._conn.execute(
+            "MATCH (f:File)-[a:ABOUT]->(t:Topic) RETURN f.id, t.name, a.weight"
+        )
+        while about.has_next():
+            row = about.get_next()
+            file_id = str(_unwrap(row[0]))
+            name = str(_unwrap(row[1]))
+            if file_id in file_ids and name in topic_names:
+                edges.append(
+                    {
+                        "source": file_id,
+                        "target": f"topic:{name}",
+                        "type": "about",
+                        "weight": float(_unwrap(row[2])),
+                    }
+                )
+
+        references = self._conn.execute("MATCH (f:File)-[:REFERENCES]->(o:File) RETURN f.id, o.id")
+        while references.has_next():
+            row = references.get_next()
+            source_id = str(_unwrap(row[0]))
+            target_id = str(_unwrap(row[1]))
+            if source_id in file_ids and target_id in file_ids:
+                edges.append(
+                    {
+                        "source": source_id,
+                        "target": target_id,
+                        "type": "references",
+                        "weight": 1.0,
+                    }
+                )
+
+        duplicates = self._conn.execute(
+            "MATCH (f:File)-[d:DUPLICATE_OF]->(o:File) RETURN f.id, o.id, d.similarity"
+        )
+        while duplicates.has_next():
+            row = duplicates.get_next()
+            source_id = str(_unwrap(row[0]))
+            target_id = str(_unwrap(row[1]))
+            if source_id in file_ids and target_id in file_ids:
+                edges.append(
+                    {
+                        "source": source_id,
+                        "target": target_id,
+                        "type": "duplicate",
+                        "weight": float(_unwrap(row[2])),
+                    }
+                )
+
+        return {"nodes": nodes, "edges": edges}
+
     def count_nodes(self) -> dict[str, int]:
         """Return entity and topic counts for status surfaces."""
         counts: dict[str, int] = {}

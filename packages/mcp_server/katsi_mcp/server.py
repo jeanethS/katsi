@@ -126,19 +126,13 @@ def index_status() -> dict:
     database = svc.get("workspace_database")
     media_counts = {}
     if database is not None:
-        RepresentationRegistry(database)
-        with database.connection() as connection:
-            media_counts = {
-                row["status"]: row["count"]
-                for row in connection.execute(
-                    """
-                    SELECT status, COUNT(DISTINCT resource_version_id) AS count
-                    FROM representations
-                    WHERE kind = 'media_descriptor' AND is_current = 1
-                    GROUP BY status
-                    """
-                ).fetchall()
-            }
+        # The registry owns the representations table, so ask it rather than
+        # querying the schema behind its back. Constructing one also creates
+        # the table when a caller injected a database that predates it.
+        registry = svc.get("representation_registry") or RepresentationRegistry(database)
+        media_counts = registry.count_current_resources_by_status(
+            MediaRepresentationKind.MEDIA_DESCRIPTOR
+        )
     media_files = sum(media_counts.values())
     last_indexed = None
     for rec in svc["records"].list_all():
@@ -451,11 +445,10 @@ def open_workspace(root_path: str) -> dict:
 
     # Try to find existing workspace by root
     database = svc["workspace_database"]
-    existing = (
-        database.connection()
-        .execute("SELECT * FROM workspaces WHERE root_path = ?", (str(root),))
-        .fetchone()
-    )
+    with database.connection() as conn:
+        existing = conn.execute(
+            "SELECT * FROM workspaces WHERE root_path = ?", (str(root),)
+        ).fetchone()
 
     if existing:
         from katsi_core.workspace.contracts import Workspace

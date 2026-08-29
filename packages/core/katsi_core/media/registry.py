@@ -302,6 +302,20 @@ class RepresentationRegistry:
             ),
         )
 
+    def count_current_resources_by_status(self, kind: MediaRepresentationKind) -> dict[str, int]:
+        """Count distinct current resource versions of ``kind``, grouped by status."""
+        with self._database.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT status, COUNT(DISTINCT resource_version_id) AS count
+                FROM representations
+                WHERE kind = ? AND is_current = 1
+                GROUP BY status
+                """,
+                (kind.value,),
+            ).fetchall()
+        return {row["status"]: row["count"] for row in rows}
+
     def find_by_fingerprint_digest(
         self,
         kind: MediaRepresentationKind,

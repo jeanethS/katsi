@@ -19,9 +19,13 @@ export interface GraphEdge {
   weight: number;
 }
 
+/** "empty" is a real but unindexed library; "unavailable" means the graph could not be read. */
+export type GraphStatus = "ready" | "empty" | "unavailable";
+
 export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  status?: GraphStatus;
 }
 
 export interface IndexResult {

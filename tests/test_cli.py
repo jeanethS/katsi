@@ -169,6 +169,15 @@ def test_ask_prints_bundle_and_relationships(cli_runner, tmp_path):
     assert "score" in res2.output.lower()
 
 
+def test_list_identities_reads_through_the_connection_context_manager(cli_runner):
+    """Regression: callers used database.connection().execute(), calling execute on
+    the _GeneratorContextManager itself instead of the yielded connection."""
+    runner, cli_main, _, _, _, _ = cli_runner
+    res = runner.invoke(cli_main.app, ["list-identities"])
+    assert res.exit_code == 0, res.output
+    assert "_GeneratorContextManager" not in res.output
+
+
 def test_index_missing_path_errors(cli_runner, tmp_path):
     runner, cli_main, _, _, _, _ = cli_runner
     nonsense = tmp_path / "does_not_exist"

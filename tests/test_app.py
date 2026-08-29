@@ -1,7 +1,7 @@
 import json
 from io import BytesIO
 
-from katsi_app.app import create_app, get_status
+from katsi_app.app import create_app, get_graph, get_status
 from starlette.testclient import TestClient
 
 from katsi_core.config import Settings
@@ -49,6 +49,55 @@ def test_index_endpoint_requires_a_folder_path() -> None:
     response = TestClient(create_app(index_provider=lambda _path: {})).post("/api/index", json={})
 
     assert response.status_code == 400
+
+
+def test_get_graph_reports_empty_without_inventing_nodes(tmp_path) -> None:
+    settings = Settings(store={"data_dir": tmp_path})
+
+    payload = get_graph(settings)
+
+    assert payload == {"nodes": [], "edges": [], "status": "empty"}
+
+
+def test_get_graph_reports_unavailable_when_the_store_fails(tmp_path, monkeypatch) -> None:
+    settings = Settings(store={"data_dir": tmp_path})
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("kuzu is locked")
+
+    monkeypatch.setattr("katsi_app.app.GraphStore", fail)
+
+    payload = get_graph(settings)
+
+    assert payload == {"nodes": [], "edges": [], "status": "unavailable"}
+
+
+def test_get_graph_returns_indexed_nodes(tmp_path) -> None:
+    settings = Settings(store={"data_dir": tmp_path})
+    graph = GraphStore(tmp_path / settings.store.kuzu_db)
+    graph.upsert_file(
+        FileRecord(
+            id="one",
+            path="one.md",
+            name="one.md",
+            ext=".md",
+            mime="text/markdown",
+            size_bytes=1,
+            mtime=1,
+            content_hash="hash",
+            summary="A note",
+        )
+    )
+    graph.add_about("one", ["AI"])
+    graph.close()
+
+    payload = get_graph(settings)
+
+    assert payload["status"] == "ready"
+    assert {node["id"] for node in payload["nodes"]} == {"one", "topic:AI"}
+    assert payload["edges"] == [
+        {"source": "one", "target": "topic:AI", "type": "about", "weight": 1.0}
+    ]
 
 
 def test_get_status_reads_local_services(tmp_path, monkeypatch) -> None:

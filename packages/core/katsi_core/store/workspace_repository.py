@@ -534,31 +534,36 @@ class WorkspaceRepository:
 
     def current_resource_versions(self, workspace_id: WorkspaceId) -> dict[str, ResourceVersion]:
         """Return current file paths mapped to their immutable source versions."""
-        versions: dict[str, ResourceVersion] = {}
-        for resource in self.list_current_resources(workspace_id):
-            if resource.current_path is None:
-                continue
-            content_hash = self.current_content_hash(resource.id)
-            if content_hash is None:
-                continue
-            with self._database.connection() as connection:
-                row = connection.execute(
-                    """
-                    SELECT id, byte_count, observed_at, source_event_id FROM resource_versions
-                    WHERE resource_id = ? AND content_hash = ?
-                    """,
-                    (str(resource.id), content_hash),
-                ).fetchone()
-            if row is not None:
-                versions[resource.current_path] = ResourceVersion(
-                    id=UUID(row["id"]),
-                    resource_id=resource.id,
-                    content_hash=content_hash,
-                    byte_count=row["byte_count"],
-                    observed_at=datetime.fromisoformat(row["observed_at"]),
-                    source_event_id=UUID(row["source_event_id"]),
-                )
-        return versions
+        # One connection and one query for the whole workspace: the previous
+        # per-resource lookups opened a connection per tracked file.
+        with self._database.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT r.current_path, v.id, v.resource_id, v.content_hash,
+                       v.byte_count, v.observed_at, v.source_event_id
+                FROM resources r
+                JOIN resource_versions v ON v.resource_id = r.id
+                WHERE r.workspace_id = ?
+                  AND r.status = 'current'
+                  AND r.current_path IS NOT NULL
+                  AND v.observed_at = (
+                      SELECT MAX(observed_at) FROM resource_versions
+                      WHERE resource_id = r.id
+                  )
+                """,
+                (str(workspace_id),),
+            ).fetchall()
+        return {
+            row["current_path"]: ResourceVersion(
+                id=UUID(row["id"]),
+                resource_id=UUID(row["resource_id"]),
+                content_hash=row["content_hash"],
+                byte_count=row["byte_count"],
+                observed_at=datetime.fromisoformat(row["observed_at"]),
+                source_event_id=UUID(row["source_event_id"]),
+            )
+            for row in rows
+        }
 
     def list_events(
         self, workspace_id: WorkspaceId, *, after_sequence: int = 0, limit: int = 100
