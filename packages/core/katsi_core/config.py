@@ -25,6 +25,7 @@ class OllamaSettings(BaseModel):
     host: str = "http://localhost:11434"
     embed_model: str = "bge-m3"
     llm_model: str = "qwen2.5:7b"
+    caption_model: str = "qwen2.5vl:7b"
     num_ctx: int = 8_192
     timeout: float = 120.0
 

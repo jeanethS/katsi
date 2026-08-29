@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import os
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from pathlib import Path as PathLib
 from threading import Event
@@ -22,8 +25,10 @@ from katsi_core.config import get_settings
 from katsi_core.ingest.pipeline import IngestPipeline
 from katsi_core.ingest.records import FileRecordStore
 from katsi_core.ingest.walk import matches_any, walk_files
+from katsi_core.media.contracts import MediaRepresentationKind
 from katsi_core.media.registry import RepresentationRegistry
-from katsi_core.media.reprocess import MediaReprocessor, ReprocessCounts
+from katsi_core.media.reprocess import MediaReprocessor, ReprocessCounts, _duration_ms
+from katsi_core.media.vision_caption import VisionCaptioner, caption_video
 from katsi_core.retrieve.context import build_context
 from katsi_core.retrieve.search import search
 from katsi_core.store.graph import GraphStore
@@ -242,6 +247,143 @@ def _reprocess_media(svc: dict, path: Path) -> ReprocessCounts:
                     setattr(total, name, getattr(total, name) + getattr(outcome, name))
                 progress.update(task, advance=1)
     return total
+
+
+def _ffmpeg_path(settings) -> str:
+    """The ffmpeg the owner already configured for video pipelines, else PATH."""
+    for definition in settings.media.pipelines:
+        executable = definition.executable_path or ""
+        if executable.endswith("ffmpeg"):
+            return executable
+    return "ffmpeg"
+
+
+@dataclass
+class _CaptionCounts:
+    videos: int = 0
+    captions: int = 0
+    skipped: int = 0
+    failed: int = 0
+
+
+def _video_resources(svc: dict, requested: Path) -> list[tuple]:
+    """Current tracked video resources under PATH: (resource_version_id, path)."""
+    with svc["workspace_database"].connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT rv.id, rv.content_hash, r.current_path, w.root_path
+            FROM resource_versions AS rv
+            JOIN resources AS r ON r.id = rv.resource_id
+            JOIN workspaces AS w ON w.id = r.workspace_id
+            WHERE r.status = 'current'
+              AND rv.observed_at = (
+                  SELECT MAX(observed_at) FROM resource_versions WHERE resource_id = r.id
+              )
+            """
+        ).fetchall()
+    resources = []
+    for row in rows:
+        file_path = (Path(row["root_path"]) / row["current_path"]).resolve()
+        mime, _ = mimetypes.guess_type(file_path.name)
+        if (
+            file_path.is_relative_to(requested)
+            and file_path.is_file()
+            and mime is not None
+            and mime.startswith("video/")
+        ):
+            resources.append((row, file_path))
+    return resources
+
+
+def _caption_videos(svc: dict, path: Path, max_frames: int) -> _CaptionCounts:
+    """Caption keyframes of tracked videos under PATH and project them to search.
+
+    Captioning is first-party (a local vision model), so it runs outside the
+    network-denied media-pipeline sandbox -- unlike scene detection or OCR.
+    """
+    s = svc["settings"]
+    registry = svc["representation_registry"]
+    vectors = svc["vectors"]
+    embed = svc["embed"]
+    captioner = VisionCaptioner(
+        model=s.ollama.caption_model, host=s.ollama.host, timeout=s.ollama.timeout
+    )
+    ffmpeg = _ffmpeg_path(s)
+    resources = _video_resources(svc, path.resolve())
+    counts = _CaptionCounts()
+    console.print(f"[bold]captioning[/] {len(resources)} tracked video(s) under {path}")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("[cyan]captioning", total=len(resources) or None)
+        for row, file_path in resources:
+            progress.update(task, description=str(file_path.name)[:40])
+            descriptor = registry.get_current_representation(
+                UUID(row["id"]), MediaRepresentationKind.MEDIA_DESCRIPTOR
+            )
+            duration_ms = _duration_ms(descriptor) if descriptor is not None else None
+            if not duration_ms:
+                # No metadata yet: run `index --reprocess-media` first.
+                counts.skipped += 1
+                progress.update(task, advance=1)
+                continue
+            try:
+                with tempfile.TemporaryDirectory(prefix="katsi_caption_") as tmp:
+                    reps = caption_video(
+                        file_path,
+                        resource_version_id=UUID(row["id"]),
+                        content_hash=row["content_hash"],
+                        duration_ms=duration_ms,
+                        ffmpeg_path=ffmpeg,
+                        captioner=captioner,
+                        working_dir=Path(tmp),
+                        settings=s.media.media_sampling,
+                        max_frames=max_frames,
+                    )
+                if not reps:
+                    counts.failed += 1
+                    progress.update(task, advance=1)
+                    continue
+                registry.register_representation_batch(reps)
+                embeddings = embed.embed([rep.textual_payload or "" for rep in reps])
+                vectors.upsert_media_text(reps, embeddings)
+                counts.videos += 1
+                counts.captions += len(reps)
+            except Exception as exc:
+                logger.warning("caption %s failed: %r", file_path, exc)
+                counts.failed += 1
+            progress.update(task, advance=1)
+    return counts
+
+
+@app.command()
+def caption(
+    path: Path = typer.Argument(..., help="File or directory of tracked videos."),  # noqa: B008
+    max_frames: int = typer.Option(
+        3, "--max-frames", help="Keyframes to caption per video (cost is ~1 model call each)."
+    ),
+) -> None:
+    """Caption video keyframes with a local vision model and index them for search.
+
+    Videos must already be tracked and have metadata (run `index` then
+    `index --reprocess-media` first). Captions become semantically searchable
+    through the media-text projection.
+    """
+    svc = _services()
+    if not path.exists():
+        console.print(f"[red]error:[/] path not found: {path}")
+        raise typer.Exit(code=1) from None
+    counts = _caption_videos(svc, path, max_frames)
+    table = Table(title="Caption summary")
+    table.add_column("metric")
+    table.add_column("count", justify="right")
+    for name, value in vars(counts).items():
+        table.add_row(name, str(value))
+    console.print(table)
 
 
 @app.command()
@@ -1044,9 +1186,7 @@ def list_identities_cmd() -> None:
 
     try:
         with database.connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM agent_identities ORDER BY created_at"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM agent_identities ORDER BY created_at").fetchall()
 
         if not rows:
             console.print("[yellow]no identities found[/]")

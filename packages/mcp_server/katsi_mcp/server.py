@@ -175,6 +175,64 @@ def search_files(query: str, k: int = 8) -> list[FileHit]:
     )
 
 
+def _resource_path(svc: dict, resource_version_id: str) -> str | None:
+    """Resolve a media resource version back to its current on-disk path."""
+    with svc["workspace_database"].connection() as conn:
+        row = conn.execute(
+            """
+            SELECT r.current_path, w.root_path
+            FROM resource_versions AS rv
+            JOIN resources AS r ON r.id = rv.resource_id
+            JOIN workspaces AS w ON w.id = r.workspace_id
+            WHERE rv.id = ?
+            """,
+            (resource_version_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return str(Path(row["root_path"]) / row["current_path"])
+
+
+@mcp.tool()
+def search_media(query: str, k: int = 8) -> list[dict]:
+    """Semantic search over media-derived text (video/image captions, OCR, transcripts).
+
+    Complements search_files (which searches document text) by ranking the media
+    resources whose captions/OCR/transcripts match the query. Each hit cites the
+    source path, the matched text, and time/frame locators for building an edit.
+    """
+    from katsi_core.retrieve.media import (
+        fuse_media_results,
+        media_search_hits,
+    )
+    from katsi_core.retrieve.media import search_media as route
+
+    svc = _services()
+    registry = svc["representation_registry"]
+    query_vector = svc["embed"].embed([query])[0]
+    routed = route(svc["vectors"], text_vector=query_vector, k=k)
+    # media_search_hits needs the authoritative representations to cite; gather
+    # the ones the routed signals point at.
+    representations = {}
+    for hits in routed.values():
+        for hit in hits:
+            representation = registry.get_representation(hit.representation_id)
+            if representation is not None:
+                representations[representation.id] = representation
+    return [
+        {
+            "path": _resource_path(svc, str(hit.resource_version_id)),
+            "resource_version_id": str(hit.resource_version_id),
+            "representation_id": str(hit.representation_id),
+            "kind": hit.representation_kind,
+            "preview": hit.preview,
+            "locators": list(hit.locators),
+            "score": hit.score,
+        }
+        for hit in media_search_hits(fuse_media_results(routed), representations, k=k)
+    ]
+
+
 @mcp.tool()
 def get_context(query: str, max_tokens: int = 3000) -> ContextBundle:
     """PRIMARY TOOL. Curated, budget-capped context for the client to answer over:
