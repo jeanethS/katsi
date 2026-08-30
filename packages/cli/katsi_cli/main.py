@@ -295,11 +295,15 @@ def _video_resources(svc: dict, requested: Path) -> list[tuple]:
     return resources
 
 
-def _caption_videos(svc: dict, path: Path, max_frames: int) -> _CaptionCounts:
+def _caption_videos(svc: dict, path: Path, max_frames: int, force: bool = False) -> _CaptionCounts:
     """Caption keyframes of tracked videos under PATH and project them to search.
 
     Captioning is first-party (a local vision model), so it runs outside the
     network-denied media-pipeline sandbox -- unlike scene detection or OCR.
+
+    Videos that already carry a current caption are skipped unless *force* is
+    set, so an interrupted run resumes at the remaining clips instead of paying
+    the whole model cost again.
     """
     s = svc["settings"]
     registry = svc["representation_registry"]
@@ -328,6 +332,16 @@ def _caption_videos(svc: dict, path: Path, max_frames: int) -> _CaptionCounts:
             duration_ms = _duration_ms(descriptor) if descriptor is not None else None
             if not duration_ms:
                 # No metadata yet: run `index --reprocess-media` first.
+                counts.skipped += 1
+                progress.update(task, advance=1)
+                continue
+            if (
+                not force
+                and registry.get_current_representation(
+                    UUID(row["id"]), MediaRepresentationKind.IMAGE_CAPTION
+                )
+                is not None
+            ):
                 counts.skipped += 1
                 progress.update(task, advance=1)
                 continue
@@ -366,18 +380,22 @@ def caption(
     max_frames: int = typer.Option(
         3, "--max-frames", help="Keyframes to caption per video (cost is ~1 model call each)."
     ),
+    force: bool = typer.Option(
+        False, "--force", help="Re-caption videos that already have a current caption."
+    ),
 ) -> None:
     """Caption video keyframes with a local vision model and index them for search.
 
     Videos must already be tracked and have metadata (run `index` then
     `index --reprocess-media` first). Captions become semantically searchable
-    through the media-text projection.
+    through the media-text projection. Already-captioned videos are skipped
+    unless --force is given, so an interrupted run resumes cheaply.
     """
     svc = _services()
     if not path.exists():
         console.print(f"[red]error:[/] path not found: {path}")
         raise typer.Exit(code=1) from None
-    counts = _caption_videos(svc, path, max_frames)
+    counts = _caption_videos(svc, path, max_frames, force=force)
     table = Table(title="Caption summary")
     table.add_column("metric")
     table.add_column("count", justify="right")
