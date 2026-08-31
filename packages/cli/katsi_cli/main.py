@@ -574,6 +574,78 @@ search_cmd.__name__ = "search"
 app.command(name="search")(search_cmd)
 
 
+def _media_resource_path(svc: dict, resource_version_id: str) -> str | None:
+    """Resolve a media resource version to its current on-disk path."""
+    with svc["workspace_database"].connection() as conn:
+        row = conn.execute(
+            """
+            SELECT r.current_path, w.root_path
+            FROM resource_versions AS rv
+            JOIN resources AS r ON r.id = rv.resource_id
+            JOIN workspaces AS w ON w.id = r.workspace_id
+            WHERE rv.id = ?
+            """,
+            (resource_version_id,),
+        ).fetchone()
+    return str(Path(row["root_path"]) / row["current_path"]) if row is not None else None
+
+
+def _first_time_ms(locators: list[dict]) -> int | None:
+    """The earliest cited frame/time in a hit's locators, for an edit in/out."""
+    stamps = [
+        loc.get("timestamp_ms", loc.get("start_ms"))
+        for loc in locators
+        if loc.get("locator_type") in {"video_frame", "time_range"}
+    ]
+    stamps = [ms for ms in stamps if ms is not None]
+    return min(stamps) if stamps else None
+
+
+@app.command(name="search-media")
+def search_media_cmd(
+    query: str = typer.Argument(..., help="Search query."),
+    k: int = typer.Option(8, "--top", "-k", help="Top-k media resources to return."),  # noqa: B008
+) -> None:
+    """Search media captions/OCR/transcripts (video, images) for QUERY.
+
+    Complements `search` (document text): ranks media resources whose derived
+    text matches, citing the source path, matched text, and a frame/time cue.
+    """
+    from katsi_core.retrieve.media import fuse_media_results, media_search_hits
+    from katsi_core.retrieve.media import search_media as route
+
+    svc = _services()
+    registry = svc["representation_registry"]
+    query_vector = svc["embed"].embed([query])[0]
+    routed = route(svc["vectors"], text_vector=query_vector, k=k)
+    representations = {}
+    for hits in routed.values():
+        for hit in hits:
+            representation = registry.get_representation(hit.representation_id)
+            if representation is not None:
+                representations[representation.id] = representation
+    materialized = media_search_hits(fuse_media_results(routed), representations, k=k)
+    if not materialized:
+        console.print("[yellow]no media matches[/] (have you run `katsi caption`?)")
+        return
+    table = Table(title=f"search-media: {query}")
+    table.add_column("score", justify="right")
+    table.add_column("time", justify="right")
+    table.add_column("file")
+    table.add_column("caption")
+    for hit in materialized:
+        path = _media_resource_path(svc, str(hit.resource_version_id))
+        time_ms = _first_time_ms(list(hit.locators))
+        stamp = f"{time_ms // 1000}s" if time_ms is not None else "-"
+        table.add_row(
+            f"{hit.score:.3f}",
+            stamp,
+            Path(path).name if path else str(hit.resource_version_id)[:8],
+            (hit.preview or "")[:80],
+        )
+    console.print(table)
+
+
 @app.command(name="ask")
 def ask(
     query: str = typer.Argument(..., help="Question to ask of your indexed files."),
