@@ -310,7 +310,10 @@ def _caption_videos(svc: dict, path: Path, max_frames: int, force: bool = False)
     vectors = svc["vectors"]
     embed = svc["embed"]
     captioner = VisionCaptioner(
-        model=s.ollama.caption_model, host=s.ollama.host, timeout=s.ollama.timeout
+        model=s.ollama.caption_model,
+        host=s.ollama.host,
+        timeout=s.ollama.timeout,
+        num_ctx=s.ollama.num_ctx,
     )
     ffmpeg = _ffmpeg_path(s)
     resources = _video_resources(svc, path.resolve())

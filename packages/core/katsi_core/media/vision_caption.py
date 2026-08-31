@@ -72,11 +72,13 @@ class VisionCaptioner:
         model: str,
         host: str,
         timeout: float,
+        num_ctx: int = 8_192,
         client: ollama.Client | None = None,
     ) -> None:
         self._model = model
         self._host = host
         self._timeout = timeout
+        self._num_ctx = num_ctx
         self._client = client
 
     def _get_client(self) -> ollama.Client:
@@ -92,6 +94,10 @@ class VisionCaptioner:
             prompt=_PROMPT,
             images=[str(image_path)],
             stream=False,
+            # A vision model turns each frame into image tokens proportional to
+            # its resolution; a high-res frame overflows the model's small
+            # default context (4096), so give it room rather than dropping clips.
+            options={"num_ctx": self._num_ctx},
         )
         text = str(response.get("response", "")).strip()
         return text[:_CAPTION_MAX_CHARS]
@@ -111,6 +117,11 @@ def _extract_frame(video_path: Path, timestamp_ms: int, ffmpeg_path: str, out_pa
             str(video_path),
             "-frames:v",
             "1",
+            # Cap the long edge so a 4K frame does not blow past the vision
+            # model's context in image tokens (and captions faster). Aspect
+            # kept; -2 keeps the other edge even for the encoder.
+            "-vf",
+            "scale='min(1280,iw)':-2",
             str(out_path),
         ],
         capture_output=True,
